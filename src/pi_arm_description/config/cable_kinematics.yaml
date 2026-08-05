@@ -1,0 +1,55 @@
+cable_kinematics:
+  model_version: 2
+  angle_unit: rad
+  length_unit: mm
+
+  validation:
+    asin_domain_tolerance: 1.0e-12
+    cosine_singularity_threshold: 1.0e-6
+    compatibility_tolerance: 1.0e-9
+
+  axes:
+    joint_01:
+      model: linear
+      motor_radius_mm: 16.25
+      joint_radius_mm: 19.75
+
+    joint_02:
+      model: linear
+      motor_radius_mm: 16.0
+      joint_radius_mm: 16.0
+
+    joint_03:
+      model: synchronized_pair_coupled
+      motor_radius_mm: 16.25
+      joint3_radius_mm: 28.5
+      joint4_radius_mm: 23.25
+      joint2_guide_radius_mm: 28.5
+      coupling_sign: 1
+
+    joint_05:
+      model: chord_coupled
+      motor_radius_mm: 16.25
+      joint_radius_mm: 53.5
+      joint2_guide_radius_mm: 28.5
+      coupling_sign: 1
+
+    joint_06:
+      model: chord_coupled
+      motor_radius_mm: 16.25
+      joint_radius_mm: 53.5
+      joint2_guide_radius_mm: 28.5
+      coupling_sign: 1
+
+    joint_09:
+      model: dual_branch_coupled
+      branch_a:
+        motor_radius_mm: 12.25
+        joint_radius_mm: 12.25
+        joint2_guide_radius_mm: 20.2391304347826
+        coupling_sign: 1
+      branch_b:
+        motor_radius_mm: 17.25
+        joint_radius_mm: 17.25
+        joint2_guide_radius_mm: 28.5
+        coupling_sign: 1
