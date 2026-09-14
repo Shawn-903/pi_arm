@@ -38,11 +38,11 @@ ament_target_dependencies(pi_arm_hardware
   rclcpp
   rclcpp_lifecycle
 )
-target_link_libraries(pi_arm_hardware PRIVATE yaml-cpp)
+target_link_libraries(pi_arm_hardware yaml-cpp)
 target_compile_options(pi_arm_hardware PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(pi_arm_hardware_monitor_node src/monitor_node.cpp)
-target_link_libraries(pi_arm_hardware_monitor_node PRIVATE pi_arm_hardware)
+target_link_libraries(pi_arm_hardware_monitor_node pi_arm_hardware)
 ament_target_dependencies(pi_arm_hardware_monitor_node
   hardware_interface
   pi_arm_interfaces

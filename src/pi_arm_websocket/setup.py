@@ -13,6 +13,7 @@ setup(
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
     ],
     install_requires=["setuptools", "websockets"],
+    tests_require=["pytest"],
     zip_safe=True,
     maintainer="Pi Arm Maintainer",
     maintainer_email="maintainer@example.com",
