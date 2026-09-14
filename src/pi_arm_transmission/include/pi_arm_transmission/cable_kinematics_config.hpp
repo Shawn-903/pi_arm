@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 namespace pi_arm_transmission
 {
 
@@ -34,6 +36,12 @@ struct Axis6BranchParameters
   int coupling_sign{1};
 };
 
+struct OutputPositionLimits
+{
+  double lower_position_rad{0.0};
+  double upper_position_rad{0.0};
+};
+
 struct CableKinematicsParameters
 {
   LinearAxisParameters axis1;
@@ -43,9 +51,11 @@ struct CableKinematicsParameters
   CoupledChordAxisParameters axis5;
   Axis6BranchParameters axis6_branch_a;
   Axis6BranchParameters axis6_branch_b;
+  std::array<OutputPositionLimits, 6> output_limits;
   double asin_domain_tolerance{1.0e-12};
   double cosine_singularity_threshold{1.0e-6};
   double compatibility_tolerance{1.0e-9};
+  double output_limit_tolerance_rad{1.0e-6};
 };
 
 }  // namespace pi_arm_transmission

@@ -8,7 +8,7 @@ joint_limits:
   joint_02:
     has_acceleration_limits: true
     max_acceleration: 0.3490659
-  joint_03:
+  joint_04:
     has_acceleration_limits: true
     max_acceleration: 0.3490659
   joint_05:

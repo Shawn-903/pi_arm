@@ -13,9 +13,10 @@ constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr double kTolerance = 1.0e-10;
 constexpr double kAxis1Gain = 79.0 / 65.0;
 constexpr double kAxis3Gain = 207.0 / 65.0;
-constexpr double kAxis45Gain = 214.0 / 65.0;
+constexpr double kAxis45Gain = 33.94 / 16.25;
 constexpr double kAxis345CouplingGain = 114.0 / 65.0;
-constexpr double kAxis6CouplingGain = 38.0 / 23.0;
+constexpr double kAxis6CouplingGain =
+  0.5 * (20.25 / 12.25 + 28.5 / 17.25);
 
 pi_arm_transmission::CableKinematicsParameters parameters()
 {
@@ -23,10 +24,12 @@ pi_arm_transmission::CableKinematicsParameters parameters()
   value.axis1 = {16.25, 19.75};
   value.axis2 = {16.0, 16.0};
   value.axis3 = {16.25, 28.5, 23.25, 28.5, 1};
-  value.axis4 = {16.25, 53.5, 28.5, 1};
-  value.axis5 = {16.25, 53.5, 28.5, 1};
-  value.axis6_branch_a = {12.25, 12.25, 931.0 / 46.0, 1};
+  value.axis4 = {16.25, 33.94, 28.5, 1};
+  value.axis5 = {16.25, 33.94, 28.5, 1};
+  value.axis6_branch_a = {12.25, 12.25, 20.25, 1};
   value.axis6_branch_b = {17.25, 17.25, 28.5, 1};
+  value.output_limits.fill({-10.0, 10.0});
+  value.compatibility_tolerance = 1.0e-3;
   return value;
 }
 
@@ -51,9 +54,15 @@ TEST(CableKinematics, RejectsInvalidAndIncompatibleParameters)
     std::invalid_argument);
 
   auto incompatible_coupling = parameters();
-  incompatible_coupling.axis6_branch_a.joint2_guide_radius_mm = 20.25;
+  incompatible_coupling.axis6_branch_a.joint2_guide_radius_mm = 21.0;
   EXPECT_THROW(
     pi_arm_transmission::CableKinematics kinematics(incompatible_coupling),
+    std::invalid_argument);
+
+  auto invalid_output_limit = parameters();
+  invalid_output_limit.output_limits[2] = {1.0, -1.0};
+  EXPECT_THROW(
+    pi_arm_transmission::CableKinematics kinematics(invalid_output_limit),
     std::invalid_argument);
 }
 
@@ -132,6 +141,24 @@ TEST(CableKinematics, RejectsNonFiniteRuntimeInput)
   const auto status = kinematics.joint_to_output_position(joint, output);
   EXPECT_EQ(status.error, pi_arm_transmission::KinematicsError::NON_FINITE_INPUT);
   EXPECT_EQ(status.axis, 3U);
+}
+
+TEST(CableKinematics, ChecksConfiguredOutputPositionLimitsWithoutClamping)
+{
+  auto value = parameters();
+  value.output_limits[2] = {-1.0, 2.0};
+  value.output_limit_tolerance_rad = 1.0e-6;
+  const pi_arm_transmission::CableKinematics kinematics(value);
+
+  pi_arm_transmission::Vector6 output{};
+  output[2] = 2.0 + 0.5e-6;
+  EXPECT_TRUE(kinematics.check_output_position_limits(output));
+
+  output[2] = 2.0 + 2.0e-6;
+  const auto status = kinematics.check_output_position_limits(output);
+  EXPECT_EQ(status.error, pi_arm_transmission::KinematicsError::OUTPUT_POSITION_LIMIT);
+  EXPECT_EQ(status.axis, 3U);
+  EXPECT_DOUBLE_EQ(status.value, output[2]);
 }
 
 TEST(CableKinematics, VelocityMatchesAnalyticAndInverseMapping)
@@ -234,8 +261,14 @@ TEST(CableKinematics, Axis6BranchesCloseSimultaneously)
   ASSERT_TRUE(kinematics.joint_to_output_position(joint, output));
 
   const auto residual = kinematics.axis6_residual(joint[1], joint[5], output[5]);
-  EXPECT_NEAR(residual.branch_a_mm, 0.0, kTolerance);
-  EXPECT_NEAR(residual.branch_b_mm, 0.0, kTolerance);
+  const double expected_a =
+    12.25 * (kAxis6CouplingGain - 20.25 / 12.25) * joint[1];
+  const double expected_b =
+    17.25 * (kAxis6CouplingGain - 28.5 / 17.25) * joint[1];
+  EXPECT_NEAR(residual.branch_a_mm, expected_a, kTolerance);
+  EXPECT_NEAR(residual.branch_b_mm, expected_b, kTolerance);
+  EXPECT_LT(std::abs(residual.branch_a_mm), 0.01);
+  EXPECT_LT(std::abs(residual.branch_b_mm), 0.01);
 }
 
 }  // namespace

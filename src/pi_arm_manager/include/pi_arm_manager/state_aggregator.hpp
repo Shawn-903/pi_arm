@@ -5,6 +5,7 @@
 
 #include "pi_arm_interfaces/msg/hardware_state.hpp"
 #include "pi_arm_interfaces/msg/robot_state.hpp"
+#include "pi_arm_manager/management_gate.hpp"
 #include "pi_arm_interfaces/msg/task_state.hpp"
 
 namespace pi_arm_manager
@@ -24,6 +25,7 @@ inline uint8_t aggregate_state(
     hardware.fresh.size() == joint_count &&
     hardware.ages_sec.size() == joint_count &&
     hardware.error_codes.size() == joint_count &&
+    complete_raw_motor_state(hardware) &&
     std::all_of(
     hardware.positions.begin(), hardware.positions.end(),
     [](double value) {return std::isfinite(value);}) &&
@@ -31,13 +33,20 @@ inline uint8_t aggregate_state(
     hardware.velocities.begin(), hardware.velocities.end(),
     [](double value) {return std::isfinite(value);});
   if (!hardware.connected || !complete ||
-    !std::all_of(hardware.fresh.begin(), hardware.fresh.end(), [](bool value) {return value;}))
+    !std::all_of(hardware.fresh.begin(), hardware.fresh.end(), [](bool value) {return value;}) ||
+    !std::all_of(
+      hardware.motor_fresh.begin(), hardware.motor_fresh.end(), [](bool value) {return value;}))
   {
     return pi_arm_interfaces::msg::RobotState::DISCONNECTED;
   }
   if (std::any_of(hardware.errors.begin(), hardware.errors.end(), [](bool value) {return value;}) ||
     std::any_of(
       hardware.error_codes.begin(), hardware.error_codes.end(),
+      [](int32_t value) {return value != 0;}) ||
+    std::any_of(
+      hardware.motor_errors.begin(), hardware.motor_errors.end(), [](bool value) {return value;}) ||
+    std::any_of(
+      hardware.motor_error_codes.begin(), hardware.motor_error_codes.end(),
       [](int32_t value) {return value != 0;}))
   {
     return pi_arm_interfaces::msg::RobotState::FAULT;
@@ -48,7 +57,9 @@ inline uint8_t aggregate_state(
     return pi_arm_interfaces::msg::RobotState::DISABLED;
   }
   if (task.status == pi_arm_interfaces::msg::TaskState::RUNNING ||
-    std::any_of(hardware.moving.begin(), hardware.moving.end(), [](bool value) {return value;}))
+    std::any_of(hardware.moving.begin(), hardware.moving.end(), [](bool value) {return value;}) ||
+    std::any_of(
+      hardware.motor_moving.begin(), hardware.motor_moving.end(), [](bool value) {return value;}))
   {
     return pi_arm_interfaces::msg::RobotState::RUNNING;
   }

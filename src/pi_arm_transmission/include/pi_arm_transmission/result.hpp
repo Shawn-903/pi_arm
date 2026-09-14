@@ -9,6 +9,7 @@ enum class KinematicsError
 {
   NONE,
   NON_FINITE_INPUT,
+  OUTPUT_POSITION_LIMIT,
   ASIN_DOMAIN,
   VELOCITY_SINGULARITY,
 };

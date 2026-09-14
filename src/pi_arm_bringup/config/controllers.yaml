@@ -13,7 +13,7 @@ joint_trajectory_controller:
     joints:
       - joint_01
       - joint_02
-      - joint_03
+      - joint_04
       - joint_05
       - joint_06
       - joint_09

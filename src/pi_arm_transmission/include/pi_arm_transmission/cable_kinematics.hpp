@@ -12,9 +12,9 @@ using Vector6 = std::array<double, 6>;
 using Matrix6 = std::array<std::array<double, 6>, 6>;
 
 // Public vectors use the six ROS active-joint coordinates in this order:
-// joint_01, joint_02, joint_03, joint_05, joint_06, joint_09.
+// joint_01, joint_02, joint_04, joint_05, joint_06, joint_09.
 // For the synchronized mechanisms, the equivalent mechanical coordinates are
-// S3 = 2 * joint_03, S4 = 2 * joint_05, and S5 = 2 * joint_06. Those factors
+// S3 = 2 * joint_04, S4 = 2 * joint_05, and S5 = 2 * joint_06. Those factors
 // are already substituted into the formulas implemented by this class.
 
 struct Axis6Residual
@@ -37,6 +37,9 @@ public:
   KinematicsStatus output_to_joint_position(
     const Vector6 & output_position_rad,
     Vector6 & joint_position_rad) const noexcept;
+
+  KinematicsStatus check_output_position_limits(
+    const Vector6 & output_position_rad) const noexcept;
 
   KinematicsStatus joint_to_output_velocity(
     const Vector6 & joint_position_rad,

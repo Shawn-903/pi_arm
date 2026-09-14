@@ -3,6 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
+#include <string>
 #include <vector>
 
 namespace
@@ -14,7 +17,7 @@ pi_arm_hardware::BackendConfig make_config()
   config.cable_kinematics_file = PI_ARM_TEST_CABLE_CONFIG;
   const std::vector<std::uint8_t> motor_ids{1U, 2U, 3U, 4U, 5U, 6U};
   const std::vector<std::string> joint_names{
-    "joint_01", "joint_02", "joint_03", "joint_05", "joint_06", "joint_09"};
+    "joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"};
   for (std::size_t index = 0; index < motor_ids.size(); ++index) {
     config.actuators.push_back(
       pi_arm_hardware::ActuatorConfig{
@@ -29,7 +32,7 @@ pi_arm_hardware::BackendConfig make_config()
 
 TEST(ActuatorCoordinates, RoundTripsProtocolAndOutputCoordinates)
 {
-  const pi_arm_hardware::ActuatorConfig actuator{"joint_03", 3U, 36.0, -1};
+  const pi_arm_hardware::ActuatorConfig actuator{"joint_04", 3U, 36.0, -1};
   pi_arm_hardware::validate_actuator_config(actuator);
   const double protocol =
     pi_arm_hardware::output_position_to_protocol_deg(0.25, actuator);
@@ -59,8 +62,12 @@ TEST(MockBackend, FollowsPositionAndVelocityCommands)
   ASSERT_TRUE(backend.write(positions, velocities));
 
   ASSERT_TRUE(backend.read(sample));
-  EXPECT_EQ(sample.positions_rad, positions);
-  EXPECT_EQ(sample.velocities_rad_s, velocities);
+  ASSERT_EQ(sample.positions_rad.size(), positions.size());
+  ASSERT_EQ(sample.velocities_rad_s.size(), velocities.size());
+  for (std::size_t index = 0; index < positions.size(); ++index) {
+    EXPECT_NEAR(sample.positions_rad[index], positions[index], 1.0e-12);
+    EXPECT_NEAR(sample.velocities_rad_s[index], velocities[index], 1.0e-12);
+  }
   EXPECT_FALSE(sample.in_motion[0]);
   EXPECT_TRUE(sample.in_motion[1]);
 }
@@ -114,10 +121,35 @@ TEST(MockBackend, DeactivateClearsMotionAndDisconnects)
   }
 }
 
-TEST(MockBackend, AppliesManagementToOneMotorOrAll)
+TEST(MockBackend, RejectsWholeCommandWhenMappedOutputExceedsLimit)
 {
   pi_arm_hardware::MockBackend backend(make_config());
   backend.configure();
+  backend.activate();
+  pi_arm_hardware::HardwareSample sample;
+  for (int index = 0; index < 3; ++index) {
+    ASSERT_TRUE(backend.read(sample));
+  }
+  ASSERT_TRUE(
+    backend.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 0).success);
+
+  // This is inside the deliberately broad test joint limit, but axis 3 maps
+  // beyond motor_03's configured reducer-output limit.
+  const std::vector<double> positions{0.0, 0.0, 3.0, 0.0, 0.0, 0.0};
+  const std::vector<double> velocities(6U, 0.0);
+  EXPECT_FALSE(backend.write(positions, velocities));
+  ASSERT_TRUE(backend.read(sample));
+  EXPECT_NE(sample.error_message.find("motor_03"), std::string::npos);
+  for (const double position : sample.positions_rad) {
+    EXPECT_DOUBLE_EQ(position, 0.0);
+  }
+}
+
+TEST(MockBackend, SeparatesRawMotorAndJointDependencyState)
+{
+  pi_arm_hardware::MockBackend backend(make_config());
+  backend.configure();
+  backend.activate();
   pi_arm_hardware::HardwareSample sample;
   for (int index = 0; index < 3; ++index) {
     ASSERT_TRUE(backend.read(sample));
@@ -125,15 +157,41 @@ TEST(MockBackend, AppliesManagementToOneMotorOrAll)
   ASSERT_TRUE(
     backend.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 4).success);
   ASSERT_TRUE(backend.read(sample));
-  EXPECT_TRUE(sample.enabled[3]);
-  EXPECT_FALSE(sample.enabled[0]);
+  EXPECT_TRUE(sample.motor_enabled[3]);
+  EXPECT_FALSE(sample.enabled[3]);  // joint_05 also depends on motor 2.
+  EXPECT_EQ(sample.driver_mode, "MONITORING");
 
   ASSERT_TRUE(
     backend.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 0).success);
   ASSERT_TRUE(backend.read(sample));
-  for (const bool enabled : sample.enabled) {
-    EXPECT_TRUE(enabled);
-  }
+  EXPECT_TRUE(std::all_of(sample.motor_enabled.begin(), sample.motor_enabled.end(), [](bool v) {
+    return v;
+  }));
+  EXPECT_TRUE(std::all_of(sample.enabled.begin(), sample.enabled.end(), [](bool v) {return v;}));
+  EXPECT_EQ(sample.driver_mode, "CONTROL");
+
+  ASSERT_TRUE(
+    backend.manage(pi_arm_can::ManagementOperation::MOTOR_OFF, 2).success);
+  ASSERT_TRUE(backend.read(sample));
+  const std::vector<bool> expected_motors{true, false, true, true, true, true};
+  const std::vector<bool> expected_joints{true, false, false, false, false, false};
+  EXPECT_EQ(sample.motor_enabled, expected_motors);
+  EXPECT_EQ(sample.enabled, expected_joints);
+  EXPECT_EQ(sample.driver_mode, "MONITORING");
+
+  ASSERT_TRUE(
+    backend.manage(pi_arm_can::ManagementOperation::MOTOR_OFF, 0).success);
+  ASSERT_TRUE(backend.read(sample));
+  EXPECT_TRUE(std::none_of(sample.motor_enabled.begin(), sample.motor_enabled.end(), [](bool v) {
+    return v;
+  }));
+
+  EXPECT_TRUE(
+    backend.manage(pi_arm_can::ManagementOperation::MOTOR_OFF, 2).success);
+  EXPECT_TRUE(
+    backend.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 2).success);
+  EXPECT_TRUE(
+    backend.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 2).success);
   EXPECT_FALSE(
     backend.manage(pi_arm_can::ManagementOperation::MOTOR_OFF, 7).success);
   EXPECT_FALSE(

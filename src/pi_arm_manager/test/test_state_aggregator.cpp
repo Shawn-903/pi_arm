@@ -19,6 +19,13 @@ static HardwareState healthy_hardware()
   state.moving = {false, false};
   state.error_codes = {0, 0};
   state.ages_sec = {0.01, 0.01};
+  state.motor_ids = {1, 2};
+  state.motor_enabled = {true, true};
+  state.motor_errors = {false, false};
+  state.motor_moving = {false, false};
+  state.motor_fresh = {true, true};
+  state.motor_error_codes = {0, 0};
+  state.motor_ages_sec = {0.01, 0.01};
   return state;
 }
 

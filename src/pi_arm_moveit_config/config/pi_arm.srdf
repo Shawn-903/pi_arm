@@ -11,14 +11,14 @@
 
   <end_effector name="tool0" parent_link="link_09" group="tool" parent_group="pi_arm"/>
 
-  <passive_joint name="joint_04"/>
+  <passive_joint name="joint_03"/>
   <passive_joint name="joint_07"/>
   <passive_joint name="joint_08"/>
 
   <group_state name="home" group="pi_arm">
     <joint name="joint_01" value="0"/>
     <joint name="joint_02" value="0"/>
-    <joint name="joint_03" value="0"/>
+    <joint name="joint_04" value="0"/>
     <joint name="joint_05" value="0"/>
     <joint name="joint_06" value="0"/>
     <joint name="joint_09" value="0"/>

@@ -48,7 +48,7 @@ class RosBridge(Node):
         self.declare_parameter("request_timeout_sec", 5.0)
         self.declare_parameter(
             "joint_names",
-            ["joint_01", "joint_02", "joint_03", "joint_05", "joint_06", "joint_09"],
+            ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"],
         )
         self.host = str(self.get_parameter("host").value)
         self.port = int(self.get_parameter("port").value)
@@ -459,9 +459,18 @@ class WebSocketGateway:
                 "current_joint_angles": [],
                 "current_speeds": [],
                 "enabled": [],
+                "joint_enabled": [],
                 "has_error": [],
                 "in_motion": [],
                 "last_update_timestamps": [],
+                "motor_ids": [],
+                "motor_enabled": [],
+                "motor_has_error": [],
+                "motor_in_motion": [],
+                "motor_fresh": [],
+                "motor_error_codes": [],
+                "motor_ages_sec": [],
+                "motor_last_update_timestamps": [],
                 "all_enabled": False,
                 "any_error": False,
                 "any_in_motion": False,
@@ -473,16 +482,33 @@ class WebSocketGateway:
             body = {
                 "current_joint_angles": [v * RAD_TO_DEG for v in hardware.positions],
                 "current_speeds": [v * RAD_TO_DEG for v in hardware.velocities],
+                # Legacy `enabled` remains joint-level for compatibility.
                 "enabled": list(hardware.enabled),
+                "joint_enabled": list(hardware.enabled),
                 "has_error": list(hardware.errors),
                 "in_motion": list(hardware.moving),
                 "last_update_timestamps": [
                     max(0.0, stamp - age) if fresh and math.isfinite(age) else 0.0
                     for fresh, age in zip(hardware.fresh, hardware.ages_sec)
                 ],
-                "all_enabled": bool(hardware.enabled) and all(hardware.enabled),
-                "any_error": any(hardware.errors) or any(hardware.error_codes),
-                "any_in_motion": any(hardware.moving),
+                "motor_ids": list(hardware.motor_ids),
+                "motor_enabled": list(hardware.motor_enabled),
+                "motor_has_error": list(hardware.motor_errors),
+                "motor_in_motion": list(hardware.motor_moving),
+                "motor_fresh": list(hardware.motor_fresh),
+                "motor_error_codes": list(hardware.motor_error_codes),
+                "motor_ages_sec": list(hardware.motor_ages_sec),
+                "motor_last_update_timestamps": [
+                    max(0.0, stamp - age) if fresh and math.isfinite(age) else 0.0
+                    for fresh, age in zip(hardware.motor_fresh, hardware.motor_ages_sec)
+                ],
+                "all_enabled": bool(hardware.motor_enabled)
+                and all(hardware.motor_enabled),
+                "any_error": any(hardware.errors)
+                or any(hardware.error_codes)
+                or any(hardware.motor_errors)
+                or any(hardware.motor_error_codes),
+                "any_in_motion": any(hardware.moving) or any(hardware.motor_moving),
                 "robot_state": state.state_name,
                 "task": {
                     "task_id": state.task.task_id,

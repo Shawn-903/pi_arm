@@ -23,7 +23,7 @@ namespace
 constexpr std::size_t kAxisCount = 6U;
 constexpr int64_t kWriteRejectLogPeriodMs = 1000;
 constexpr std::array<const char *, kAxisCount> kExpectedJointNames{
-  "joint_01", "joint_02", "joint_03", "joint_05", "joint_06", "joint_09"};
+  "joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"};
 
 rclcpp::Logger backend_logger()
 {
@@ -100,7 +100,7 @@ void validate_backend_config(const BackendConfig & config)
     validate_actuator_config(config.actuators[index]);
     if (config.actuators[index].joint_name != kExpectedJointNames[index]) {
       throw std::invalid_argument(
-              "actuator order must be joint_01, joint_02, joint_03, joint_05, joint_06, joint_09");
+              "actuator order must be joint_01, joint_02, joint_04, joint_05, joint_06, joint_09");
     }
     if (!motor_ids.insert(config.actuators[index].motor_id).second) {
       throw std::invalid_argument("actuator motor IDs must be unique");
@@ -138,6 +138,40 @@ bool joint_depends_on_motor(
     return motor_index == 1U;
   }
   return motor_index == 1U || motor_index == joint_index;
+}
+
+void aggregate_mock_motor_state_to_joints(HardwareSample & sample)
+{
+  if (sample.motor_enabled.size() != kAxisCount ||
+    sample.motor_has_error.size() != kAxisCount ||
+    sample.motor_fresh.size() != kAxisCount ||
+    sample.motor_error_codes.size() != kAxisCount ||
+    sample.motor_ages_sec.size() != kAxisCount)
+  {
+    return;
+  }
+  for (std::size_t joint_index = 0; joint_index < kAxisCount; ++joint_index) {
+    bool enabled = true;
+    bool has_error = false;
+    bool fresh = true;
+    std::int32_t error_code = 0;
+    double age = 0.0;
+    for (std::size_t motor_index = 0; motor_index < kAxisCount; ++motor_index) {
+      if (!joint_depends_on_motor(joint_index, motor_index)) {
+        continue;
+      }
+      enabled = enabled && sample.motor_enabled[motor_index];
+      has_error = has_error || sample.motor_has_error[motor_index];
+      fresh = fresh && sample.motor_fresh[motor_index];
+      error_code |= sample.motor_error_codes[motor_index];
+      age = std::max(age, sample.motor_ages_sec[motor_index]);
+    }
+    sample.enabled[joint_index] = enabled;
+    sample.has_error[joint_index] = has_error;
+    sample.fresh[joint_index] = fresh;
+    sample.error_codes[joint_index] = error_code;
+    sample.ages_sec[joint_index] = age;
+  }
 }
 
 template<typename T>
@@ -215,6 +249,12 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     sample.fresh.assign(kAxisCount, false);
     sample.error_codes.assign(kAxisCount, 0);
     sample.ages_sec.assign(kAxisCount, std::numeric_limits<double>::infinity());
+    sample.motor_enabled.assign(kAxisCount, false);
+    sample.motor_has_error.assign(kAxisCount, false);
+    sample.motor_in_motion.assign(kAxisCount, false);
+    sample.motor_fresh.assign(kAxisCount, false);
+    sample.motor_error_codes.assign(kAxisCount, 0);
+    sample.motor_ages_sec.assign(kAxisCount, std::numeric_limits<double>::infinity());
     sample.connected = driver_->running() && driver_->mode() != pi_arm_can::DriverMode::FAULT;
     sample.driver_mode = pi_arm_can::to_string(driver_->mode());
     sample.management_operation = pi_arm_can::to_string(driver_->management_operation());
@@ -229,9 +269,12 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     std::array<bool, kAxisCount> velocity_valid{};
     std::array<bool, kAxisCount> motor_enabled{};
     std::array<bool, kAxisCount> motor_error{};
+    std::array<bool, kAxisCount> motor_in_motion{};
     std::array<bool, kAxisCount> motor_fresh{};
     std::array<std::int32_t, kAxisCount> motor_error_codes{};
     std::array<double, kAxisCount> motor_ages{};
+    std::array<bool, kAxisCount> output_limit_error{};
+    bool output_positions_within_limits = false;
 
     for (std::size_t index = 0; index < kAxisCount; ++index) {
       const auto & actuator = config_.actuators[index];
@@ -245,6 +288,8 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       if (state.status2_valid) {
         output_velocities[index] =
           protocol_velocity_to_output_rad_s(state.protocol_speed_dps, actuator);
+        motor_in_motion[index] =
+          std::abs(output_velocities[index]) > config_.moving_speed_threshold_rad_s;
       }
       if (state.status1_valid) {
         motor_enabled[index] = state.motor_state == 0x00U || state.motor_state == 0x30U;
@@ -259,27 +304,46 @@ bool RealBackend::read(HardwareSample & sample) noexcept
         state.angle_valid && state.status1_valid && state.status2_valid &&
         motor_ages[index] <= config_.state_stale_timeout_sec;
     }
+    sample.motor_enabled.assign(motor_enabled.begin(), motor_enabled.end());
+    sample.motor_has_error.assign(motor_error.begin(), motor_error.end());
+    sample.motor_in_motion.assign(motor_in_motion.begin(), motor_in_motion.end());
+    sample.motor_fresh.assign(motor_fresh.begin(), motor_fresh.end());
+    sample.motor_error_codes.assign(motor_error_codes.begin(), motor_error_codes.end());
+    sample.motor_ages_sec.assign(motor_ages.begin(), motor_ages.end());
 
     const bool all_angles_valid =
       std::all_of(angle_valid.begin(), angle_valid.end(), [](const bool value) {return value;});
     if (all_angles_valid) {
-      pi_arm_transmission::Vector6 recovered{};
-      const auto status = kinematics_.output_to_joint_position(output_positions, recovered);
+      auto status = kinematics_.check_output_position_limits(output_positions);
       if (!status) {
+        const std::size_t index = status.axis - 1U;
+        output_limit_error[index] = true;
+        const auto & limit = kinematics_.parameters().output_limits[index];
         sample.error_message =
-          std::string("cable position inverse failed: ") +
-          pi_arm_transmission::to_string(status.error);
-        return false;
+          "output-shaft feedback limit exceeded at motor_0" +
+          std::to_string(status.axis) + ": value=" + std::to_string(status.value) +
+          " rad, limit=[" + std::to_string(limit.lower_position_rad) + "," +
+          std::to_string(limit.upper_position_rad) + "] rad";
+      } else {
+        output_positions_within_limits = true;
+        pi_arm_transmission::Vector6 recovered{};
+        status = kinematics_.output_to_joint_position(output_positions, recovered);
+        if (!status) {
+          sample.error_message =
+            std::string("cable position inverse failed: ") +
+            pi_arm_transmission::to_string(status.error);
+          return false;
+        }
+        last_joint_positions_rad_ = recovered;
+        position_initialized_ = true;
+        sample.positions_rad = to_vector(recovered);
       }
-      last_joint_positions_rad_ = recovered;
-      position_initialized_ = true;
-      sample.positions_rad = to_vector(recovered);
     }
 
     const bool all_velocities_valid =
       std::all_of(
       velocity_valid.begin(), velocity_valid.end(), [](const bool value) {return value;});
-    if (position_initialized_ && all_velocities_valid) {
+    if (position_initialized_ && output_positions_within_limits && all_velocities_valid) {
       pi_arm_transmission::Vector6 recovered_velocity{};
       const auto status = kinematics_.output_to_joint_velocity(
         last_joint_positions_rad_, output_velocities, recovered_velocity);
@@ -303,7 +367,7 @@ bool RealBackend::read(HardwareSample & sample) noexcept
           continue;
         }
         enabled = enabled && motor_enabled[motor_index];
-        has_error = has_error || motor_error[motor_index];
+        has_error = has_error || motor_error[motor_index] || output_limit_error[motor_index];
         fresh = fresh && motor_fresh[motor_index];
         error_code |= motor_error_codes[motor_index];
         age = std::max(age, motor_ages[motor_index]);
@@ -324,12 +388,14 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     const bool all_fresh =
       std::all_of(motor_fresh.begin(), motor_fresh.end(), [](const bool value) {return value;});
     if (driver_->mode() == pi_arm_can::DriverMode::MONITORING &&
-      all_enabled && all_fresh && position_initialized_ && !power_cycle_required_)
+      all_enabled && all_fresh && position_initialized_ && output_positions_within_limits &&
+      !power_cycle_required_)
     {
       driver_->set_mode(pi_arm_can::DriverMode::CONTROL);
       sample.driver_mode = pi_arm_can::to_string(driver_->mode());
     } else if (driver_->mode() == pi_arm_can::DriverMode::CONTROL &&
-      (!all_enabled || !all_fresh || !position_initialized_ || power_cycle_required_))
+      (!all_enabled || !all_fresh || !position_initialized_ ||
+      !output_positions_within_limits || power_cycle_required_))
     {
       driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
       sample.driver_mode = pi_arm_can::to_string(driver_->mode());
@@ -399,6 +465,15 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: cable position mapping failed (%s axis=%zu value=%.6g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
+      return false;
+    }
+    status = kinematics_.check_output_position_limits(output_positions);
+    if (!status) {
+      const std::size_t index = status.axis - 1U;
+      const auto & limit = kinematics_.parameters().output_limits[index];
+      log_write_reject(
+        "write rejected: output-shaft limit exceeded at motor[%zu] value=%.6g lim=[%.6g,%.6g]",
+        status.axis, status.value, limit.lower_position_rad, limit.upper_position_rad);
       return false;
     }
 
@@ -521,7 +596,14 @@ MockBackend::MockBackend(BackendConfig config)
   sample_.fresh.assign(kAxisCount, true);
   sample_.error_codes.assign(kAxisCount, 0);
   sample_.ages_sec.assign(kAxisCount, 0.0);
+  sample_.motor_enabled.assign(kAxisCount, false);
+  sample_.motor_has_error.assign(kAxisCount, false);
+  sample_.motor_in_motion.assign(kAxisCount, false);
+  sample_.motor_fresh.assign(kAxisCount, true);
+  sample_.motor_error_codes.assign(kAxisCount, 0);
+  sample_.motor_ages_sec.assign(kAxisCount, 0.0);
   stationary_samples_.assign(kAxisCount, 0U);
+  aggregate_mock_motor_state_to_joints(sample_);
   sample_.driver_mode = "OFFLINE";
 }
 
@@ -541,8 +623,11 @@ void MockBackend::activate()
   }
   active_ = true;
   sample_.connected = true;
-  sample_.driver_mode = "CONTROL";
-  std::fill(sample_.fresh.begin(), sample_.fresh.end(), true);
+  std::fill(sample_.motor_fresh.begin(), sample_.motor_fresh.end(), true);
+  aggregate_mock_motor_state_to_joints(sample_);
+  const bool all_enabled = std::all_of(
+    sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
+  sample_.driver_mode = all_enabled ? "CONTROL" : "MONITORING";
 }
 
 void MockBackend::deactivate() noexcept
@@ -554,7 +639,9 @@ void MockBackend::deactivate() noexcept
   output_velocities_rad_s_ = {};
   std::fill(sample_.velocities_rad_s.begin(), sample_.velocities_rad_s.end(), 0.0);
   std::fill(sample_.in_motion.begin(), sample_.in_motion.end(), false);
-  std::fill(sample_.fresh.begin(), sample_.fresh.end(), false);
+  std::fill(sample_.motor_in_motion.begin(), sample_.motor_in_motion.end(), false);
+  std::fill(sample_.motor_fresh.begin(), sample_.motor_fresh.end(), false);
+  aggregate_mock_motor_state_to_joints(sample_);
 }
 
 void MockBackend::cleanup() noexcept
@@ -564,7 +651,9 @@ void MockBackend::cleanup() noexcept
   configured_ = false;
   sample_.connected = false;
   sample_.driver_mode = "OFFLINE";
-  std::fill(sample_.enabled.begin(), sample_.enabled.end(), false);
+  std::fill(sample_.motor_enabled.begin(), sample_.motor_enabled.end(), false);
+  std::fill(sample_.motor_fresh.begin(), sample_.motor_fresh.end(), false);
+  aggregate_mock_motor_state_to_joints(sample_);
 }
 
 bool MockBackend::read(HardwareSample & sample) noexcept
@@ -611,17 +700,29 @@ bool MockBackend::write(
 
   const bool all_enabled =
     std::all_of(
-    sample_.enabled.begin(), sample_.enabled.end(), [](const bool value) {return value;});
+    sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](const bool value) {return value;});
   if (!all_enabled) {
     output_velocities_rad_s_ = {};
     std::fill(sample_.velocities_rad_s.begin(), sample_.velocities_rad_s.end(), 0.0);
     std::fill(sample_.in_motion.begin(), sample_.in_motion.end(), false);
+    std::fill(sample_.motor_in_motion.begin(), sample_.motor_in_motion.end(), false);
     return true;
   }
 
   auto status = kinematics_.joint_to_output_position(joint_positions, output_positions_rad_);
   if (!status) {
     sample_.error_message = pi_arm_transmission::to_string(status.error);
+    return false;
+  }
+  status = kinematics_.check_output_position_limits(output_positions_rad_);
+  if (!status) {
+    const std::size_t index = status.axis - 1U;
+    const auto & limit = kinematics_.parameters().output_limits[index];
+    sample_.error_message =
+      "output-shaft limit exceeded at motor_0" + std::to_string(status.axis) +
+      ": value=" + std::to_string(status.value) + " rad, limit=[" +
+      std::to_string(limit.lower_position_rad) + "," +
+      std::to_string(limit.upper_position_rad) + "] rad";
     return false;
   }
   status = kinematics_.joint_to_output_velocity(
@@ -650,9 +751,12 @@ bool MockBackend::write(
   for (std::size_t index = 0; index < kAxisCount; ++index) {
     sample_.in_motion[index] =
       std::abs(recovered_velocities[index]) > config_.moving_speed_threshold_rad_s;
-    sample_.fresh[index] = true;
-    sample_.ages_sec[index] = 0.0;
+    sample_.motor_in_motion[index] =
+      std::abs(output_velocities_rad_s_[index]) > config_.moving_speed_threshold_rad_s;
+    sample_.motor_fresh[index] = true;
+    sample_.motor_ages_sec[index] = 0.0;
   }
+  aggregate_mock_motor_state_to_joints(sample_);
   return true;
 }
 
@@ -694,20 +798,25 @@ ManagementResult MockBackend::manage(
       case pi_arm_can::ManagementOperation::NONE:
         return {false, 1, "management operation NONE is not executable"};
       case pi_arm_can::ManagementOperation::MOTOR_OFF:
-        sample_.enabled[index] = false;
-        sample_.velocities_rad_s[index] = 0.0;
-        sample_.in_motion[index] = false;
+        sample_.motor_enabled[index] = false;
+        sample_.motor_in_motion[index] = false;
         break;
       case pi_arm_can::ManagementOperation::MOTOR_RUN:
-        sample_.enabled[index] = true;
+        sample_.motor_enabled[index] = true;
         break;
       case pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS:
-        sample_.has_error[index] = false;
-        sample_.error_codes[index] = 0;
+        sample_.motor_has_error[index] = false;
+        sample_.motor_error_codes[index] = 0;
         break;
       case pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO:
         break;
     }
+  }
+  aggregate_mock_motor_state_to_joints(sample_);
+  if (active_) {
+    const bool all_enabled = std::all_of(
+      sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
+    sample_.driver_mode = all_enabled ? "CONTROL" : "MONITORING";
   }
   if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
     output_positions_rad_ = {};
@@ -715,6 +824,7 @@ ManagementResult MockBackend::manage(
     std::fill(sample_.positions_rad.begin(), sample_.positions_rad.end(), 0.0);
     std::fill(sample_.velocities_rad_s.begin(), sample_.velocities_rad_s.end(), 0.0);
     std::fill(sample_.in_motion.begin(), sample_.in_motion.end(), false);
+    sample_.driver_mode = "MONITORING";
     return {true, 0, "mock whole-arm zero applied"};
   }
   return {true, 0, "mock management operation applied"};

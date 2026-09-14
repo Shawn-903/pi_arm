@@ -92,6 +92,12 @@ PI_ARM_DEFINE_HAS_FIELD(fresh);
 PI_ARM_DEFINE_HAS_FIELD(error_codes);
 PI_ARM_DEFINE_HAS_FIELD(ages_sec);
 PI_ARM_DEFINE_HAS_FIELD(last_update_ages_sec);
+PI_ARM_DEFINE_HAS_FIELD(motor_enabled);
+PI_ARM_DEFINE_HAS_FIELD(motor_errors);
+PI_ARM_DEFINE_HAS_FIELD(motor_moving);
+PI_ARM_DEFINE_HAS_FIELD(motor_fresh);
+PI_ARM_DEFINE_HAS_FIELD(motor_error_codes);
+PI_ARM_DEFINE_HAS_FIELD(motor_ages_sec);
 PI_ARM_DEFINE_HAS_FIELD(all_enabled);
 PI_ARM_DEFINE_HAS_FIELD(any_error);
 PI_ARM_DEFINE_HAS_FIELD(any_in_motion);
@@ -173,6 +179,24 @@ void fill_hardware_state_message(
   }
   if constexpr (has_last_update_ages_sec<MessageT>::value) {
     message.last_update_ages_sec = sample.ages_sec;
+  }
+  if constexpr (has_motor_enabled<MessageT>::value) {
+    message.motor_enabled = sample.motor_enabled;
+  }
+  if constexpr (has_motor_errors<MessageT>::value) {
+    message.motor_errors = sample.motor_has_error;
+  }
+  if constexpr (has_motor_moving<MessageT>::value) {
+    message.motor_moving = sample.motor_in_motion;
+  }
+  if constexpr (has_motor_fresh<MessageT>::value) {
+    message.motor_fresh = sample.motor_fresh;
+  }
+  if constexpr (has_motor_error_codes<MessageT>::value) {
+    message.motor_error_codes = sample.motor_error_codes;
+  }
+  if constexpr (has_motor_ages_sec<MessageT>::value) {
+    message.motor_ages_sec = sample.motor_ages_sec;
   }
   if constexpr (has_all_enabled<MessageT>::value) {
     message.all_enabled =
@@ -555,6 +579,8 @@ void PiArmSystem::publish_hardware_state()
     std::fill(sample.velocities_rad_s.begin(), sample.velocities_rad_s.end(), 0.0);
     std::fill(sample.in_motion.begin(), sample.in_motion.end(), false);
     std::fill(sample.fresh.begin(), sample.fresh.end(), false);
+    std::fill(sample.motor_in_motion.begin(), sample.motor_in_motion.end(), false);
+    std::fill(sample.motor_fresh.begin(), sample.motor_fresh.end(), false);
     sample.connected = false;
   }
   pi_arm_interfaces::msg::HardwareState message;

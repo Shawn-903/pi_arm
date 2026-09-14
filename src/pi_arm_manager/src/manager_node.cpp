@@ -26,6 +26,7 @@
 #include "pi_arm_interfaces/msg/task_state.hpp"
 #include "pi_arm_interfaces/srv/manage_motor.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
+#include "pi_arm_manager/management_gate.hpp"
 #include "pi_arm_manager/state_aggregator.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -286,36 +287,63 @@ private:
         std::shared_ptr<pi_arm_interfaces::srv::ManageMotor::Response> response)
       {
         std::lock_guard<std::mutex> command_lock(command_mutex_);
-        const auto state = current_state();
+        pi_arm_interfaces::msg::HardwareState hardware_snapshot;
+        pi_arm_interfaces::msg::TaskState task_snapshot;
+        {
+          std::lock_guard<std::mutex> state_lock(state_mutex_);
+          hardware_snapshot = hardware_;
+          task_snapshot = task_;
+          if ((now() - last_hardware_time_).seconds() > hardware_timeout_) {
+            hardware_snapshot.connected = false;
+          }
+        }
+        const auto state = aggregate_state(hardware_snapshot, task_snapshot);
         const bool still = still_frames_.load() >= 3;
+        const bool task_claimed = task_claimed_.load();
         bool allowed = false;
-        switch (operation) {
-          case Operation::ENABLE:
-            allowed = state == pi_arm_interfaces::msg::RobotState::DISABLED &&
-              !task_claimed_.load() && still;
-            break;
-          case Operation::DISABLE:
-            allowed = state == pi_arm_interfaces::msg::RobotState::READY &&
-              !task_claimed_.load();
-            break;
-          case Operation::SET_ZERO:
-            allowed = (state == pi_arm_interfaces::msg::RobotState::READY ||
-              state == pi_arm_interfaces::msg::RobotState::DISABLED) &&
-              !task_claimed_.load() && still;
-            break;
-          case Operation::RESET:
-            allowed = state != pi_arm_interfaces::msg::RobotState::DISCONNECTED;
-            break;
+        int rejection_code = 2001;
+        std::string rejection_message = "operation rejected by robot state";
+        if (operation == Operation::ENABLE || operation == Operation::DISABLE) {
+          const auto decision = decide_motor_power_operation(
+            operation == Operation::ENABLE ?
+            MotorPowerOperation::ENABLE : MotorPowerOperation::DISABLE,
+            hardware_snapshot, state, task_claimed, still, request->motor_id);
+          if (decision.already_satisfied) {
+            response->success = true;
+            response->code = decision.code;
+            response->message = decision.message;
+            RCLCPP_INFO(
+              get_logger(), "service %s idempotent: motor_id=%d message=%s",
+              name.c_str(), request->motor_id, response->message.c_str());
+            return;
+          }
+          allowed = decision.allowed;
+          rejection_code = decision.code;
+          rejection_message = decision.message;
+        } else {
+          switch (operation) {
+            case Operation::ENABLE:
+            case Operation::DISABLE:
+              break;
+            case Operation::SET_ZERO:
+              allowed = (state == pi_arm_interfaces::msg::RobotState::READY ||
+                state == pi_arm_interfaces::msg::RobotState::DISABLED) &&
+                !task_claimed && still;
+              break;
+            case Operation::RESET:
+              allowed = state != pi_arm_interfaces::msg::RobotState::DISCONNECTED;
+              break;
+          }
         }
         if (!allowed) {
           response->success = false;
-          response->code = 2001;
-          response->message = "operation rejected by robot state";
+          response->code = rejection_code;
+          response->message = rejection_message;
           RCLCPP_WARN(
             get_logger(),
             "service %s REJECTED: motor_id=%d state=%s still=%d task_claimed=%d",
             name.c_str(), request->motor_id, state_name(state),
-            still ? 1 : 0, task_claimed_.load() ? 1 : 0);
+            still ? 1 : 0, task_claimed ? 1 : 0);
           return;
         }
         if (!client->wait_for_service(std::chrono::duration<double>(operation_timeout_))) {

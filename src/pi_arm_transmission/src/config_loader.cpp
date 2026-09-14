@@ -133,6 +133,15 @@ Axis6BranchParameters parse_axis6_branch(const YAML::Node & node)
     require_value<int>(node, "coupling_sign")};
 }
 
+OutputPositionLimits parse_output_limit(const YAML::Node & node, const std::string & name)
+{
+  reject_unknown_keys(
+    node, {"lower_position_rad", "upper_position_rad"}, name + " output limit");
+  return {
+    require_value<double>(node, "lower_position_rad"),
+    require_value<double>(node, "upper_position_rad")};
+}
+
 }  // namespace
 
 CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
@@ -155,11 +164,12 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
 
   const auto root = require_map(document, "cable_kinematics");
   reject_unknown_keys(
-    root, {"model_version", "angle_unit", "length_unit", "axes", "validation"},
+    root,
+    {"model_version", "angle_unit", "length_unit", "axes", "output_limits", "validation"},
     "cable_kinematics");
   const int model_version = require_value<int>(root, "model_version");
-  if (model_version != 2) {
-    throw std::invalid_argument("cable kinematics model_version must be 2");
+  if (model_version != 3) {
+    throw std::invalid_argument("cable kinematics model_version must be 3");
   }
   if (optional_value<std::string>(root, "angle_unit", "rad") != "rad") {
     throw std::invalid_argument("cable kinematics angle_unit must be 'rad'");
@@ -170,13 +180,13 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
 
   const auto axes = require_map(root, "axes");
   reject_unknown_keys(
-    axes, {"joint_01", "joint_02", "joint_03", "joint_05", "joint_06", "joint_09"},
+    axes, {"joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"},
     "axes");
 
   CableKinematicsParameters parameters;
   parameters.axis1 = parse_linear(require_map(axes, "joint_01"));
   parameters.axis2 = parse_linear(require_map(axes, "joint_02"));
-  parameters.axis3 = parse_coupled_axis3(require_map(axes, "joint_03"));
+  parameters.axis3 = parse_coupled_axis3(require_map(axes, "joint_04"));
   parameters.axis4 = parse_coupled_chord(require_map(axes, "joint_05"));
   parameters.axis5 = parse_coupled_chord(require_map(axes, "joint_06"));
 
@@ -186,6 +196,25 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
   parameters.axis6_branch_a = parse_axis6_branch(require_map(axis6, "branch_a"));
   parameters.axis6_branch_b = parse_axis6_branch(require_map(axis6, "branch_b"));
 
+  const auto output_limits = require_map(root, "output_limits");
+  reject_unknown_keys(
+    output_limits,
+    {"coordinate", "unit", "motor_01", "motor_02", "motor_03", "motor_04", "motor_05",
+      "motor_06"},
+    "output_limits");
+  if (require_value<std::string>(output_limits, "coordinate") != "reducer_output_shaft") {
+    throw std::invalid_argument(
+            "output_limits coordinate must be 'reducer_output_shaft'");
+  }
+  if (require_value<std::string>(output_limits, "unit") != "rad") {
+    throw std::invalid_argument("output_limits unit must be 'rad'");
+  }
+  for (std::size_t index = 0; index < parameters.output_limits.size(); ++index) {
+    const std::string name = "motor_0" + std::to_string(index + 1U);
+    parameters.output_limits[index] =
+      parse_output_limit(require_map(output_limits, name.c_str()), name);
+  }
+
   const auto validation = root["validation"];
   if (validation) {
     if (!validation.IsMap()) {
@@ -193,7 +222,8 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
     }
     reject_unknown_keys(
       validation,
-      {"asin_domain_tolerance", "cosine_singularity_threshold", "compatibility_tolerance"},
+      {"asin_domain_tolerance", "cosine_singularity_threshold", "compatibility_tolerance",
+        "output_limit_tolerance_rad"},
       "validation");
     parameters.asin_domain_tolerance =
       optional_value<double>(
@@ -205,6 +235,9 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
     parameters.compatibility_tolerance =
       optional_value<double>(
       validation, "compatibility_tolerance", parameters.compatibility_tolerance);
+    parameters.output_limit_tolerance_rad =
+      optional_value<double>(
+      validation, "output_limit_tolerance_rad", parameters.output_limit_tolerance_rad);
   }
 
   const CableKinematics validated(parameters);

@@ -64,6 +64,8 @@ const char * to_string(const KinematicsError error) noexcept
       return "NONE";
     case KinematicsError::NON_FINITE_INPUT:
       return "NON_FINITE_INPUT";
+    case KinematicsError::OUTPUT_POSITION_LIMIT:
+      return "OUTPUT_POSITION_LIMIT";
     case KinematicsError::ASIN_DOMAIN:
       return "ASIN_DOMAIN";
     case KinematicsError::VELOCITY_SINGULARITY:
@@ -124,6 +126,19 @@ CableKinematics::CableKinematics(CableKinematicsParameters parameters)
     parameters_.cosine_singularity_threshold, "cosine_singularity_threshold");
   require_positive_finite(
     parameters_.compatibility_tolerance, "compatibility_tolerance");
+  require_positive_finite(
+    parameters_.output_limit_tolerance_rad, "output_limit_tolerance_rad");
+
+  for (std::size_t index = 0; index < parameters_.output_limits.size(); ++index) {
+    const auto & limit = parameters_.output_limits[index];
+    if (!std::isfinite(limit.lower_position_rad) ||
+      !std::isfinite(limit.upper_position_rad) ||
+      limit.lower_position_rad >= limit.upper_position_rad)
+    {
+      throw std::invalid_argument(
+              "output_limits[" + std::to_string(index) + "] must be finite and ordered");
+    }
+  }
 
   alpha1_ = parameters_.axis1.joint_radius_mm / parameters_.axis1.motor_radius_mm;
   alpha2_ = parameters_.axis2.joint_radius_mm / parameters_.axis2.motor_radius_mm;
@@ -231,6 +246,26 @@ KinematicsStatus CableKinematics::output_to_joint_position(
   joint_position_rad[5] =
     (output_position_rad[5] - axis6_coupling_gain_ * joint_position_rad[1]) / alpha6_;
   return require_finite_vector(joint_position_rad);
+}
+
+KinematicsStatus CableKinematics::check_output_position_limits(
+  const Vector6 & output_position_rad) const noexcept
+{
+  const auto finite = require_finite_vector(output_position_rad);
+  if (!finite) {
+    return finite;
+  }
+
+  for (std::size_t index = 0; index < output_position_rad.size(); ++index) {
+    const auto & limit = parameters_.output_limits[index];
+    const double value = output_position_rad[index];
+    if (value < limit.lower_position_rad - parameters_.output_limit_tolerance_rad ||
+      value > limit.upper_position_rad + parameters_.output_limit_tolerance_rad)
+    {
+      return {KinematicsError::OUTPUT_POSITION_LIMIT, index + 1U, value};
+    }
+  }
+  return KinematicsStatus::success();
 }
 
 KinematicsStatus CableKinematics::jacobian(

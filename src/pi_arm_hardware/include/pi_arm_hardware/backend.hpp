@@ -42,6 +42,15 @@ struct HardwareSample
   std::vector<bool> fresh;
   std::vector<std::int32_t> error_codes;
   std::vector<double> ages_sec;
+  // Raw motor-controller state in BackendConfig::actuators order. Keep this
+  // separate from the joint-level arrays above: one joint can depend on more
+  // than one motor in the cable transmission.
+  std::vector<bool> motor_enabled;
+  std::vector<bool> motor_has_error;
+  std::vector<bool> motor_in_motion;
+  std::vector<bool> motor_fresh;
+  std::vector<std::int32_t> motor_error_codes;
+  std::vector<double> motor_ages_sec;
   bool connected{false};
   std::string driver_mode{"OFFLINE"};
   std::string management_operation{"NONE"};
