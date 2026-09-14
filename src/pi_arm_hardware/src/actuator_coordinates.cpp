@@ -43,6 +43,22 @@ double protocol_position_to_output_rad(
          config.protocol_angle_ratio);
 }
 
+double model_output_position_to_protocol_deg(
+  const double model_output_position_rad, const double software_output_offset_rad,
+  const ActuatorConfig & config) noexcept
+{
+  return output_position_to_protocol_deg(
+    model_output_position_rad - software_output_offset_rad, config);
+}
+
+double protocol_position_to_model_output_rad(
+  const double protocol_position_deg, const double software_output_offset_rad,
+  const ActuatorConfig & config) noexcept
+{
+  return protocol_position_to_output_rad(protocol_position_deg, config) +
+         software_output_offset_rad;
+}
+
 double output_velocity_to_protocol_dps(
   const double output_velocity_rad_s, const ActuatorConfig & config) noexcept
 {

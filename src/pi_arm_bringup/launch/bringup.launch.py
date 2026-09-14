@@ -16,6 +16,8 @@ def generate_launch_description():
     can_interface = LaunchConfiguration("can_interface")
     bitrate = LaunchConfiguration("bitrate")
     cable_kinematics_file = LaunchConfiguration("cable_kinematics_file")
+    calibration_file = LaunchConfiguration("calibration_file")
+    allow_real_control = LaunchConfiguration("allow_real_control")
     use_rviz = LaunchConfiguration("use_rviz")
     use_manager = LaunchConfiguration("use_manager")
     use_websocket = LaunchConfiguration("use_websocket")
@@ -37,6 +39,10 @@ def generate_launch_description():
                 bitrate,
                 " cable_kinematics_file:=",
                 cable_kinematics_file,
+                " calibration_file:=",
+                calibration_file,
+                " allow_real_control:=",
+                allow_real_control,
             ]
         )
     }
@@ -74,6 +80,8 @@ def generate_launch_description():
             "can_interface": can_interface,
             "bitrate": bitrate,
             "cable_kinematics_file": cable_kinematics_file,
+            "calibration_file": calibration_file,
+            "allow_real_control": allow_real_control,
         }.items(),
     )
     rviz = IncludeLaunchDescription(
@@ -87,6 +95,8 @@ def generate_launch_description():
             "can_interface": can_interface,
             "bitrate": bitrate,
             "cable_kinematics_file": cable_kinematics_file,
+            "calibration_file": calibration_file,
+            "allow_real_control": allow_real_control,
         }.items(),
         condition=IfCondition(use_rviz),
     )
@@ -111,6 +121,23 @@ def generate_launch_description():
                     ]
                 ),
                 description="Installed six-axis cable kinematics YAML",
+            ),
+            DeclareLaunchArgument(
+                "calibration_file",
+                default_value=PathJoinSubstitution(
+                    [
+                        FindPackageShare("pi_arm_hardware"),
+                        "config",
+                        "pack_reference_calibration.template.yaml",
+                    ]
+                ),
+                description="Pack-reference actuator calibration YAML",
+            ),
+            DeclareLaunchArgument(
+                "allow_real_control",
+                default_value="false",
+                choices=["true", "false"],
+                description="Explicitly allow real CAN position commands after calibration gates pass",
             ),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_manager", default_value="true"),

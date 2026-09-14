@@ -1,0 +1,16 @@
+# TEMPLATE ONLY. Real control rejects this file because approved is false.
+# q=0 remains the fully upright mechanical model pose. The motor ROM zero is
+# written at packing_pose_joint_rad. After power cycling in the fixture,
+# record residual reducer-output angles in raw_output_at_packing_rad.
+calibration:
+  schema_version: 1
+  robot_id: UNSET
+  calibration_id: UNAPPROVED-TEMPLATE
+  approved: false
+  model_version: 3
+  created_at_utc: "1970-01-01T00:00:00Z"
+  configuration_fingerprint: REPLACE_WITH_CALIBRATION_CLI_OUTPUT
+  joint_names: [joint_01, joint_02, joint_04, joint_05, joint_06, joint_09]
+  motor_ids: [1, 2, 3, 4, 5, 6]
+  packing_pose_joint_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  raw_output_at_packing_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

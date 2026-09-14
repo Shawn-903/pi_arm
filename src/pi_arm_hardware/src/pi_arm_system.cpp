@@ -32,7 +32,21 @@ T required_joint_parameter(
   }
   std::istringstream stream(found->second);
   T value{};
-  stream >> value;
+  if constexpr (std::is_same_v<T, bool>) {
+    stream >> std::boolalpha >> value;
+    if (!stream) {
+      stream.clear();
+      stream.str(found->second);
+      int numeric = -1;
+      stream >> numeric;
+      if (numeric != 0 && numeric != 1) {
+        throw std::invalid_argument("invalid boolean hardware parameter '" + name + "'");
+      }
+      value = numeric == 1;
+    }
+  } else {
+    stream >> value;
+  }
   if (!stream || !(stream >> std::ws).eof()) {
     throw std::invalid_argument(
             "joint '" + joint_name + "' has an invalid ros2_control parameter '" + name + "'");
@@ -51,7 +65,21 @@ T parameter_or(
   }
   std::istringstream stream(found->second);
   T value{};
-  stream >> value;
+  if constexpr (std::is_same_v<T, bool>) {
+    stream >> std::boolalpha >> value;
+    if (!stream) {
+      stream.clear();
+      stream.str(found->second);
+      int numeric = -1;
+      stream >> numeric;
+      if (numeric != 0 && numeric != 1) {
+        throw std::invalid_argument("invalid boolean hardware parameter '" + name + "'");
+      }
+      value = numeric == 1;
+    }
+  } else {
+    stream >> value;
+  }
   if (!stream || !(stream >> std::ws).eof()) {
     throw std::invalid_argument("invalid hardware parameter '" + name + "'");
   }
@@ -98,6 +126,18 @@ PI_ARM_DEFINE_HAS_FIELD(motor_moving);
 PI_ARM_DEFINE_HAS_FIELD(motor_fresh);
 PI_ARM_DEFINE_HAS_FIELD(motor_error_codes);
 PI_ARM_DEFINE_HAS_FIELD(motor_ages_sec);
+PI_ARM_DEFINE_HAS_FIELD(calibrated);
+PI_ARM_DEFINE_HAS_FIELD(kinematics_valid);
+PI_ARM_DEFINE_HAS_FIELD(control_permitted);
+PI_ARM_DEFINE_HAS_FIELD(calibration_id);
+PI_ARM_DEFINE_HAS_FIELD(raw_protocol_positions_deg);
+PI_ARM_DEFINE_HAS_FIELD(raw_output_positions_rad);
+PI_ARM_DEFINE_HAS_FIELD(software_output_offsets_rad);
+PI_ARM_DEFINE_HAS_FIELD(model_output_positions_rad);
+PI_ARM_DEFINE_HAS_FIELD(kinematics_error_code);
+PI_ARM_DEFINE_HAS_FIELD(kinematics_error_axis);
+PI_ARM_DEFINE_HAS_FIELD(kinematics_error_value);
+PI_ARM_DEFINE_HAS_FIELD(kinematics_error_message);
 PI_ARM_DEFINE_HAS_FIELD(all_enabled);
 PI_ARM_DEFINE_HAS_FIELD(any_error);
 PI_ARM_DEFINE_HAS_FIELD(any_in_motion);
@@ -197,6 +237,42 @@ void fill_hardware_state_message(
   }
   if constexpr (has_motor_ages_sec<MessageT>::value) {
     message.motor_ages_sec = sample.motor_ages_sec;
+  }
+  if constexpr (has_calibrated<MessageT>::value) {
+    message.calibrated = sample.calibrated;
+  }
+  if constexpr (has_kinematics_valid<MessageT>::value) {
+    message.kinematics_valid = sample.kinematics_valid;
+  }
+  if constexpr (has_control_permitted<MessageT>::value) {
+    message.control_permitted = sample.control_permitted;
+  }
+  if constexpr (has_calibration_id<MessageT>::value) {
+    message.calibration_id = sample.calibration_id;
+  }
+  if constexpr (has_raw_protocol_positions_deg<MessageT>::value) {
+    message.raw_protocol_positions_deg = sample.raw_protocol_positions_deg;
+  }
+  if constexpr (has_raw_output_positions_rad<MessageT>::value) {
+    message.raw_output_positions_rad = sample.raw_output_positions_rad;
+  }
+  if constexpr (has_software_output_offsets_rad<MessageT>::value) {
+    message.software_output_offsets_rad = sample.software_output_offsets_rad;
+  }
+  if constexpr (has_model_output_positions_rad<MessageT>::value) {
+    message.model_output_positions_rad = sample.model_output_positions_rad;
+  }
+  if constexpr (has_kinematics_error_code<MessageT>::value) {
+    message.kinematics_error_code = sample.kinematics_error_code;
+  }
+  if constexpr (has_kinematics_error_axis<MessageT>::value) {
+    message.kinematics_error_axis = sample.kinematics_error_axis;
+  }
+  if constexpr (has_kinematics_error_value<MessageT>::value) {
+    message.kinematics_error_value = sample.kinematics_error_value;
+  }
+  if constexpr (has_kinematics_error_message<MessageT>::value) {
+    message.kinematics_error_message = sample.kinematics_error_message;
   }
   if constexpr (has_all_enabled<MessageT>::value) {
     message.all_enabled =
@@ -324,6 +400,10 @@ bool PiArmSystem::parse_configuration()
   backend_config_.can_interface = string_parameter_or(parameters, "can_interface", "can0");
   backend_config_.cable_kinematics_file =
     string_parameter_or(parameters, "cable_kinematics_file", "");
+  backend_config_.calibration_file =
+    string_parameter_or(parameters, "calibration_file", "");
+  backend_config_.allow_real_control =
+    parameter_or<bool>(parameters, "allow_real_control", false);
   if (backend_config_.cable_kinematics_file.empty()) {
     throw std::invalid_argument(
             "hardware parameter 'cable_kinematics_file' must name the installed YAML file");
@@ -510,9 +590,6 @@ void PiArmSystem::start_auxiliary_node()
     "/pi_arm/hardware/enable_motor", pi_arm_can::ManagementOperation::MOTOR_RUN);
   create_management_service(
     "/pi_arm/hardware/reset_motor", pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS);
-  create_management_service(
-    "/pi_arm/hardware/set_zero",
-    pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO);
   state_timer_ = node_->create_wall_timer(
     std::chrono::duration<double>(1.0 / state_publish_rate_hz_),
     [this]() {publish_hardware_state();});

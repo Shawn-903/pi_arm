@@ -21,6 +21,10 @@ target_include_directories(pi_arm_can
 )
 target_compile_options(pi_arm_can PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(pi_arm_rom_zero_cli src/rom_zero_cli.cpp)
+target_link_libraries(pi_arm_rom_zero_cli PRIVATE pi_arm_can)
+target_compile_options(pi_arm_rom_zero_cli PRIVATE -Wall -Wextra -Wpedantic)
+
 install(
   DIRECTORY include/
   DESTINATION include
@@ -32,6 +36,10 @@ install(
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
   INCLUDES DESTINATION include
+)
+install(
+  TARGETS pi_arm_rom_zero_cli
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)

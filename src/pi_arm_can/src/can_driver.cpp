@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -13,6 +14,7 @@
 #include <linux/can/raw.h>
 #include <net/if.h>
 #include <poll.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -71,6 +73,15 @@ CanDriver::CanDriver(DriverConfig config)
   if (config_.interface_name.empty() || config_.interface_name.size() >= 16U) {
     throw std::invalid_argument("SocketCAN interface name is empty or too long");
   }
+  if (!std::all_of(
+      config_.interface_name.begin(), config_.interface_name.end(),
+      [](const unsigned char value) {
+        return std::isalnum(value) != 0 || value == '_' || value == '-';
+      }))
+  {
+    throw std::invalid_argument(
+            "SocketCAN interface name may contain only letters, digits, '_' and '-'");
+  }
   if (config_.motor_ids.empty()) {
     throw std::invalid_argument("at least one motor ID is required");
   }
@@ -107,8 +118,24 @@ void CanDriver::start()
     last_error_.clear();
   }
 
+  const std::string lease_path = "/run/lock/pi_arm_can_" + config_.interface_name + ".lock";
+  lease_fd_ = ::open(lease_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0660);
+  if (lease_fd_ < 0) {
+    throw std::runtime_error(
+            "failed to open SocketCAN interface lease '" + lease_path + "': " +
+            std::strerror(errno));
+  }
+  if (::flock(lease_fd_, LOCK_EX | LOCK_NB) < 0) {
+    const std::string detail = std::strerror(errno);
+    release_interface_lease();
+    throw std::runtime_error(
+            "SocketCAN interface '" + config_.interface_name +
+            "' is already owned by another Pi Arm process: " + detail);
+  }
+
   const int fd = ::socket(PF_CAN, SOCK_RAW, CAN_RAW);
   if (fd < 0) {
+    release_interface_lease();
     throw std::runtime_error("failed to create SocketCAN socket: " + std::string(std::strerror(errno)));
   }
 
@@ -141,6 +168,7 @@ void CanDriver::start()
     }
   } catch (...) {
     ::close(fd);
+    release_interface_lease();
     throw;
   }
 
@@ -170,6 +198,7 @@ void CanDriver::stop() noexcept
     rx_thread_.join();
   }
   close_socket();
+  release_interface_lease();
 
   std::deque<TxBatch> abandoned;
   {
@@ -198,6 +227,9 @@ bool CanDriver::set_mode(const DriverMode requested)
     return false;
   }
   if (requested != DriverMode::MONITORING && requested != DriverMode::CONTROL) {
+    return false;
+  }
+  if (config_.read_only && requested == DriverMode::CONTROL) {
     return false;
   }
   mode_.store(requested);
@@ -263,7 +295,9 @@ bool CanDriver::execute_management(
   const ManagementOperation operation, const std::vector<std::uint8_t> & motor_ids,
   const std::chrono::milliseconds timeout)
 {
-  if (operation == ManagementOperation::NONE || motor_ids.empty() || timeout.count() <= 0) {
+  if (config_.read_only || operation == ManagementOperation::NONE || motor_ids.empty() ||
+    timeout.count() <= 0)
+  {
     return false;
   }
   std::unique_lock<std::mutex> operation_lock(management_mutex_);
@@ -573,6 +607,15 @@ void CanDriver::close_socket() noexcept
     ::close(socket_fd_);
   }
   socket_fd_ = -1;
+}
+
+void CanDriver::release_interface_lease() noexcept
+{
+  if (lease_fd_ >= 0) {
+    ::flock(lease_fd_, LOCK_UN);
+    ::close(lease_fd_);
+  }
+  lease_fd_ = -1;
 }
 
 }  // namespace pi_arm_can

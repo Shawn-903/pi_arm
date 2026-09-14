@@ -1,11 +1,15 @@
+import asyncio
 import json
 
 import pytest
 
+from pi_arm_interfaces.msg import RobotState
+from pi_arm_websocket.gateway import CommandGateway
 from pi_arm_websocket.protocol import (
     COMMANDS,
     CODE_INVALID_JSON,
     CODE_INVALID_REQUEST,
+    CODE_STATE_UNAVAILABLE,
     CODE_UNSUPPORTED_COMMAND,
     ProtocolError,
     parse_request,
@@ -49,3 +53,23 @@ def test_response_keeps_legacy_ms_field():
         "ms": "ok",
         "data": {"accepted": True},
     }
+
+class _BridgeWithoutControlPermission:
+    default_joint_names = ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"]
+
+    def __init__(self):
+        self.state = RobotState()
+        self.state.hardware.control_permitted = False
+
+    def state_snapshot(self):
+        return self.state
+
+
+def test_motion_command_is_rejected_without_control_permission():
+    gateway = CommandGateway(_BridgeWithoutControlPermission())
+    request = parse_request(
+        '{"type":"req","msg_id":42,"cmd":"movej","params":{"target":[0,0,0,0,0,0],"vel":1,"acc":1}}'
+    )
+    with pytest.raises(ProtocolError) as caught:
+        asyncio.run(gateway.dispatch(request))
+    assert caught.value.code == CODE_STATE_UNAVAILABLE

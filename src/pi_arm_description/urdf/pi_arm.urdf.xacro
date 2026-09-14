@@ -4,6 +4,8 @@
   <xacro:arg name="can_interface" default="can0" />
   <xacro:arg name="bitrate" default="1000000" />
   <xacro:arg name="cable_kinematics_file" default="" />
+  <xacro:arg name="calibration_file" default="" />
+  <xacro:arg name="allow_real_control" default="false" />
   <link name="base_link">
     <inertial>
       <origin xyz="1.42472010167261E-06 -3.11862123503204E-06 0.0143168199324528" rpy="0 0 0" />
@@ -306,6 +308,8 @@
       <param name="can_interface">$(arg can_interface)</param>
       <param name="bitrate">$(arg bitrate)</param>
       <param name="cable_kinematics_file">$(arg cable_kinematics_file)</param>
+      <param name="calibration_file">$(arg calibration_file)</param>
+      <param name="allow_real_control">$(arg allow_real_control)</param>
       <param name="moving_speed_threshold_rad_s">0.00017453292519943296</param>
       <param name="state_stale_timeout_sec">1.0</param>
     </hardware>

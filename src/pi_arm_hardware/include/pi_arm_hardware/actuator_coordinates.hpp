@@ -20,6 +20,12 @@ double output_position_to_protocol_deg(
   double output_position_rad, const ActuatorConfig & config) noexcept;
 double protocol_position_to_output_rad(
   double protocol_position_deg, const ActuatorConfig & config) noexcept;
+double model_output_position_to_protocol_deg(
+  double model_output_position_rad, double software_output_offset_rad,
+  const ActuatorConfig & config) noexcept;
+double protocol_position_to_model_output_rad(
+  double protocol_position_deg, double software_output_offset_rad,
+  const ActuatorConfig & config) noexcept;
 double output_velocity_to_protocol_dps(
   double output_velocity_rad_s, const ActuatorConfig & config) noexcept;
 double protocol_velocity_to_output_rad_s(

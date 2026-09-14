@@ -106,4 +106,26 @@ TEST(DriverCache, RecordsSetZeroAcknowledgementWithoutChangingLiveAngle)
   EXPECT_DOUBLE_EQ(state.protocol_angle_deg, 123.45);
 }
 
+TEST(DriverConfiguration, RejectsUnsafeInterfaceNames)
+{
+  pi_arm_can::DriverConfig config;
+  config.interface_name = "../can0";
+  config.motor_ids = {1U};
+  EXPECT_THROW(pi_arm_can::CanDriver driver(config), std::invalid_argument);
+}
+
+TEST(DriverSafety, ReadOnlyModeRejectsControlAndManagement)
+{
+  pi_arm_can::DriverConfig config;
+  config.interface_name = "vcan0";
+  config.motor_ids = {1U};
+  config.read_only = true;
+  pi_arm_can::CanDriver driver(config);
+
+  EXPECT_FALSE(driver.set_mode(pi_arm_can::DriverMode::CONTROL));
+  EXPECT_FALSE(
+    driver.execute_management(
+      pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO, {1U}));
+}
+
 }  // namespace

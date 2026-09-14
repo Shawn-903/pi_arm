@@ -36,6 +36,18 @@ def test_state_payload_separates_joint_and_motor_enabled_fields():
     state.hardware.motor_fresh = [True] * 6
     state.hardware.motor_error_codes = [0] * 6
     state.hardware.motor_ages_sec = [0.2] * 6
+    state.hardware.calibrated = True
+    state.hardware.kinematics_valid = True
+    state.hardware.control_permitted = False
+    state.hardware.calibration_id = "test-calibration"
+    state.hardware.raw_protocol_positions_deg = [1.0] * 6
+    state.hardware.raw_output_positions_rad = [0.1] * 6
+    state.hardware.software_output_offsets_rad = [0.2] * 6
+    state.hardware.model_output_positions_rad = [0.3] * 6
+    state.hardware.kinematics_error_code = "NONE"
+    state.hardware.kinematics_error_axis = 0
+    state.hardware.kinematics_error_value = 0.0
+    state.hardware.kinematics_error_message = ""
 
     gateway = object.__new__(WebSocketGateway)
     gateway.bridge = _Bridge(state)
@@ -52,3 +64,10 @@ def test_state_payload_separates_joint_and_motor_enabled_fields():
     assert payload["motor_error_codes"] == [0] * 6
     assert payload["motor_ages_sec"] == [0.2] * 6
     assert payload["all_enabled"] is False
+    assert payload["calibrated"] is True
+    assert payload["kinematics_valid"] is True
+    assert payload["control_permitted"] is False
+    assert payload["calibration_id"] == "test-calibration"
+    assert payload["raw_protocol_positions_deg"] == [1.0] * 6
+    assert payload["model_output_positions_rad"] == [0.3] * 6
+    assert payload["kinematics_error"]["code"] == "NONE"

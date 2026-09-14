@@ -48,7 +48,7 @@ class VisualizerAssetsTest(unittest.TestCase):
         self.assertIn("generate_output_shaft_urdf.py", launch_text)
         self.assertIn("gui_description", launch_text)
         self.assertIn("/pi_arm/output_shaft_robot_description", launch_text)
-        self.assertIn("/pi_arm/output_shaft_states", launch_text)
+        self.assertIn("/pi_arm/model_output_shaft_states", launch_text)
         self.assertIn('DeclareLaunchArgument("use_gui"', launch_text)
         self.assertNotIn("controller_manager", launch_text)
         self.assertNotIn("pi_arm_can", launch_text)

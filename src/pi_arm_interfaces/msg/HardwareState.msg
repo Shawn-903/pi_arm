@@ -22,4 +22,17 @@ bool[] motor_moving
 bool[] motor_fresh
 int32[] motor_error_codes
 float64[] motor_ages_sec
+# Pack-reference calibration and actuator-coordinate diagnostics.
+bool calibrated
+bool kinematics_valid
+bool control_permitted
+string calibration_id
+float64[] raw_protocol_positions_deg
+float64[] raw_output_positions_rad
+float64[] software_output_offsets_rad
+float64[] model_output_positions_rad
+string kinematics_error_code
+int32 kinematics_error_axis
+float64 kinematics_error_value
+string kinematics_error_message
 string diagnostic

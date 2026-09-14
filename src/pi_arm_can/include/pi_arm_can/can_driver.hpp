@@ -41,6 +41,9 @@ struct DriverConfig
 {
   std::string interface_name{"can0"};
   std::vector<std::uint8_t> motor_ids;
+  // A read-only driver may poll 0x92/0x9A/0x9C but can never enter CONTROL
+  // or execute management commands.
+  bool read_only{false};
   std::chrono::milliseconds state_poll_interval{20};
   std::size_t status1_poll_divider{5U};
   std::size_t max_pending_batches{64U};
@@ -120,6 +123,7 @@ private:
   bool write_batch(const std::vector<CanFrame> & frames) noexcept;
   void set_fault(const std::string & message) noexcept;
   void close_socket() noexcept;
+  void release_interface_lease() noexcept;
 
   DriverConfig config_;
   std::unordered_map<std::uint8_t, MotorState> states_;
@@ -139,6 +143,7 @@ private:
   std::mutex management_mutex_;
   std::thread rx_thread_;
   std::thread tx_thread_;
+  int lease_fd_{-1};
   int socket_fd_{-1};
 };
 

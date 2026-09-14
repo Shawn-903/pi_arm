@@ -73,7 +73,7 @@ class RosBridge(Node):
             "enable_motor": self.create_client(ManageMotor, "/pi_arm/enable_motor"),
             "disable_motor": self.create_client(ManageMotor, "/pi_arm/disable_motor"),
             "reset_motor": self.create_client(ManageMotor, "/pi_arm/reset_motor"),
-            "set_zero": self.create_client(ManageMotor, "/pi_arm/set_zero"),
+
             "stop_motion": self.create_client(StopMotion, "/pi_arm/stop_motion"),
         }
         self.action_clients = {
@@ -224,13 +224,16 @@ class CommandGateway:
 
     async def dispatch(self, request: Request) -> dict[str, Any]:
         command, params = request.command, request.params
-        if command in {"enable_motor", "disable_motor", "reset_motor", "set_zero"}:
-            motor_id = integer_param(params, "motor_id", allow_zero=True)
-            if command == "set_zero" and motor_id != 0:
+        if command in {"movej", "movejs", "movel", "move", "motor_move"}:
+            state = self.bridge.state_snapshot()
+            if state is None or not state.hardware.control_permitted:
                 raise ProtocolError(
-                    CODE_INVALID_PARAMS,
-                    "set_zero 是整机操作，motor_id 必须为 0",
+                    CODE_STATE_UNAVAILABLE,
+                    "运动被禁止：标定、运动学或硬件控制许可未满足",
+                    request.msg_id,
                 )
+        if command in {"enable_motor", "disable_motor", "reset_motor"}:
+            motor_id = integer_param(params, "motor_id", allow_zero=True)
             ros_request = ManageMotor.Request()
             ros_request.motor_id = motor_id
             await self.bridge.call_service(command, ros_request)
@@ -471,6 +474,15 @@ class WebSocketGateway:
                 "motor_error_codes": [],
                 "motor_ages_sec": [],
                 "motor_last_update_timestamps": [],
+                "calibrated": False,
+                "kinematics_valid": False,
+                "control_permitted": False,
+                "calibration_id": "",
+                "raw_protocol_positions_deg": [],
+                "raw_output_positions_rad": [],
+                "software_output_offsets_rad": [],
+                "model_output_positions_rad": [],
+                "kinematics_error": {},
                 "all_enabled": False,
                 "any_error": False,
                 "any_in_motion": False,
@@ -502,6 +514,20 @@ class WebSocketGateway:
                     max(0.0, stamp - age) if fresh and math.isfinite(age) else 0.0
                     for fresh, age in zip(hardware.motor_fresh, hardware.motor_ages_sec)
                 ],
+                "calibrated": hardware.calibrated,
+                "kinematics_valid": hardware.kinematics_valid,
+                "control_permitted": hardware.control_permitted,
+                "calibration_id": hardware.calibration_id,
+                "raw_protocol_positions_deg": list(hardware.raw_protocol_positions_deg),
+                "raw_output_positions_rad": list(hardware.raw_output_positions_rad),
+                "software_output_offsets_rad": list(hardware.software_output_offsets_rad),
+                "model_output_positions_rad": list(hardware.model_output_positions_rad),
+                "kinematics_error": {
+                    "code": hardware.kinematics_error_code,
+                    "axis": hardware.kinematics_error_axis,
+                    "value": hardware.kinematics_error_value,
+                    "message": hardware.kinematics_error_message,
+                },
                 "all_enabled": bool(hardware.motor_enabled)
                 and all(hardware.motor_enabled),
                 "any_error": any(hardware.errors)

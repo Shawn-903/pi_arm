@@ -2,6 +2,7 @@
 
 #include "pi_arm_can/can_driver.hpp"
 #include "pi_arm_hardware/actuator_coordinates.hpp"
+#include "pi_arm_hardware/calibration.hpp"
 #include "pi_arm_transmission/cable_kinematics.hpp"
 
 #include <array>
@@ -20,6 +21,9 @@ struct BackendConfig
 {
   std::string can_interface{"can0"};
   std::string cable_kinematics_file;
+  std::string calibration_file;
+  bool allow_real_control{false};
+  bool read_only{false};
   std::vector<ActuatorConfig> actuators;
   // Per-joint limits, filled by the hardware plugin from the URDF <limit> tags.
   // The single source of truth for these values is the robot description.
@@ -51,6 +55,18 @@ struct HardwareSample
   std::vector<bool> motor_fresh;
   std::vector<std::int32_t> motor_error_codes;
   std::vector<double> motor_ages_sec;
+  bool calibrated{false};
+  bool kinematics_valid{false};
+  bool control_permitted{false};
+  std::string calibration_id;
+  std::vector<double> raw_protocol_positions_deg;
+  std::vector<double> raw_output_positions_rad;
+  std::vector<double> software_output_offsets_rad;
+  std::vector<double> model_output_positions_rad;
+  std::string kinematics_error_code{"NONE"};
+  std::int32_t kinematics_error_axis{0};
+  double kinematics_error_value{0.0};
+  std::string kinematics_error_message;
   bool connected{false};
   std::string driver_mode{"OFFLINE"};
   std::string management_operation{"NONE"};
@@ -107,9 +123,9 @@ public:
 private:
   BackendConfig config_;
   pi_arm_transmission::CableKinematics kinematics_;
+  CalibrationResult calibration_;
   pi_arm_transmission::Vector6 last_joint_positions_rad_{};
   std::atomic_bool position_initialized_{false};
-  std::atomic_bool power_cycle_required_{false};
   std::unique_ptr<pi_arm_can::CanDriver> driver_;
 };
 

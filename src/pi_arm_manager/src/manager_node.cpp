@@ -144,8 +144,6 @@ public:
       "/pi_arm/hardware/disable_motor", rmw_qos_profile_services_default, service_group_);
     reset_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
       "/pi_arm/hardware/reset_motor", rmw_qos_profile_services_default, service_group_);
-    zero_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
-      "/pi_arm/hardware/set_zero", rmw_qos_profile_services_default, service_group_);
     follow_client_ = rclcpp_action::create_client<Follow>(
       this, follow_action_name_, action_group_);
 
@@ -155,8 +153,6 @@ public:
       "/pi_arm/disable_motor", disable_client_, Operation::DISABLE);
     reset_service_ = make_management_service(
       "/pi_arm/reset_motor", reset_client_, Operation::RESET);
-    zero_service_ = make_management_service(
-      "/pi_arm/set_zero", zero_client_, Operation::SET_ZERO);
     stop_service_ = create_service<pi_arm_interfaces::srv::StopMotion>(
       "/pi_arm/stop_motion",
       std::bind(
@@ -206,7 +202,7 @@ public:
   }
 
 private:
-  enum class Operation {ENABLE, DISABLE, RESET, SET_ZERO};
+  enum class Operation {ENABLE, DISABLE, RESET};
 
   // Reads position/velocity bounds from the robot model (URDF) and acceleration
   // bounds from the robot_description_planning joint limits that the launch
@@ -324,11 +320,6 @@ private:
           switch (operation) {
             case Operation::ENABLE:
             case Operation::DISABLE:
-              break;
-            case Operation::SET_ZERO:
-              allowed = (state == pi_arm_interfaces::msg::RobotState::READY ||
-                state == pi_arm_interfaces::msg::RobotState::DISABLED) &&
-                !task_claimed && still;
               break;
             case Operation::RESET:
               allowed = state != pi_arm_interfaces::msg::RobotState::DISCONNECTED;
@@ -1292,11 +1283,11 @@ private:
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_client_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_client_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reset_client_;
-  rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr zero_client_;
+
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_service_;
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_service_;
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reset_service_;
-  rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr zero_service_;
+
   rclcpp::Service<pi_arm_interfaces::srv::StopMotion>::SharedPtr stop_service_;
   rclcpp::CallbackGroup::SharedPtr service_group_;
   rclcpp::CallbackGroup::SharedPtr action_group_;

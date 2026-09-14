@@ -15,9 +15,12 @@ find_package(pi_arm_transmission REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(yaml_cpp_vendor REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 add_library(pi_arm_hardware SHARED
   src/actuator_coordinates.cpp
+  src/calibration.cpp
   src/backend.cpp
   src/pi_arm_system.cpp
 )
@@ -35,7 +38,17 @@ ament_target_dependencies(pi_arm_hardware
   rclcpp
   rclcpp_lifecycle
 )
+target_link_libraries(pi_arm_hardware PRIVATE yaml-cpp)
 target_compile_options(pi_arm_hardware PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(pi_arm_hardware_monitor_node src/monitor_node.cpp)
+target_link_libraries(pi_arm_hardware_monitor_node PRIVATE pi_arm_hardware)
+ament_target_dependencies(pi_arm_hardware_monitor_node
+  hardware_interface
+  pi_arm_interfaces
+  rclcpp
+)
+target_compile_options(pi_arm_hardware_monitor_node PRIVATE -Wall -Wextra -Wpedantic)
 
 pluginlib_export_plugin_description_file(hardware_interface pi_arm_hardware_plugin.xml)
 
@@ -44,10 +57,22 @@ install(
   DESTINATION include
 )
 install(
+  PROGRAMS scripts/pi_arm_calibration_candidate
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(
+  DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
+)
+install(
   TARGETS pi_arm_hardware
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
+)
+install(
+  TARGETS pi_arm_hardware_monitor_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
