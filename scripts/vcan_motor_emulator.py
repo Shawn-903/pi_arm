@@ -54,6 +54,7 @@ def response(motor: Motor, request: bytes) -> bytes | None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("interface", nargs="?", default="vcan0")
+    parser.add_argument("--trace", action="store_true", help="print each received request")
     args = parser.parse_args()
 
     bus = socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
@@ -79,6 +80,11 @@ def main() -> None:
         motor_id = (can_id & 0x7FF) - CAN_BASE
         if length != 8 or motor_id not in motors:
             continue
+        if args.trace:
+            print(
+                f"RX motor_id={motor_id} opcode=0x{payload[0]:02X}",
+                flush=True,
+            )
         reply = response(motors[motor_id], payload)
         if reply is not None:
             bus.send(CAN_FRAME.pack(CAN_BASE + motor_id, 8, reply))
