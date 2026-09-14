@@ -369,7 +369,7 @@ hardware_interface::CallbackReturn PiArmSystem::on_init(
     state_positions_.assign(joint_count, 0.0);
     state_velocities_.assign(joint_count, 0.0);
     command_positions_.assign(joint_count, 0.0);
-    command_velocities_ = backend_config_.joint_velocity_limits_rad_s;
+    command_velocities_.assign(joint_count, 0.0);
     latest_sample_.positions_rad = state_positions_;
     latest_sample_.velocities_rad_s = state_velocities_;
     latest_sample_.enabled.assign(joint_count, false);
@@ -518,7 +518,10 @@ hardware_interface::CallbackReturn PiArmSystem::on_activate(const rclcpp_lifecyc
   try {
     backend_->activate();
     command_positions_ = state_positions_;
-    command_velocities_ = backend_config_.joint_velocity_limits_rad_s;
+    // Velocity command interfaces start at rest. Initializing them to the
+    // positive joint limits manufactures a non-zero idle command and is not a
+    // valid controller state.
+    command_velocities_.assign(joint_names_.size(), 0.0);
     {
       std::lock_guard<std::mutex> sample_lock(sample_mutex_);
       latest_sample_.connected = true;
@@ -590,6 +593,28 @@ void PiArmSystem::start_auxiliary_node()
     "/pi_arm/hardware/enable_motor", pi_arm_can::ManagementOperation::MOTOR_RUN);
   create_management_service(
     "/pi_arm/hardware/reset_motor", pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS);
+  motion_arm_service_ = node_->create_service<SetMotionArmed>(
+    "/pi_arm/hardware/set_motion_armed",
+    [this](
+      const std::shared_ptr<SetMotionArmed::Request> request,
+      std::shared_ptr<SetMotionArmed::Response> response)
+    {
+      const auto result = backend_->set_motion_armed(request->armed, request->lease_id);
+      response->success = result.success;
+      response->armed = result.armed;
+      response->message = result.message;
+      if (result.success) {
+        RCLCPP_INFO(
+          node_->get_logger(), "position-write gate armed=%d lease=%llu: %s",
+          result.armed ? 1 : 0,
+          static_cast<unsigned long long>(request->lease_id), result.message.c_str());
+      } else {
+        RCLCPP_WARN(
+          node_->get_logger(), "position-write gate rejected armed=%d lease=%llu: %s",
+          request->armed ? 1 : 0,
+          static_cast<unsigned long long>(request->lease_id), result.message.c_str());
+      }
+    });
   state_timer_ = node_->create_wall_timer(
     std::chrono::duration<double>(1.0 / state_publish_rate_hz_),
     [this]() {publish_hardware_state();});
@@ -607,6 +632,7 @@ void PiArmSystem::stop_auxiliary_node() noexcept
     executor_thread_.join();
   }
   management_services_.clear();
+  motion_arm_service_.reset();
   state_timer_.reset();
   state_publisher_.reset();
   if (executor_ && node_) {

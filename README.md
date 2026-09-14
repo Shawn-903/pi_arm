@@ -145,6 +145,7 @@ ros2 launch pi_arm_bringup bringup.launch.py \
 - 运动 Action：`/pi_arm/movej`、`movejs`、`movel`、`direct_move`。
 
 `HardwareState.connected` 只表示驱动与 SocketCAN 在线；`calibrated`、`kinematics_valid` 和 `control_permitted` 分别表示标定有效、运动学输出有效和真实控制许可。原始协议角、ROM 相对输出轴角、软件偏置和模型输出轴角分别在 `raw_protocol_positions_deg`、`raw_output_positions_rad`、`software_output_offsets_rad`、`model_output_positions_rad`。`HardwareState.enabled` 按 `joint_names` 表示关节依赖聚合后的可用状态；例如关闭电机 2 会使依赖它的多个关节变为不可用，但不代表这些电机控制器也已关闭。原始控制器状态必须读取按 `motor_ids` 对齐的 `motor_enabled`、`motor_errors`、`motor_moving`、`motor_fresh`、`motor_error_codes` 和 `motor_ages_sec`。WebSocket 保留旧的关节级 `enabled` 字段并新增 `joint_enabled`；网页显示单台电机状态时必须改用 `motor_ids` 和 `motor_enabled`，不能由关节状态反推电机状态。
+`control_permitted=true` 只表示标定、运动学、反馈、故障状态和人工 `allow_real_control` 门控满足，并不武装 CAN 位置写入。启动、空闲和 `enable_motor` 后驱动仍保持 `MONITORING`，不会把 JTC 的旧 idle/hold command 发送为 `0xA4`。当前只有 manager 已检查并接受的 `DirectMove` 会通过内部 `/pi_arm/hardware/set_motion_armed` 租约临时武装真实位置写入，而且必须等待武装后出现不同于旧 idle/hold command 的新控制器命令；完成、取消、`stop_motion`、任意电机管理操作或反馈/标定失效都会解除租约并清除待发送位置批次。该内部服务不是 WebSocket/网页公开控制接口，也不是安全认证边界。MoveJ、MoveJs 和 MoveL 尚未接入同一租约生命周期，因此真实 backend 对它们保持失败关闭；Mock 不受真实 CAN 写入门控影响。
 `enable_motor`/`disable_motor` 的 `motor_id=0` 表示全部六台电机，`1..6` 表示指定电机。两者只在反馈完整且新鲜、无 FAULT、连续三帧静止且没有运动任务占用时执行；整机为 `READY` 或部分使能导致的 `DISABLED` 均可继续逐台操作。若新鲜原始反馈已经确认目标电机处于请求状态，服务以成功返回而不重复下发管理命令。
 - 停止服务：`/pi_arm/stop_motion`。这是软件层停止请求，不是机械急停。
 - MoveIt/控制器：`/joint_trajectory_controller/follow_joint_trajectory`。

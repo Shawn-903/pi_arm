@@ -3,6 +3,7 @@
 #include "pi_arm_can/can_driver.hpp"
 #include "pi_arm_hardware/actuator_coordinates.hpp"
 #include "pi_arm_hardware/calibration.hpp"
+#include "pi_arm_hardware/motion_write_gate.hpp"
 #include "pi_arm_transmission/cable_kinematics.hpp"
 
 #include <array>
@@ -80,10 +81,17 @@ struct ManagementResult
   std::string message;
 };
 
+struct MotionArmResult
+{
+  bool success{false};
+  bool armed{false};
+  std::string message;
+};
+
 // Thread-safety contract: read() and write() are called from the ros2_control
-// loop while manage() is called concurrently from a service thread. Every
-// implementation must make read()/write() safe against a concurrent manage()
-// without blocking the control loop for the duration of a management command.
+// loop while manage() and set_motion_armed() can be called concurrently from
+// the auxiliary service thread. Every implementation must keep these paths
+// safe without blocking the control loop for the duration of management I/O.
 // Lifecycle methods (configure/activate/deactivate/cleanup) are never called
 // concurrently with each other or with read()/write()/manage(); the plugin
 // guarantees this ordering.
@@ -101,6 +109,8 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept = 0;
   virtual ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept = 0;
+  virtual MotionArmResult set_motion_armed(
+    bool armed, std::uint64_t lease_id) noexcept = 0;
 };
 
 class RealBackend final : public Backend
@@ -119,6 +129,8 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept override;
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
+  MotionArmResult set_motion_armed(
+    bool armed, std::uint64_t lease_id) noexcept override;
 
 private:
   BackendConfig config_;
@@ -126,6 +138,8 @@ private:
   CalibrationResult calibration_;
   pi_arm_transmission::Vector6 last_joint_positions_rad_{};
   std::atomic_bool position_initialized_{false};
+  std::atomic_bool control_permitted_{false};
+  MotionWriteGate motion_write_gate_;
   std::unique_ptr<pi_arm_can::CanDriver> driver_;
 };
 
@@ -144,6 +158,8 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept override;
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
+  MotionArmResult set_motion_armed(
+    bool armed, std::uint64_t lease_id) noexcept override;
 
 private:
   bool valid_motor_id(int motor_id) const noexcept;

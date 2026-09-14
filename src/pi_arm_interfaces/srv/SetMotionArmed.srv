@@ -1,0 +1,6 @@
+bool armed
+uint64 lease_id
+---
+bool success
+bool armed
+string message

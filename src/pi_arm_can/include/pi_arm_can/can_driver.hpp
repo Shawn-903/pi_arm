@@ -113,6 +113,7 @@ private:
   {
     std::vector<CanFrame> frames;
     std::shared_ptr<std::promise<bool>> completion;
+    bool requires_control{false};
   };
 
   bool validate_motor_id(std::uint8_t motor_id) const noexcept;
@@ -120,7 +121,8 @@ private:
   std::vector<CanFrame> make_poll_batch(std::size_t poll_sequence) const;
   void rx_loop() noexcept;
   void tx_loop() noexcept;
-  bool write_batch(const std::vector<CanFrame> & frames) noexcept;
+  bool write_batch(const std::vector<CanFrame> & frames, bool requires_control = false) noexcept;
+  void discard_pending_control_batches() noexcept;
   void set_fault(const std::string & message) noexcept;
   void close_socket() noexcept;
   void release_interface_lease() noexcept;
@@ -138,6 +140,10 @@ private:
   std::atomic<bool> stop_requested_{false};
 
   std::mutex tx_mutex_;
+  // Serializes a CONTROL -> MONITORING transition with an in-flight position
+  // batch. Once set_mode(MONITORING) returns, no later 0xA4 from an older
+  // queued batch can be written.
+  std::mutex control_tx_mutex_;
   std::condition_variable tx_cv_;
   std::deque<TxBatch> tx_queue_;
   std::mutex management_mutex_;

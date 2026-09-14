@@ -190,3 +190,15 @@ T=150=0.02 s=20 ms*T*=501=0.02 s=20 ms
 - 硬件是否支持相应命令刷新率。
 
 实时控制中应尽量避免在周期函数里做阻塞等待、大量动态内存分配、文件读写和慢速日志输出。
+
+### **4.5 Pi Arm 真实位置写入租约**
+
+Controller Manager 即使没有新轨迹，也会周期调用硬件 `write()`；Joint Trajectory Controller 还可能保留一份 idle/hold command。因此“六台电机已 enable”不能等价于“允许发送位置帧”。当前真实 backend 使用三层条件：
+
+1. `control_permitted`：审批标定、运动学、六电机新鲜反馈、无故障及 `allow_real_control` 均有效；
+2. manager 已检查并接受一个 `DirectMove`，取得短生命周期运动租约；
+3. 武装后 command interface 出现不同于此前 idle/hold 基线的新命令。
+
+只有三层同时成立，`RealBackend::write()` 才把驱动切换到 `CONTROL` 并调用 `CanDriver::enqueue_position_batch()`。单独调用 enable 不创建租约。完成、取消、软件停止、disable/enable/reset、反馈或标定失效会解除租约，使驱动回到 `MONITORING`，并丢弃尚未发送的位置批次。监控轮询仍只使用 `0x92`、`0x9A` 和 `0x9C`。
+
+这一租约解决的是“空闲控制器命令被误发”为 `0xA4` 的软件门控问题，不是鉴权机制，也不构成急停。当前只有 DirectMove 接入租约；其他真实运动 Action 在完成同等生命周期集成前保持失败关闭。

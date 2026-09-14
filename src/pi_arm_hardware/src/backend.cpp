@@ -220,6 +220,8 @@ void RealBackend::activate()
 
 void RealBackend::deactivate() noexcept
 {
+  control_permitted_.store(false);
+  motion_write_gate_.disarm();
   if (driver_) {
     driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
   }
@@ -227,6 +229,8 @@ void RealBackend::deactivate() noexcept
 
 void RealBackend::cleanup() noexcept
 {
+  control_permitted_.store(false);
+  motion_write_gate_.disarm();
   if (driver_) {
     driver_->stop();
     driver_.reset();
@@ -436,21 +440,61 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       config_.allow_real_control && calibration_.valid && sample.kinematics_valid &&
       all_enabled && all_fresh && !any_motor_error;
 
-    if (driver_->mode() == pi_arm_can::DriverMode::MONITORING && sample.control_permitted) {
-      driver_->set_mode(pi_arm_can::DriverMode::CONTROL);
-      sample.driver_mode = pi_arm_can::to_string(driver_->mode());
-    } else if (driver_->mode() == pi_arm_can::DriverMode::CONTROL &&
-      !sample.control_permitted)
-    {
-      driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
-      sample.driver_mode = pi_arm_can::to_string(driver_->mode());
+    control_permitted_.store(sample.control_permitted);
+    if (!sample.control_permitted) {
+      // Feedback, calibration and kinematics validity are independent of an
+      // accepted motion lease. Losing any prerequisite revokes the lease and
+      // returns the CAN driver to read-only polling.
+      set_motion_armed(false, 0U);
     }
+    sample.driver_mode = pi_arm_can::to_string(driver_->mode());
     return true;
   } catch (const std::exception & error) {
+    control_permitted_.store(false);
+    set_motion_armed(false, 0U);
     sample.error_message = error.what();
     return false;
   }
 }
+
+MotionArmResult RealBackend::set_motion_armed(
+  const bool armed, const std::uint64_t lease_id) noexcept
+{
+  if (!armed) {
+    if (!motion_write_gate_.disarm(lease_id)) {
+      return {false, true, "motion lease does not match the active lease"};
+    }
+    if (driver_ && driver_->mode() != pi_arm_can::DriverMode::FAULT &&
+      driver_->mode() != pi_arm_can::DriverMode::OFFLINE)
+    {
+      driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
+    }
+    return {true, false, "real position writes disarmed"};
+  }
+
+  if (config_.read_only) {
+    return {false, false, "read-only backend cannot arm position writes"};
+  }
+  if (!config_.allow_real_control || !calibration_.valid || !control_permitted_.load()) {
+    return {false, false, "real-control prerequisites are not satisfied"};
+  }
+  if (!driver_ || !driver_->running() ||
+    (driver_->mode() != pi_arm_can::DriverMode::MONITORING &&
+    driver_->mode() != pi_arm_can::DriverMode::CONTROL))
+  {
+    return {false, false, "CAN driver is not available for motion arming"};
+  }
+  if (!motion_write_gate_.arm(lease_id))
+  {
+    return {
+      false, motion_write_gate_.armed(),
+      "invalid/conflicting motion lease or no finite idle command baseline"};
+  }
+  // Remain in MONITORING until write() observes a controller command that is
+  // newer than the idle/hold command captured above.
+  return {true, true, "real position writes armed; waiting for a fresh controller command"};
+}
+
 bool RealBackend::write(
   const std::vector<double> & positions_rad,
   const std::vector<double> & velocities_rad_s) noexcept
@@ -465,17 +509,48 @@ bool RealBackend::write(
       "write rejected: size/config mismatch (driver=%d pos=%zu vel=%zu actuators=%zu)",
       driver_ ? 1 : 0, positions_rad.size(), velocities_rad_s.size(),
       config_.actuators.size());
+    set_motion_armed(false, 0U);
     return false;
   }
-  if (driver_->mode() == pi_arm_can::DriverMode::MONITORING ||
-    driver_->mode() == pi_arm_can::DriverMode::EXCLUSIVE_MANAGEMENT)
-  {
+
+  if (!motion_write_gate_.armed()) {
+    motion_write_gate_.observe_idle(positions_rad, velocities_rad_s);
     return true;
+  }
+  if (!control_permitted_.load()) {
+    set_motion_armed(false, 0U);
+    return true;
+  }
+  if (!std::all_of(positions_rad.begin(), positions_rad.end(), [](double value) {
+      return std::isfinite(value);
+    }) ||
+    !std::all_of(velocities_rad_s.begin(), velocities_rad_s.end(), [](double value) {
+      return std::isfinite(value);
+    }))
+  {
+    log_write_reject("write rejected: armed command contains a non-finite value");
+    set_motion_armed(false, 0U);
+    return false;
+  }
+  if (!motion_write_gate_.permit_write(positions_rad, velocities_rad_s)) {
+    // This is the captured idle/hold command, not a new controller command.
+    return true;
+  }
+  if (driver_->mode() == pi_arm_can::DriverMode::EXCLUSIVE_MANAGEMENT) {
+    return true;
+  }
+  if (driver_->mode() == pi_arm_can::DriverMode::MONITORING &&
+    !driver_->set_mode(pi_arm_can::DriverMode::CONTROL))
+  {
+    log_write_reject("write rejected: failed to enter CONTROL for active motion lease");
+    set_motion_armed(false, 0U);
+    return false;
   }
   if (driver_->mode() != pi_arm_can::DriverMode::CONTROL) {
     log_write_reject(
       "write rejected: driver mode is not CONTROL (mode=%d)",
       static_cast<int>(driver_->mode()));
+    set_motion_armed(false, 0U);
     return false;
   }
 
@@ -487,6 +562,7 @@ bool RealBackend::write(
         log_write_reject(
           "write rejected: non-finite command at joint[%zu] pos=%.6g vel=%.6g",
           index, positions_rad[index], velocities_rad_s[index]);
+        set_motion_armed(false, 0U);
         return false;
       }
       if (positions_rad[index] < config_.joint_lower_limits_rad[index] ||
@@ -496,6 +572,7 @@ bool RealBackend::write(
           "write rejected: position limit exceeded at joint[%zu] pos=%.6g lim=[%.6g,%.6g]",
           index, positions_rad[index],
           config_.joint_lower_limits_rad[index], config_.joint_upper_limits_rad[index]);
+        set_motion_armed(false, 0U);
         return false;
       }
       joint_positions[index] = positions_rad[index];
@@ -509,6 +586,7 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: cable position mapping failed (%s axis=%zu value=%.6g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
+      set_motion_armed(false, 0U);
       return false;
     }
     status = kinematics_.check_output_position_limits(output_positions);
@@ -518,6 +596,7 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: output-shaft limit exceeded at motor[%zu] value=%.6g lim=[%.6g,%.6g]",
         status.axis, status.value, limit.lower_position_rad, limit.upper_position_rad);
+      set_motion_armed(false, 0U);
       return false;
     }
 
@@ -528,12 +607,14 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: cable velocity mapping failed (%s axis=%zu value=%.6g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
+      set_motion_armed(false, 0U);
       return false;
     }
 
     pi_arm_transmission::Matrix6 jacobian{};
     status = kinematics_.jacobian(joint_positions, jacobian);
     if (!status) {
+      set_motion_armed(false, 0U);
       return false;
     }
 
@@ -563,18 +644,29 @@ bool RealBackend::write(
           protocol_speed});
     }
     if (!driver_->enqueue_position_batch(commands)) {
+      if (!motion_write_gate_.armed() ||
+        driver_->mode() == pi_arm_can::DriverMode::MONITORING)
+      {
+        // A concurrent cancel/stop revoked the lease after this cycle began.
+        // Treat the dropped batch as the intended fail-closed outcome, not as
+        // a ros2_control lifecycle communication error.
+        return true;
+      }
       const auto detail = driver_->last_error();
       log_write_reject(
         "write rejected: enqueue_position_batch failed (%s)",
         detail.empty() ? "no detail" : detail.c_str());
+      set_motion_armed(false, 0U);
       return false;
     }
     return true;
   } catch (const std::exception & error) {
     log_write_reject("write rejected: %s", error.what());
+    set_motion_armed(false, 0U);
     return false;
   } catch (...) {
     log_write_reject("write rejected: unexpected exception");
+    set_motion_armed(false, 0U);
     return false;
   }
 }
@@ -585,6 +677,9 @@ ManagementResult RealBackend::manage(
   if (!driver_) {
     return {false, 2, "CAN driver is not configured"};
   }
+  // Power and fault-management operations are never motion-authorizing. They
+  // revoke an existing lease before any management frame is queued.
+  set_motion_armed(false, 0U);
   if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
     return {
       false, 6,
@@ -874,6 +969,21 @@ ManagementResult MockBackend::manage(
     sample_.control_permitted = all_enabled;
   }
   return {true, 0, "mock management operation applied"};
+}
+
+MotionArmResult MockBackend::set_motion_armed(
+  const bool armed, const std::uint64_t lease_id) noexcept
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!configured_) {
+    return {false, false, "mock backend is not configured"};
+  }
+  if (armed && lease_id == 0U) {
+    return {false, false, "invalid mock motion lease"};
+  }
+  // Mock has no CAN write boundary; accept the manager handshake without
+  // changing its existing deterministic command behavior.
+  return {true, armed, armed ? "mock motion lease accepted" : "mock motion lease released"};
 }
 
 }  // namespace pi_arm_hardware

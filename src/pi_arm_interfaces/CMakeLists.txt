@@ -12,6 +12,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TaskState.msg"
   "msg/RobotState.msg"
   "srv/ManageMotor.srv"
+  "srv/SetMotionArmed.srv"
   "srv/StopMotion.srv"
   "action/MoveJ.action"
   "action/MoveJs.action"

@@ -25,6 +25,7 @@
 #include "pi_arm_interfaces/msg/robot_state.hpp"
 #include "pi_arm_interfaces/msg/task_state.hpp"
 #include "pi_arm_interfaces/srv/manage_motor.hpp"
+#include "pi_arm_interfaces/srv/set_motion_armed.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
 #include "pi_arm_manager/management_gate.hpp"
 #include "pi_arm_manager/state_aggregator.hpp"
@@ -144,6 +145,8 @@ public:
       "/pi_arm/hardware/disable_motor", rmw_qos_profile_services_default, service_group_);
     reset_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
       "/pi_arm/hardware/reset_motor", rmw_qos_profile_services_default, service_group_);
+    motion_arm_client_ = create_client<pi_arm_interfaces::srv::SetMotionArmed>(
+      "/pi_arm/hardware/set_motion_armed", rmw_qos_profile_services_default, service_group_);
     follow_client_ = rclcpp_action::create_client<Follow>(
       this, follow_action_name_, action_group_);
 
@@ -368,6 +371,47 @@ private:
         }
       },
       rmw_qos_profile_services_default, service_group_);
+  }
+
+  std::uint64_t active_task_id()
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return task_.task_id;
+  }
+
+  bool set_motion_armed(
+    const bool armed, const std::uint64_t lease_id, const std::string & stage)
+  {
+    if (!motion_arm_client_->wait_for_service(
+        std::chrono::duration<double>(operation_timeout_)))
+    {
+      RCLCPP_ERROR(
+        get_logger(), "motion gate service unavailable at %s", stage.c_str());
+      return false;
+    }
+    auto request = std::make_shared<pi_arm_interfaces::srv::SetMotionArmed::Request>();
+    request->armed = armed;
+    request->lease_id = lease_id;
+    auto future = motion_arm_client_->async_send_request(request);
+    if (future.wait_for(std::chrono::duration<double>(operation_timeout_)) !=
+      std::future_status::ready)
+    {
+      RCLCPP_ERROR(get_logger(), "motion gate timeout at %s", stage.c_str());
+      return false;
+    }
+    const auto response = future.get();
+    if (!response->success || response->armed != armed) {
+      RCLCPP_ERROR(
+        get_logger(), "motion gate rejected at %s: success=%d armed=%d message=%s",
+        stage.c_str(), response->success ? 1 : 0, response->armed ? 1 : 0,
+        response->message.c_str());
+      return false;
+    }
+    RCLCPP_INFO(
+      get_logger(), "motion gate armed=%d lease=%llu at %s: %s",
+      armed ? 1 : 0, static_cast<unsigned long long>(lease_id), stage.c_str(),
+      response->message.c_str());
+    return true;
   }
 
   void hardware_callback(const pi_arm_interfaces::msg::HardwareState::SharedPtr message)
@@ -998,7 +1042,18 @@ private:
     }
     point.time_from_start = rclcpp::Duration::from_seconds(duration);
     goal.trajectory.points.push_back(point);
-    complete_follow_action<DirectMove>(handle, goal, "direct_move");
+    const auto lease_id = active_task_id();
+    if (!set_motion_armed(true, lease_id, "direct_move/accepted")) {
+      throw std::runtime_error("failed to arm position writes for accepted direct_move");
+    }
+    try {
+      complete_follow_action<DirectMove>(handle, goal, "direct_move");
+    } catch (...) {
+      set_motion_armed(false, 0U, "direct_move/exception");
+      throw;
+    }
+    // Idempotent fallback for every early-return path in complete_follow_action().
+    set_motion_armed(false, lease_id, "direct_move/finished");
   }
 
   template<typename ActionT, typename GoalHandleT>
@@ -1062,6 +1117,13 @@ private:
     const std::shared_ptr<GoalHandleT> handle, const Follow::Goal & goal,
     const std::string & command)
   {
+    bool direct_disarmed = false;
+    const auto disarm_direct = [this, &command, &direct_disarmed](const std::string & stage) {
+        if (command == "direct_move" && !direct_disarmed) {
+          set_motion_armed(false, 0U, stage);
+          direct_disarmed = true;
+        }
+      };
     RCLCPP_INFO(
       get_logger(),
       "%s follow: waiting for action server '%s' (timeout=%.1fs)",
@@ -1070,6 +1132,7 @@ private:
       RCLCPP_ERROR(
         get_logger(), "%s follow: action server unavailable: %s",
         command.c_str(), follow_action_name_.c_str());
+      disarm_direct("direct_move/follow_server_unavailable");
       complete_action<ActionT>(handle, false, command, "trajectory controller unavailable");
       return;
     }
@@ -1080,12 +1143,14 @@ private:
     if (wait_future_logged(send_future, operation_timeout_, command + "/send_goal") !=
       std::future_status::ready)
     {
+      disarm_direct("direct_move/follow_goal_timeout");
       complete_action<ActionT>(handle, false, command, "trajectory goal timeout");
       return;
     }
     auto follow_handle = send_future.get();
     if (!follow_handle) {
       RCLCPP_ERROR(get_logger(), "%s follow: goal REJECTED by controller", command.c_str());
+      disarm_direct("direct_move/follow_goal_rejected");
       complete_action<ActionT>(handle, false, command, "trajectory goal rejected");
       return;
     }
@@ -1124,6 +1189,9 @@ private:
       std::lock_guard<std::mutex> lock(follow_mutex_);
       active_follow_goal_.reset();
     }
+    // Stop new real position frames before settling/result processing. The
+    // hardware service also purges queued position-control batches.
+    disarm_direct("direct_move/follow_result");
     complete_action<ActionT>(handle, backend_ok, command, detail);
   }
 
@@ -1192,6 +1260,9 @@ private:
   void request_stop()
   {
     stop_requested_.store(true);
+    // Force-release any lease before controller cancellation/hold handling.
+    // stop_motion remains a software stop, not an emergency stop.
+    set_motion_armed(false, 0U, "stop_or_cancel");
     if (move_group_) {
       move_group_->stop();
     }
@@ -1235,6 +1306,7 @@ private:
     const std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Request>,
     std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Response> response)
   {
+    set_motion_armed(false, 0U, "stop_motion/service");
     if (!task_claimed_.load()) {
       RCLCPP_INFO(get_logger(), "stop_motion: no active motion");
       response->success = true;
@@ -1283,6 +1355,7 @@ private:
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_client_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_client_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reset_client_;
+  rclcpp::Client<pi_arm_interfaces::srv::SetMotionArmed>::SharedPtr motion_arm_client_;
 
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_service_;
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_service_;

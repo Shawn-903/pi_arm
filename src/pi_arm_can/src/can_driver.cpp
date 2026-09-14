@@ -217,8 +217,12 @@ void CanDriver::stop() noexcept
 
 bool CanDriver::set_mode(const DriverMode requested)
 {
+  std::lock_guard<std::mutex> control_lock(control_tx_mutex_);
   const DriverMode current = mode_.load();
   if (requested == current) {
+    if (requested == DriverMode::MONITORING) {
+      discard_pending_control_batches();
+    }
     return true;
   }
   if (!running_.load() || current == DriverMode::FAULT ||
@@ -233,7 +237,32 @@ bool CanDriver::set_mode(const DriverMode requested)
     return false;
   }
   mode_.store(requested);
+  if (requested == DriverMode::MONITORING) {
+    discard_pending_control_batches();
+  }
   return true;
+}
+
+void CanDriver::discard_pending_control_batches() noexcept
+{
+  std::deque<TxBatch> discarded;
+  {
+    std::lock_guard<std::mutex> lock(tx_mutex_);
+    auto iterator = tx_queue_.begin();
+    while (iterator != tx_queue_.end()) {
+      if (iterator->requires_control) {
+        discarded.push_back(std::move(*iterator));
+        iterator = tx_queue_.erase(iterator);
+      } else {
+        ++iterator;
+      }
+    }
+  }
+  for (auto & batch : discarded) {
+    if (batch.completion) {
+      try {batch.completion->set_value(false);} catch (...) {}
+    }
+  }
 }
 
 std::string CanDriver::last_error() const
@@ -269,10 +298,12 @@ bool CanDriver::enqueue_batch(TxBatch batch, const bool high_priority)
 
 bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & commands)
 {
+  std::lock_guard<std::mutex> control_lock(control_tx_mutex_);
   if (mode_.load() != DriverMode::CONTROL || commands.empty()) {
     return false;
   }
   TxBatch batch;
+  batch.requires_control = true;
   batch.frames.reserve(commands.size());
   try {
     for (const auto & command : commands) {
@@ -444,11 +475,11 @@ void CanDriver::tx_loop() noexcept
     }
 
     if (have_batch) {
-      const bool success = write_batch(batch.frames);
+      const bool success = write_batch(batch.frames, batch.requires_control);
       if (batch.completion) {
         try {batch.completion->set_value(success);} catch (...) {}
       }
-      if (!success) {
+      if (!success && (!batch.requires_control || mode_.load() == DriverMode::FAULT)) {
         break;
       }
     }
@@ -465,8 +496,16 @@ void CanDriver::tx_loop() noexcept
   }
 }
 
-bool CanDriver::write_batch(const std::vector<CanFrame> & frames) noexcept
+bool CanDriver::write_batch(
+  const std::vector<CanFrame> & frames, const bool requires_control) noexcept
 {
+  std::unique_lock<std::mutex> control_lock(control_tx_mutex_, std::defer_lock);
+  if (requires_control) {
+    control_lock.lock();
+    if (mode_.load() != DriverMode::CONTROL) {
+      return false;
+    }
+  }
   for (const auto & frame : frames) {
     struct can_frame native {};
     native.can_id = frame.id;
