@@ -60,12 +60,20 @@ ros2 launch pi_arm_bringup bringup.launch.py hardware_type:=mock
 ros2 launch pi_arm_bringup bringup.launch.py hardware_type:=mock use_rviz:=false
 ```
 
-真实 CAN：
+真实 CAN 只读监控（不会启动 controller_manager、MoveIt、manager、WebSocket 或 RViz；CAN 仅轮询 `0x92/0x9A/0x9C`）：
 
 ```bash
 sudo bash scripts/setup_can.sh real can0 1000000
+ros2 launch pi_arm_bringup monitor.launch.py \
+  can_interface:=can0 calibration_file:=/绝对路径/approved-calibration.yaml
+```
+
+真实整栈默认仍禁止位置控制。只有标定已审批、指纹匹配、运动学有效、六电机反馈健康且全部使能后，才可由现场验收人员显式加入 `allow_real_control:=true`。普通开发和诊断不得开启此参数：
+
+```bash
 ros2 launch pi_arm_bringup bringup.launch.py \
-  hardware_type:=real can_interface:=can0 bitrate:=1000000 use_rviz:=false
+  hardware_type:=real can_interface:=can0 bitrate:=1000000 use_rviz:=false \
+  calibration_file:=/绝对路径/approved-calibration.yaml allow_real_control:=false
 ```
 
 仅检查模型：
@@ -88,6 +96,8 @@ ros2 launch pi_arm_moveit_config moveit_rviz.launch.py hardware_type:=mock
 - `use_rviz:=true|false`：是否启动 MoveIt RViz。
 - `use_manager:=true|false`、`use_websocket:=true|false`：是否启动业务管理和 WebSocket 代理。
 - `cable_kinematics_file:=...`：六轴绳索几何 YAML。默认使用安装后的 `pi_arm_description/config/cable_kinematics.yaml`，一般无需手动指定。
+- `calibration_file:=...`：打包姿态 ROM 零位的软件机械零位标定。模板为 `approved:false`，真实控制会失败关闭。
+- `allow_real_control:=false|true`：真实位置帧的最终人工门控，默认 `false`；Mock 不受该实机门控影响。
 
 ## 输出轴离线可视化
 
@@ -99,7 +109,7 @@ source install/setup.bash
 ros2 launch pi_arm_output_visualizer output_shaft_visualizer.launch.py
 ```
 
-输入话题为 `/pi_arm/output_shaft_states`，角度单位为弧度。无滑块界面时使用 `use_gui:=false`，无 RViz 时使用 `use_rviz:=false`。不要与 `pi_arm_description display.launch.py` 同时运行，因为两者都会发布 `/joint_states`。详细输入名称和手动发布示例见 [`src/pi_arm_output_visualizer/README.md`](src/pi_arm_output_visualizer/README.md)。离线显示成功只验证模型和消息链路，不能证明实机方向、零位、张力或安全性正确。
+输入话题为 `/pi_arm/model_output_shaft_states`，表示已进入 `model_output` 坐标的减速器输出轴角，单位为弧度。ROM 置零后的原始 `rom_relative_output` 不能直接输入；必须先加载审批且指纹匹配的标定并执行 `model_output = rom_relative_output + Δ`。无滑块界面时使用 `use_gui:=false`，无 RViz 时使用 `use_rviz:=false`。不要与 `pi_arm_description display.launch.py` 同时运行，因为两者都会发布 `/joint_states`。详细输入名称和手动发布示例见 [`src/pi_arm_output_visualizer/README.md`](src/pi_arm_output_visualizer/README.md)。离线显示成功只验证模型和消息链路，不能证明实机方向、零位、张力或安全性正确。
 
 ## SocketCAN 与 vcan
 
@@ -131,10 +141,10 @@ ros2 launch pi_arm_bringup bringup.launch.py \
 主要接口位于 `/pi_arm` 命名空间：
 
 - 状态：`/pi_arm/hardware_state`、`/pi_arm/state`。
-- 电机服务：`/pi_arm/enable_motor`、`disable_motor`、`reset_motor`、`set_zero`。
+- 电机服务：`/pi_arm/enable_motor`、`disable_motor`、`reset_motor`。普通 manager、WebSocket、网页和 ros2_control 辅助服务均不提供 ROM 置零。
 - 运动 Action：`/pi_arm/movej`、`movejs`、`movel`、`direct_move`。
 
-`HardwareState.enabled` 按 `joint_names` 表示关节依赖聚合后的可用状态；例如关闭电机 2 会使依赖它的多个关节变为不可用，但不代表这些电机控制器也已关闭。原始控制器状态必须读取按 `motor_ids` 对齐的 `motor_enabled`、`motor_errors`、`motor_moving`、`motor_fresh`、`motor_error_codes` 和 `motor_ages_sec`。WebSocket 保留旧的关节级 `enabled` 字段并新增 `joint_enabled`；网页显示单台电机状态时必须改用 `motor_ids` 和 `motor_enabled`，不能由关节状态反推电机状态。
+`HardwareState.connected` 只表示驱动与 SocketCAN 在线；`calibrated`、`kinematics_valid` 和 `control_permitted` 分别表示标定有效、运动学输出有效和真实控制许可。原始协议角、ROM 相对输出轴角、软件偏置和模型输出轴角分别在 `raw_protocol_positions_deg`、`raw_output_positions_rad`、`software_output_offsets_rad`、`model_output_positions_rad`。`HardwareState.enabled` 按 `joint_names` 表示关节依赖聚合后的可用状态；例如关闭电机 2 会使依赖它的多个关节变为不可用，但不代表这些电机控制器也已关闭。原始控制器状态必须读取按 `motor_ids` 对齐的 `motor_enabled`、`motor_errors`、`motor_moving`、`motor_fresh`、`motor_error_codes` 和 `motor_ages_sec`。WebSocket 保留旧的关节级 `enabled` 字段并新增 `joint_enabled`；网页显示单台电机状态时必须改用 `motor_ids` 和 `motor_enabled`，不能由关节状态反推电机状态。
 `enable_motor`/`disable_motor` 的 `motor_id=0` 表示全部六台电机，`1..6` 表示指定电机。两者只在反馈完整且新鲜、无 FAULT、连续三帧静止且没有运动任务占用时执行；整机为 `READY` 或部分使能导致的 `DISABLED` 均可继续逐台操作。若新鲜原始反馈已经确认目标电机处于请求状态，服务以成功返回而不重复下发管理命令。
 - 停止服务：`/pi_arm/stop_motion`。这是软件层停止请求，不是机械急停。
 - MoveIt/控制器：`/joint_trajectory_controller/follow_joint_trajectory`。
@@ -144,7 +154,7 @@ ros2 launch pi_arm_bringup bringup.launch.py \
 
 WebSocket 服务当前没有鉴权和 TLS，只能用于隔离的可信网络。网页关闭、WebSocket 断开或网线拔出不会自动调用 `stop_motion`，也不保证正在执行的运动停止；安全停机必须依靠独立、可验证的机械急停和断能措施。
 
-本 Git 仓库当前不包含网页前端。若在仓库上级项目目录另行放置 `control.html`，它不会被 ROS 构建或安装，也不会随本仓库单独克隆；部署时需要单独复制，并把其中的 WebSocket 地址配置为树莓派实际 IP。
+仓库包含静态网页 [`web/control.html`](web/control.html)。它不由 `colcon` 安装或托管，可通过可信局域网内的静态 HTTP 服务器打开；页面中填写 `ws://<树莓派IP>:8765` 后手动连接。页面已按六主动关节和 CAN ID 1～6 区分关节状态与原始电机状态，并在 `control_permitted=false` 时禁用运动按钮。
 
 ## 配置单一数据源
 
@@ -160,10 +170,44 @@ WebSocket 服务当前没有鉴权和 TLS，只能用于隔离的可信网络。
 
 绳索参数、公式、软件分层和实机标定要求见：
 
-- [`docs/绳索运动学文档/绳索运动学模型说明_整理版.md`](docs/绳索运动学文档/绳索运动学模型说明_整理版.md)
-- [`docs/04_ROS2_control控制链.md`](docs/04_ROS2_control控制链.md)
+- [`docs/05 绳索运动学.md`](docs/05%20绳索运动学.md)
+- [`docs/04 ROS2_control控制链.md`](docs/04%20ROS2_control控制链.md)
 
-`/pi_arm/hardware/set_zero` 的 0x19 操作只允许整机执行（请求中的 `motor_id` 必须为 `0`）。电机应答表示零位已写入 ROM，必须重新上电并重新启动硬件生命周期后才按新零位工作；写零成功后后端会停留在监控模式，不要频繁写入。
+## 打包姿态 ROM 零位与软件机械零位
+
+机械模型零位仍定义为机械臂完全竖直的 `q=0`。ROM 零位可在可重复打包工装姿态 `q_pack` 写入；软件偏置只在执行器坐标层使用：
+
+```text
+Δ = cable_forward(q_pack) - r_pack
+model_output = rom_relative_output + Δ
+rom_relative_command = cable_forward(joint_command) - Δ
+joint = cable_inverse(model_output)
+```
+
+标定唯一入口是 `calibration_file`。文件保存 `robot_id`、六主动关节顺序、CAN ID 1～6、`q_pack`、`r_pack`、`model_version: 3`、配置指纹和审批信息；偏置在加载时计算，不重复保存。配置指纹为 FNV-1a 漂移检测值，不是密码学签名或授权机制。仓库模板 [`src/pi_arm_hardware/config/pack_reference_calibration.template.yaml`](src/pi_arm_hardware/config/pack_reference_calibration.template.yaml) 未审批，不能开启真实控制。
+
+候选文件必须从展开后的当前 URDF 和当前绳索 YAML 生成，生成器始终写入 `approved: false`，不会接触 CAN：
+
+```bash
+xacro $(ros2 pkg prefix --share pi_arm_description)/urdf/pi_arm.urdf.xacro \
+  backend:=real cable_kinematics_file:=$(ros2 pkg prefix --share pi_arm_description)/config/cable_kinematics.yaml \
+  calibration_file:=/tmp/candidate.yaml allow_real_control:=false > /tmp/pi_arm.urdf
+ros2 run pi_arm_hardware pi_arm_calibration_candidate \
+  --robot-description /tmp/pi_arm.urdf --robot-id ROBOT_ID --calibration-id CAL_ID \
+  --packing-pose Q1_RAD Q2_RAD Q4_RAD Q5_RAD Q6_RAD Q9_RAD \
+  --raw-output-at-packing R1_RAD R2_RAD R3_RAD R4_RAD R5_RAD R6_RAD \
+  --output /tmp/candidate.yaml
+```
+
+ROM 写入只存在于本地 `pi_arm_rom_zero_cli`，默认 dry-run、独占 SocketCAN、检查六台电机反馈/错误/静止状态并写 JSONL 审计。`--yes` 只允许 `vcan*`；真实 `can0 --execute` 还必须输入交互确认短语。本阶段禁止在实机运行：
+
+```bash
+ros2 run pi_arm_can pi_arm_rom_zero_cli --interface vcan0
+# 仅用于独立 vcan 验收：
+ros2 run pi_arm_can pi_arm_rom_zero_cli --interface vcan0 --execute --yes
+```
+
+真实 ROM 写入成功后必须断电重启，再在工装中采集 `r_pack`。该工具不是普通控制 API，网页和 WebSocket 不接受 `set_zero`。
 
 验收：启动日志含 `MoveL TCP caps (compile-time)`；`ros2 param list /move_group --filter cartesian_limits` 应列出 Pilz 四项。
 

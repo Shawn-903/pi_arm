@@ -59,7 +59,7 @@ Xacro 文件 → 展开参数和宏 → URDF XML → robot_description
 
 当前项目的主模型是：
 
-[pi_arm.urdf.xacro](/C:/Users/zx152/Documents/Codex/pi-arm-main/pi-arm-main/src/pi_arm_description/urdf/pi_arm.urdf.xacro:1)
+[pi_arm.urdf.xacro](../src/pi_arm_description/urdf/pi_arm.urdf.xacro)
 
 文件开头定义了四个 Xacro 参数：
 
