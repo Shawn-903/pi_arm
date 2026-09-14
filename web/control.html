@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>机械臂 HMI 控制台</title>
+  <style>
+    :root {
+      --blue: #42A5F5;
+      --blue-pressed: #1E88E5;
+      --green: #43A047;
+      --green-pressed: #1B5E20;
+      --red: #EF5350;
+      --red-pressed: #B71C1C;
+      --line: #D1D9DE;
+      --line-active: #008000;
+      --text: #263238;
+      --muted: #607D8B;
+      --panel: #FFFFFF;
+      --bg: #F2F5F7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 13px;
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 6px;
+      display: grid;
+      grid-template-columns: minmax(480px, 1fr) minmax(560px, 1fr);
+      gap: 6px;
+    }
+
+    fieldset {
+      margin: 0;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--panel);
+      min-width: 0;
+    }
+
+    legend {
+      padding: 0 8px;
+      color: #263238;
+      font-weight: 600;
+    }
+
+    .left,
+    .right {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .left {
+      grid-template-rows: auto auto;
+      align-content: start;
+      row-gap: 14px;
+    }
+
+    .right {
+      grid-template-rows: auto 1fr;
+    }
+
+    .toolbar,
+    .inline-form,
+    .endpoint-row,
+    .overall-buttons {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .overall-buttons {
+      justify-content: space-between;
+    }
+
+    .safety-warning {
+      margin: 0 0 6px;
+      padding: 8px;
+      border: 1px solid #ef6c00;
+      border-radius: 5px;
+      background: #fff3e0;
+      color: #8a2d00;
+      font-weight: 600;
+    }
+
+    button {
+      min-width: 62px;
+      min-height: 30px;
+      padding: 4px 8px;
+      border: 0;
+      border-radius: 5px;
+      color: #fff;
+      font-size: 13px;
+      text-align: center;
+      cursor: pointer;
+      transition: filter 120ms ease, transform 80ms ease;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      filter: grayscale(0.55) opacity(0.7);
+    }
+
+    .btn-primary {
+      min-height: 38px;
+      background: var(--blue);
+      font-size: 14px;
+      font-weight: 700;
+      font-family: "Segoe UI", sans-serif;
+    }
+
+    .btn-primary:active {
+      background: var(--blue-pressed);
+    }
+
+    .btn-green {
+      background: var(--green);
+    }
+
+    .btn-green:active {
+      background: var(--green-pressed);
+    }
+
+    .btn-red {
+      background: var(--red);
+    }
+
+    .btn-red:active {
+      background: var(--red-pressed);
+    }
+
+    input,
+    select {
+      min-height: 30px;
+      padding: 4px 6px;
+      border: 1px solid #B0BEC5;
+      border-radius: 3px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      min-width: 0;
+    }
+
+    input[readonly] {
+      background: #F5F7F8;
+      color: #455A64;
+    }
+
+    .readonly-grid {
+      display: grid;
+      grid-template-columns: auto minmax(80px, 1fr) auto minmax(80px, 1fr) auto minmax(80px, 1fr);
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      border: 1px solid #CFD8DC;
+      padding: 5px 4px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #ECEFF1;
+      color: #263238;
+      font-weight: 700;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #FAFAFA;
+    }
+
+    .status-ok {
+      color: #2E7D32;
+      font-weight: 700;
+    }
+
+    .status-warn {
+      color: #EF6C00;
+      font-weight: 700;
+    }
+
+    .status-error {
+      color: #C62828;
+      font-weight: 700;
+    }
+
+    .status-muted {
+      color: var(--muted);
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .tab-head {
+      display: flex;
+      gap: 2px;
+      border-bottom: 1px solid #B0BEC5;
+    }
+
+    .tab-button {
+      min-height: 30px;
+      min-width: 110px;
+      border-radius: 4px 4px 0 0;
+      background: #ECEFF1;
+      color: #263238;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid #B0BEC5;
+      border-bottom: 0;
+    }
+
+    .tab-button.active {
+      background: #fff;
+      color: #1565C0;
+    }
+
+    .tab-panel {
+      display: none;
+      padding-top: 6px;
+      min-height: 0;
+      overflow: auto;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .motor-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .motor-card {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      gap: 6px;
+      align-items: center;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
+    }
+
+    .motor-card:first-child {
+      border-color: var(--line-active);
+    }
+
+    .motor-title {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .motor-controls {
+      display: grid;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 170px repeat(2, 66px);
+      column-gap: 14px;
+      row-gap: 5px;
+      align-items: center;
+    }
+
+    .input-pair {
+      display: grid;
+      grid-template-columns: 78px 86px;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .joint-grid {
+      display: grid;
+      gap: 6px;
+    }
+
+    .joint-row {
+      display: grid;
+      grid-template-columns: 110px minmax(120px, 1fr);
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pose-control-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .pose-control-grid {
+      display: grid;
+      gap: 6px;
+    }
+
+    .pose-control-grid .joint-row {
+      grid-template-columns: 70px minmax(100px, 1fr);
+      gap: 8px;
+    }
+
+    .motion-params {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .param-card[hidden] {
+      display: none;
+    }
+
+    .param-card {
+      min-width: 0;
+    }
+
+    .line-param-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .line-param-grid .joint-row {
+      grid-template-columns: 104px 70px;
+      gap: 4px;
+    }
+
+    .line-param-grid input {
+      width: 70px;
+    }
+
+    .joint-param-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .joint-param-grid .joint-row {
+      grid-template-columns: 104px 70px;
+      gap: 4px;
+    }
+
+    .joint-param-grid input {
+      width: 70px;
+    }
+
+    @media (max-width: 1080px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .left {
+        grid-template-rows: auto auto auto;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .readonly-grid,
+      .control-row,
+      .pose-control-row,
+      .motion-params,
+      .joint-param-grid,
+      .line-param-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .input-pair {
+        grid-template-columns: 90px 1fr;
+      }
+
+      .motor-card {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="safety-warning">仅限隔离可信网络：服务端无鉴权、无 TLS。网页或网线断开不会自动停止运动；stop_motion 只是软件停止请求，不是急停。实机必须配置独立物理急停和现场监护。</div>
+  <fieldset>
+    <legend>WebSocket 连接</legend>
+    <div class="endpoint-row">
+      <label for="wsUrl">地址</label>
+      <input id="wsUrl" type="text" value="" placeholder="ws://树莓派IP:8765">
+      <button id="connectBtn" class="btn-primary">连接</button>
+      <button id="disconnectBtn" class="btn-red">断开</button>
+      <span id="safetyState">未连接 / 禁止运动</span>
+    </div>
+  </fieldset>
+  <main class="app">
+    <section class="left">
+      <fieldset>
+        <legend>关节状态</legend>
+        <table aria-label="关节状态表">
+          <thead>
+            <tr>
+              <th>关节</th>
+              <th>角度(°)</th>
+              <th>速度(°/s)</th>
+              <th>使能</th>
+              <th>错误</th>
+              <th>运动</th>
+              <th>状态更新时间</th>
+            </tr>
+          </thead>
+          <tbody id="jointStatusBody"></tbody>
+        </table>
+      </fieldset>
+
+      <fieldset>
+        <legend>原始电机状态（CAN ID 1～6）</legend>
+        <table aria-label="原始电机状态表">
+          <thead><tr><th>CAN ID</th><th>协议角度(°)</th><th>使能</th><th>错误</th><th>新鲜</th></tr></thead>
+          <tbody id="motorStatusBody"></tbody>
+        </table>
+      </fieldset>
+
+      <fieldset>
+        <legend>末端状态</legend>
+        <div class="readonly-grid">
+          <label>末端位置(mm)：</label>
+          <input id="endX" type="text" readonly value="--">
+          <label>Y</label>
+          <input id="endY" type="text" readonly value="--">
+          <label>Z</label>
+          <input id="endZ" type="text" readonly value="--">
+        </div>
+        <div class="readonly-grid">
+          <label>末端姿态(°)：</label>
+          <input id="endRx" type="text" readonly value="--">
+          <label>RY</label>
+          <input id="endRy" type="text" readonly value="--">
+          <label>RZ</label>
+          <input id="endRz" type="text" readonly value="--">
+        </div>
+      </fieldset>
+
+    </section>
+
+    <section class="right">
+      <fieldset>
+        <legend>总体控制</legend>
+        <div class="overall-buttons">
+          <button class="btn-primary" data-cmd="enable_motor" data-motor-id="0">所有关节使能</button>
+          <button class="btn-primary" id="moveAllBtn" data-motion="true">所有关节运动</button>
+          <button class="btn-primary" data-cmd="reset_motor" data-motor-id="0">所有关节错误复位</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend></legend>
+        <div class="tabs">
+          <div class="tab-head" role="tablist">
+            <button class="tab-button active" data-tab="single">单关节控制</button>
+            <button class="tab-button" data-tab="multi">多关节控制</button>
+          </div>
+
+          <section id="single" class="tab-panel active" role="tabpanel">
+            <div id="motorList" class="motor-list"></div>
+          </section>
+
+          <section id="multi" class="tab-panel" role="tabpanel">
+            <fieldset>
+              <legend>关节</legend>
+              <div id="multiJointGrid" class="joint-grid"></div>
+            </fieldset>
+            <div class="pose-control-row">
+              <fieldset>
+                <legend>位置控制</legend>
+                <div class="pose-control-grid">
+                  <div class="joint-row">
+                    <label for="targetX">X(mm)</label>
+                    <input id="targetX" type="number" step="0.001" value="30">
+                  </div>
+                  <div class="joint-row">
+                    <label for="targetY">Y(mm)</label>
+                    <input id="targetY" type="number" step="0.001" value="30">
+                  </div>
+                  <div class="joint-row">
+                    <label for="targetZ">Z(mm)</label>
+                    <input id="targetZ" type="number" step="0.001" value="30">
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>姿态控制</legend>
+                <div class="pose-control-grid">
+                  <div class="joint-row">
+                    <label for="targetRx">RX(°)</label>
+                    <input id="targetRx" type="number" step="0.001" value="30">
+                  </div>
+                  <div class="joint-row">
+                    <label for="targetRy">RY(°)</label>
+                    <input id="targetRy" type="number" step="0.001" value="30">
+                  </div>
+                  <div class="joint-row">
+                    <label for="targetRz">RZ(°)</label>
+                    <input id="targetRz" type="number" step="0.001" value="30">
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+            <div class="motion-params">
+              <fieldset>
+                <legend>运动模式</legend>
+                <label><input type="radio" name="motionMode" value="joint" checked> 关节插补</label>
+                <label style="margin-left: 20px;"><input type="radio" name="motionMode" value="line"> 直线插补</label>
+              </fieldset>
+              <fieldset id="jointParamCard" class="param-card">
+                <legend>关节插补的参数</legend>
+                <div class="joint-param-grid">
+                  <div class="joint-row">
+                    <label for="multiSpeed">关节速度(°/s)</label>
+                    <input id="multiSpeed" type="number" min="1" step="1" value="30">
+                  </div>
+                  <div class="joint-row">
+                    <label for="jointAccel">加速度(°/s²)</label>
+                    <input id="jointAccel" type="number" min="0" step="0.001" value="30">
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset id="lineParamCard" class="param-card" hidden>
+                <legend>直线插补的参数</legend>
+                <div class="line-param-grid">
+                  <div class="joint-row">
+                    <label for="endSpeed">末端速度(mm/s)</label>
+                    <input id="endSpeed" type="number" step="0.001" value="5">
+                  </div>
+                  <div class="joint-row">
+                    <label for="lineAccel">加速度(mm/s²)</label>
+                    <input id="lineAccel" type="number" step="0.001" value="30">
+                  </div>
+                  <div class="joint-row">
+                    <label for="angularSpeed">角速度(°/s)</label>
+                    <input id="angularSpeed" type="number" step="0.001" value="30">
+                  </div>
+                  <div class="joint-row">
+                    <label for="angularAccel">角加速度(°/s²)</label>
+                    <input id="angularAccel" type="number" step="0.001" value="30">
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+            <div class="toolbar" style="justify-content: center; margin-top: 8px;">
+              <button id="multiMoveBtn" data-motion="true" class="btn-green" style="font-weight: 700;">运动</button>
+              <button id="multiStopBtn" class="btn-red" style="font-weight: 700;">停止</button>
+            </div>
+          </section>
+
+        </div>
+      </fieldset>
+    </section>
+  </main>
+
+  <script>
+    const defaultHost = window.location.hostname || "127.0.0.1";
+    const defaultWsUrl = new URLSearchParams(window.location.search).get("ws") || `ws://${defaultHost}:8765`;
+    const activeJointNames = ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"];
+    const MOTOR_COUNT = 6;
+    const motorIds = Array.from({ length: MOTOR_COUNT }, (_, index) => index + 1);
+
+    let ws = null;
+    let msgId = 1;
+    let lastState = null;
+
+    const els = {
+      jointStatusBody: document.getElementById("jointStatusBody"),
+      motorStatusBody: document.getElementById("motorStatusBody"),
+      motorList: document.getElementById("motorList"),
+      multiJointGrid: document.getElementById("multiJointGrid"),
+      multiSpeed: document.getElementById("multiSpeed"),
+      multiMoveBtn: document.getElementById("multiMoveBtn"),
+      multiStopBtn: document.getElementById("multiStopBtn"),
+      moveAllBtn: document.getElementById("moveAllBtn"),
+      jointParamCard: document.getElementById("jointParamCard"),
+      lineParamCard: document.getElementById("lineParamCard"),
+      endX: document.getElementById("endX"),
+      endY: document.getElementById("endY"),
+      endZ: document.getElementById("endZ"),
+      endRx: document.getElementById("endRx"),
+      endRy: document.getElementById("endRy"),
+      endRz: document.getElementById("endRz"),
+      wsUrl: document.getElementById("wsUrl"),
+      connectBtn: document.getElementById("connectBtn"),
+      disconnectBtn: document.getElementById("disconnectBtn"),
+      safetyState: document.getElementById("safetyState"),
+    };
+
+    function formatNumber(value, digits = 3) {
+      return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
+    }
+
+    function boolText(value) {
+      if (value === true) return "是";
+      if (value === false) return "否";
+      return "--";
+    }
+
+    function statusClass(value, badWhenTrue = false) {
+      if (value === undefined || value === null) return "status-muted";
+      if (badWhenTrue) return value ? "status-error" : "status-ok";
+      return value ? "status-ok" : "status-muted";
+    }
+
+    function log(message, payload) {
+      const time = new Date().toLocaleTimeString();
+      const suffix = payload === undefined ? "" : ` ${JSON.stringify(payload)}`;
+      console.info(`[${time}] ${message}${suffix}`);
+    }
+
+    let connectionState = "closed";
+
+    function refreshControlGate() {
+      const connected = connectionState === "connected";
+      const permitted = connected && lastState?.control_permitted === true;
+      document.querySelectorAll("button[data-cmd], #multiStopBtn, button[data-action='stop']")
+        .forEach((button) => { button.disabled = !connected; });
+      document.querySelectorAll("[data-motion='true'], button[data-action='move']")
+        .forEach((button) => { button.disabled = !permitted; });
+      els.safetyState.textContent = connected
+        ? (permitted ? "已连接 / 控制许可有效" : "已连接 / 禁止运动（检查标定、运动学和电机状态）")
+        : "未连接 / 禁止运动";
+    }
+
+    function setConnectionState(state) {
+      connectionState = state;
+      refreshControlGate();
+    }
+
+    function connect() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      setConnectionState("connecting");
+      const wsUrl = els.wsUrl.value.trim();
+      if (!/^ws:\/\//i.test(wsUrl)) {
+        log("地址必须使用 ws://；服务端不提供 TLS", { url: wsUrl });
+        setConnectionState("error");
+        return;
+      }
+      log("正在连接", { url: wsUrl });
+
+      ws = new WebSocket(wsUrl);
+
+      ws.addEventListener("open", () => {
+        setConnectionState("connected");
+        log("WebSocket 已连接");
+      });
+
+      ws.addEventListener("message", (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleMessage(data);
+        } catch (error) {
+          log("收到非法 JSON", { raw: event.data });
+        }
+      });
+
+      ws.addEventListener("close", () => {
+        setConnectionState("closed");
+        log("WebSocket 已关闭");
+      });
+
+      ws.addEventListener("error", () => {
+        setConnectionState("error");
+        log("WebSocket 连接错误");
+      });
+    }
+
+    function sendCommand(cmd, params = {}) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log("发送失败：WebSocket 未连接", { cmd, params });
+        return false;
+      }
+
+      const payload = {
+        type: "req",
+        msg_id: msgId++,
+        cmd,
+        params,
+      };
+      ws.send(JSON.stringify(payload));
+      log("发送命令", payload);
+      return true;
+    }
+
+    function handleMessage(data) {
+      if (data.type === "state") {
+        lastState = data;
+        updateState(data);
+        refreshControlGate();
+        return;
+      }
+
+      if (data.type === "rsp") {
+        const ok = data.code === 0;
+        log(ok ? "命令成功" : "命令失败", {
+          msg_id: data.msg_id,
+          code: data.code,
+          ms: data.ms,
+          data: data.data,
+        });
+        return;
+      }
+
+      log("收到未知消息", data);
+    }
+
+    function updateState(state) {
+      motorIds.forEach((motorId, index) => {
+        const row = document.querySelector(`[data-status-row="${motorId}"]`);
+        if (!row) return;
+
+        const angle = state.current_joint_angles?.[index];
+        const speed = state.current_speeds?.[index];
+        const enabled = state.enabled?.[index];
+        const hasError = state.has_error?.[index];
+        const inMotion = state.in_motion?.[index];
+        const updated = state.last_update_timestamps?.[index];
+
+        row.querySelector("[data-field='angle']").textContent = formatNumber(angle);
+        row.querySelector("[data-field='speed']").textContent = formatNumber(speed);
+        setCell(row, "enabled", boolText(enabled), statusClass(enabled));
+        setCell(row, "error", boolText(hasError), statusClass(hasError, true));
+        setCell(row, "motion", boolText(inMotion), statusClass(inMotion));
+        row.querySelector("[data-field='updated']").textContent = formatNumber(updated, 1);
+      });
+
+      motorIds.forEach((motorId, index) => {
+        const row = document.querySelector(`[data-motor-row="${motorId}"]`);
+        if (!row) return;
+        row.querySelector("[data-field='raw-angle']").textContent =
+          formatNumber(state.raw_protocol_positions_deg?.[index]);
+        setCell(row, "motor-enabled", boolText(state.motor_enabled?.[index]), statusClass(state.motor_enabled?.[index]));
+        setCell(row, "motor-error", boolText(state.motor_has_error?.[index]), statusClass(state.motor_has_error?.[index], true));
+        setCell(row, "motor-fresh", boolText(state.motor_fresh?.[index]), statusClass(state.motor_fresh?.[index]));
+      });
+
+      updatePose(state.pose);
+    }
+
+    function updatePose(pose) {
+      els.endX.value = formatNumber(pose?.x);
+      els.endY.value = formatNumber(pose?.y);
+      els.endZ.value = formatNumber(pose?.z);
+      els.endRx.value = formatNumber(pose?.roll);
+      els.endRy.value = formatNumber(pose?.pitch);
+      els.endRz.value = formatNumber(pose?.yaw);
+    }
+
+    function setCell(row, field, text, className) {
+      const cell = row.querySelector(`[data-field='${field}']`);
+      cell.textContent = text;
+      cell.className = className;
+    }
+
+    function buildStatusTable() {
+      els.jointStatusBody.innerHTML = motorIds.map((motorId, index) => `
+        <tr data-status-row="${motorId}">
+          <td>${activeJointNames[index]}</td>
+          <td data-field="angle">--</td>
+          <td data-field="speed">--</td>
+          <td data-field="enabled" class="status-muted">--</td>
+          <td data-field="error" class="status-muted">--</td>
+          <td data-field="motion" class="status-muted">--</td>
+          <td data-field="updated">--</td>
+        </tr>
+      `).join("");
+      els.motorStatusBody.innerHTML = motorIds.map((motorId) => `
+        <tr data-motor-row="${motorId}">
+          <td>${motorId}</td><td data-field="raw-angle">--</td>
+          <td data-field="motor-enabled" class="status-muted">--</td>
+          <td data-field="motor-error" class="status-muted">--</td>
+          <td data-field="motor-fresh" class="status-muted">--</td>
+        </tr>`).join("");
+    }
+
+    function buildSingleMotorControls() {
+      els.motorList.innerHTML = motorIds.map((motorId) => `
+        <div class="motor-card">
+          <div class="motor-title">${activeJointNames[motorId - 1]} / CAN ${motorId}</div>
+          <div class="motor-controls">
+            <div class="control-row">
+              <span class="input-pair">
+                <label for="speed${motorId}">速度(°/s)</label>
+                <input id="speed${motorId}" type="number" min="1" step="1" value="30">
+              </span>
+              <button class="btn-green" data-cmd="enable_motor" data-motor-id="${motorId}">使能</button>
+              <button class="btn-red" data-cmd="disable_motor" data-motor-id="${motorId}">关闭</button>
+            </div>
+            <div class="control-row">
+              <span class="input-pair">
+                <label for="target${motorId}">目标(°)</label>
+                <input id="target${motorId}" type="number" step="0.001" value="30">
+              </span>
+              <button class="btn-green" data-motion="true" data-action="move" data-joint-id="${motorId}">运动</button>
+              <button class="btn-red" data-action="stop" data-joint-id="${motorId}">停止</button>
+            </div>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function buildJointInputs(container, prefix) {
+      container.innerHTML = motorIds.map((motorId) => `
+        <div class="joint-row">
+          <label for="${prefix}${motorId}">${activeJointNames[motorId - 1]}(°)</label>
+          <input id="${prefix}${motorId}" type="number" step="0.001" value="30">
+        </div>
+      `).join("");
+    }
+
+    function bindTabs() {
+      document.querySelectorAll(".tab-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          const target = button.dataset.tab;
+          document.querySelectorAll(".tab-button").forEach((item) => item.classList.toggle("active", item === button));
+          document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === target));
+        });
+      });
+    }
+
+    function bindCommands() {
+      document.querySelectorAll("input[name='motionMode']").forEach((radio) => {
+        radio.addEventListener("change", updateMotionMode);
+      });
+
+      document.addEventListener("click", (event) => {
+        const button = event.target.closest("button");
+        if (!button || button.disabled) return;
+
+        const cmd = button.dataset.cmd;
+        const motorId = Number(button.dataset.motorId);
+        if (cmd) {
+          sendCommand(cmd, { motor_id: motorId });
+          return;
+        }
+
+        const action = button.dataset.action;
+        const jointId = Number(button.dataset.jointId);
+        if (action === "move") {
+          const speed = readPositiveNumber(`speed${jointId}`, 360);
+          const target = readNumber(`target${jointId}`, 0);
+          sendCommand("motor_move", { joint_id: jointId, target_angle: target, max_speed: speed });
+        }
+
+        if (action === "stop") {
+          const speed = readPositiveNumber(`speed${jointId}`, 360);
+          sendCommand("motor_stop", { joint_id: jointId, max_speed: speed });
+        }
+      });
+
+      els.moveAllBtn.addEventListener("click", moveAllMotors);
+      els.multiMoveBtn.addEventListener("click", moveAllMotors);
+      els.multiStopBtn.addEventListener("click", stopAllMotors);
+      els.connectBtn.addEventListener("click", connect);
+      els.disconnectBtn.addEventListener("click", () => ws?.close());
+    }
+
+    function updateMotionMode() {
+      const mode = document.querySelector("input[name='motionMode']:checked")?.value ?? "joint";
+      els.jointParamCard.hidden = mode !== "joint";
+      els.lineParamCard.hidden = mode !== "line";
+    }
+
+    function readNumber(id, fallback) {
+      const value = Number(document.getElementById(id)?.value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function readPositiveNumber(id, fallback) {
+      return Math.max(1, Math.round(readNumber(id, fallback)));
+    }
+
+    function readPositiveFloat(id, fallback) {
+      const value = readNumber(id, fallback);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    }
+
+    function moveAllMotors() {
+      const mode = document.querySelector("input[name='motionMode']:checked")?.value ?? "joint";
+      if (mode === "line") {
+        const target = [
+          readNumber("targetX", 0),
+          readNumber("targetY", 0),
+          readNumber("targetZ", 0),
+          readNumber("targetRx", 0),
+          readNumber("targetRy", 0),
+          readNumber("targetRz", 0),
+        ];
+        const linear_vel = readPositiveFloat("endSpeed", 5);
+        const linear_acc = readPositiveFloat("lineAccel", 30);
+        const angular_vel = readPositiveFloat("angularSpeed", 30);
+        const angular_acc = readPositiveFloat("angularAccel", 30);
+        sendCommand("movel", { target, linear_vel, linear_acc, angular_vel, angular_acc });
+        return;
+      }
+      const target = motorIds.map((motorId) => readNumber(`multiJoint${motorId}`, readNumber(`target${motorId}`, 0)));
+      const vel = readPositiveFloat("multiSpeed", 30);
+      const acc = readPositiveFloat("jointAccel", 30);
+      sendCommand("movej", { target, vel, acc });
+    }
+
+    function stopAllMotors() {
+      sendCommand("stop_motion");
+    }
+
+    function init() {
+      els.wsUrl.value = defaultWsUrl;
+      buildStatusTable();
+      buildSingleMotorControls();
+      buildJointInputs(els.multiJointGrid, "multiJoint");
+      bindTabs();
+      bindCommands();
+      updateMotionMode();
+      setConnectionState("closed");
+      log("页面初始化完成", { motor_count: MOTOR_COUNT, ws_url: els.wsUrl.value });
+    }
+
+    init();
+  </script>
+</body>
+</html>
