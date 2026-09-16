@@ -151,6 +151,12 @@ ros2 launch pi_arm_bringup bringup.launch.py \
 - MoveIt/控制器：`/joint_trajectory_controller/follow_joint_trajectory`。
 - WebSocket：服务端默认监听 `0.0.0.0:8765`；其他设备上的客户端应连接 `ws://<树莓派IP>:8765`。JSON 请求由 `pi_arm_websocket` 转换到上述 ROS 接口，状态由 `/pi_arm/state` 推送。
 
+运动 Action 的终态与结果必须同时判断。客户端主动取消返回 `CANCELED`、`success=true`、`code=0`；由 `stop_motion` 中止的原运动返回 `ABORTED`、`success=false`、`code=3003`。运行中硬件反馈失联、故障或失能分别返回 `ABORTED`、`success=false` 和 `code=3101/3102/3103`，同时将任务标记为 `FAILED`，不得把硬件故障解释为一次成功运动。`stop_motion` 服务本身成功只表示停止请求已被接受，不表示原运动成功完成。
+
+硬件 deactivate/cleanup 会解除位置写入租约、清除待发送的控制批次并停止 CAN driver，但当前不会自动发送 `0x80`。因此 ROS 进程退出、Ctrl-C 或网络断开都不能证明电机已经失能；真实系统仍必须使用经过单独验收的 disable 流程以及独立的硬件急停和断能链路。是否在进程退出时自动发送 `0x80` 属于实机安全策略，不由普通清理路径隐式决定。
+
+Ubuntu 24.04/Jazzy 的 MoveIt 2.12.4 存在可重复的上游退出缺陷：`move_group` 在 SIGINT/SIGTERM 清理时可能沿 `MoveItCpp`/`TrajectoryExecutionManager`/`rclcpp::CallbackGroup` 析构链以 `-11` 退出。该现象与 MoveIt 官方开放问题 [moveit2#3680](https://github.com/moveit/moveit2/issues/3680) 和 [moveit2#3721](https://github.com/moveit/moveit2/issues/3721) 一致。不要屏蔽该退出码或把它记为完整 bringup 通过；应使用 `apt-cache policy ros-jazzy-moveit ros-jazzy-moveit-ros-move-group` 记录实际版本，并在上游修复版本可用后重新执行 mock/vcan 的启动与清理测试。该上游崩溃不改变“退出前必须先解除写入 gate”的项目要求。
+
 可用 `ros2 interface show pi_arm_interfaces/action/MoveJ`、`ros2 action list`、`ros2 service list` 和 `ros2 topic echo /pi_arm/state` 查询实际字段与运行状态。
 
 WebSocket 服务当前没有鉴权和 TLS，只能用于隔离的可信网络。网页关闭、WebSocket 断开或网线拔出不会自动调用 `stop_motion`，也不保证正在执行的运动停止；安全停机必须依靠独立、可验证的机械急停和断能措施。

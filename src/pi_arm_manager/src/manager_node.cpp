@@ -28,6 +28,7 @@
 #include "pi_arm_interfaces/srv/set_motion_armed.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
 #include "pi_arm_manager/management_gate.hpp"
+#include "pi_arm_manager/motion_stop_reason.hpp"
 #include "pi_arm_manager/state_aggregator.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -110,6 +111,7 @@ public:
   : Node("pi_arm_manager"),
     task_claimed_(false),
     stop_requested_(false),
+    stop_reason_(MotionStopReason::NONE),
     next_task_id_(1),
     still_frames_(0),
     linear_velocity_limit_(kMaxTransVelMps),
@@ -428,22 +430,22 @@ private:
       message->velocities.begin(), message->velocities.end(),
       [this](double v) {return std::isfinite(v) && std::abs(v) <= still_velocity_;});
     still_frames_.store(no_motion ? std::min(3, still_frames_.load() + 1) : 0);
-    bool stop_for_hardware = false;
+    MotionStopReason hardware_stop_reason = MotionStopReason::NONE;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
       hardware_ = *message;
       last_hardware_time_ = now();
       const auto state = aggregate_state(hardware_, task_);
-      stop_for_hardware = task_claimed_.load() &&
-        (state == pi_arm_interfaces::msg::RobotState::DISCONNECTED ||
-        state == pi_arm_interfaces::msg::RobotState::FAULT ||
-        state == pi_arm_interfaces::msg::RobotState::DISABLED);
+      if (task_claimed_.load()) {
+        hardware_stop_reason = motion_stop_reason_for_robot_state(state);
+      }
     }
-    if (stop_for_hardware) {
+    if (hardware_stop_reason != MotionStopReason::NONE) {
       RCLCPP_WARN(
         get_logger(),
-        "stopping active task due to hardware state change (disconnected/fault/disabled)");
-      request_stop();
+        "stopping active task due to hardware state change: %s",
+        motion_stop_reason_name(hardware_stop_reason));
+      request_stop(hardware_stop_reason);
     }
   }
 
@@ -523,6 +525,7 @@ private:
   void begin_task(const std::string & command)
   {
     stop_requested_.store(false);
+    stop_reason_.store(MotionStopReason::NONE);
     still_frames_.store(0);
     std::lock_guard<std::mutex> lock(state_mutex_);
     task_.task_id = next_task_id_.fetch_add(1);
@@ -802,7 +805,7 @@ private:
   rclcpp_action::CancelResponse cancel_common(const std::shared_ptr<GoalHandleT>)
   {
     RCLCPP_WARN(get_logger(), "motion cancel requested");
-    request_stop();
+    request_stop(MotionStopReason::ACTION_CANCEL);
     return rclcpp_action::CancelResponse::ACCEPT;
   }
 
@@ -1207,11 +1210,20 @@ private:
       stop_requested_.load() ? 1 : 0, handle->is_canceling() ? 1 : 0, still_frames_.load());
     auto result = std::make_shared<typename ActionT::Result>();
     if (handle->is_canceling() || stop_requested_.load()) {
-      result->success = true;
-      result->code = 0;
-      result->message = "motion stopped";
-      finish_task(pi_arm_interfaces::msg::TaskState::CANCELED, 0, result->message);
-      if (handle->is_canceling()) {
+      auto reason = stop_reason_.load();
+      if (reason == MotionStopReason::NONE) {
+        reason = handle->is_canceling() ? MotionStopReason::ACTION_CANCEL :
+          MotionStopReason::STOP_SERVICE;
+      }
+      const auto outcome = motion_stop_outcome(reason);
+      result->success = outcome.success;
+      result->code = outcome.code;
+      result->message = outcome.message;
+      finish_task(outcome.task_status, outcome.code, result->message);
+      RCLCPP_WARN(
+        get_logger(), "%s terminated by %s: code=%d message=%s",
+        command.c_str(), motion_stop_reason_name(reason), result->code, result->message.c_str());
+      if (reason == MotionStopReason::ACTION_CANCEL && handle->is_canceling()) {
         handle->canceled(result);
       } else {
         handle->abort(result);
@@ -1257,12 +1269,27 @@ private:
     handle->succeed(result);
   }
 
-  void request_stop()
+  void record_stop_reason(const MotionStopReason reason)
   {
-    stop_requested_.store(true);
+    auto current = stop_reason_.load();
+    while (motion_stop_priority(reason) > motion_stop_priority(current) &&
+      !stop_reason_.compare_exchange_weak(current, reason))
+    {
+      // compare_exchange updates current; retry only while the new reason has
+      // greater diagnostic priority than the reason recorded by another thread.
+    }
+  }
+
+  void request_stop(const MotionStopReason reason)
+  {
+    record_stop_reason(reason);
+    const bool already_stopping = stop_requested_.exchange(true);
     // Force-release any lease before controller cancellation/hold handling.
     // stop_motion remains a software stop, not an emergency stop.
     set_motion_armed(false, 0U, "stop_or_cancel");
+    if (already_stopping) {
+      return;
+    }
     if (move_group_) {
       move_group_->stop();
     }
@@ -1315,7 +1342,7 @@ private:
       return;
     }
     RCLCPP_WARN(get_logger(), "stop_motion: requesting stop of active task");
-    request_stop();
+    request_stop(MotionStopReason::STOP_SERVICE);
     response->success = true;
     response->code = 0;
     response->message = "stop requested";
@@ -1343,6 +1370,7 @@ private:
   rclcpp::Time last_hardware_time_{0, 0, RCL_ROS_TIME};
   std::atomic_bool task_claimed_;
   std::atomic_bool stop_requested_;
+  std::atomic<MotionStopReason> stop_reason_;
   std::atomic_uint64_t next_task_id_;
   std::atomic_int still_frames_;
 
