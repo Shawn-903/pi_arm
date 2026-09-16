@@ -53,6 +53,7 @@ ManagementResult RealBackend::start_axis_test(
     origin.push_back(snapshot.at(actuator.motor_id).protocol_angle_deg);
   }
   auto target = origin;
+  double selected_protocol_speed_cap = 0.0;
   if (space == "motor") {
     const auto found = std::find_if(config_.actuators.begin(), config_.actuators.end(),
       [axis_id](const auto & actuator) {return actuator.motor_id == axis_id;});
@@ -68,33 +69,56 @@ ManagementResult RealBackend::start_axis_test(
     {
       return {false, 2001, "joint test requires valid calibration/kinematics and all motors enabled"};
     }
-    pi_arm_transmission::Vector6 joints{}, outputs{}, start_outputs{};
+    pi_arm_transmission::Vector6 joints{}, outputs{};
     for (size_t i = 0; i < 6; ++i) {
       joints[i] = sample.positions_rad[i];
-      start_outputs[i] = sample.model_output_positions_rad[i];
     }
+    pi_arm_transmission::Matrix6 start_jacobian{}, end_jacobian{};
+    kinematics_.jacobian(joints, start_jacobian);
     joints[axis_id - 1] += delta_deg * kRad;
+    kinematics_.jacobian(joints, end_jacobian);
+    const size_t selected = static_cast<size_t>(axis_id - 1);
+    // The chord axes change their velocity gain along the path. Use the
+    // smaller endpoint gain so the chosen joint's speed limit is not raised.
+    selected_protocol_speed_cap = speed_deg_s * config_.actuators[selected].protocol_angle_ratio *
+      std::min(std::abs(start_jacobian[selected][selected]),
+      std::abs(end_jacobian[selected][selected]));
     if (!kinematics_.joint_to_output_position(joints, outputs)) {
       return {false, 1004, "joint-to-output mapping failed"};
-    }
-    // Motors interpolate output coordinates. Validate that path, including start/holds.
-    for (int step = 0; step <= 20; ++step) {
-      pi_arm_transmission::Vector6 intermediate{}, recovered{};
-      for (size_t i = 0; i < 6; ++i) {
-        intermediate[i] = start_outputs[i] + (outputs[i] - start_outputs[i]) * step / 20.0;
-      }
-      if (!kinematics_.check_output_position_limits(intermediate) ||
-        !kinematics_.output_to_joint_position(intermediate, recovered))
-      {return {false, 1004, "joint test path exceeds output limits or cannot be inverted"};}
-      for (size_t i = 0; i < 6; ++i) {
-        if (!std::isfinite(recovered[i]) || recovered[i] < config_.joint_lower_limits_rad[i] ||
-          recovered[i] > config_.joint_upper_limits_rad[i])
-        {return {false, 1004, "joint test start/target/path exceeds joint limits"};}
-      }
     }
     for (size_t i = 0; i < 6; ++i) {
       target[i] = model_output_position_to_protocol_deg(
         outputs[i], calibration_.software_output_offsets_rad[i], config_.actuators[i]);
+    }
+  }
+  // Validate the actual 0.01-degree targets sent on the wire, not unencoded floats.
+  for (auto & value : target) {value = std::round(value * 100.0) / 100.0;}
+  if (space == "joint") {
+    // No synchronized start/progress guarantee exists for independent A4 motors.
+    // Every asynchronous monotone combination lies in this output-coordinate
+    // box. For this triangular linear/asin cable model extrema occur at corners.
+    for (unsigned corner = 0; corner < 64; ++corner) {
+      pi_arm_transmission::Vector6 output{}, recovered{};
+      for (size_t i = 0; i < 6; ++i) {
+        output[i] = protocol_position_to_model_output_rad(
+          (corner & (1U << i)) ? target[i] : origin[i],
+          calibration_.software_output_offsets_rad[i], config_.actuators[i]);
+      }
+      if (!kinematics_.check_output_position_limits(output) ||
+        !kinematics_.output_to_joint_position(output, recovered))
+      {return {false, 1004, "asynchronous motor path exceeds output/inverse limits"};}
+      for (size_t i = 0; i < 6; ++i) {
+        if (!std::isfinite(recovered[i]) || recovered[i] < config_.joint_lower_limits_rad[i] ||
+          recovered[i] > config_.joint_upper_limits_rad[i])
+        {return {false, 1004, "asynchronous motor path exceeds joint limit: " +
+          config_.actuators[i].joint_name + "; reduce step or move away from limit"};}
+      }
+      pi_arm_transmission::Matrix6 encoded_jacobian{};
+      kinematics_.jacobian(recovered, encoded_jacobian);
+      const size_t selected = static_cast<size_t>(axis_id - 1);
+      selected_protocol_speed_cap = std::min(selected_protocol_speed_cap,
+        speed_deg_s * config_.actuators[selected].protocol_angle_ratio *
+        std::abs(encoded_jacobian[selected][selected]));
     }
   }
   const auto & session_origin = axis_test_session_origin_.empty() ? origin : axis_test_session_origin_;
@@ -108,6 +132,7 @@ ManagementResult RealBackend::start_axis_test(
     {return {false, 1004, "output step exceeds 0.5 deg or session displacement exceeds 2 deg"};}
     duration = std::max(duration, std::abs(output_delta) / kSpeedLimitDegS);
   }
+  double encoded_duration = 0.0;
   for (size_t i = 0; i < 6; ++i) {
     const auto & actuator = config_.actuators[i];
     if (std::abs(target[i] - origin[i]) < 0.005) {continue;}
@@ -115,8 +140,22 @@ ManagementResult RealBackend::start_axis_test(
     if (state.motor_state != 0x00U && state.motor_state != 0x30U) {
       return {false, 2001, "selected/coupled motor is not enabled"};
     }
-    commands.push_back({actuator.motor_id, target[i],
-      std::max(1.0, std::abs(target[i] - origin[i]) / duration)});
+    double speed_cap = std::min(std::abs(target[i] - origin[i]) / duration,
+      actuator.protocol_angle_ratio * kSpeedLimitDegS);
+    if (space == "motor") {
+      speed_cap = std::min(speed_cap, actuator.protocol_angle_ratio * speed_deg_s);
+    } else if (i == static_cast<size_t>(axis_id - 1)) {
+      speed_cap = std::min(speed_cap, selected_protocol_speed_cap);
+    }
+    const double encoded_speed = std::floor(speed_cap);
+    if (encoded_speed < 1.0) {
+      return {false, 1004, "speed below protocol resolution at CAN" +
+        std::to_string(actuator.motor_id) + "; minimum output speed=" +
+        std::to_string(1.0 / actuator.protocol_angle_ratio) +
+        " deg/s; choose a representable speed (joint tests include coupled motors)"};
+    }
+    encoded_duration = std::max(encoded_duration, std::abs(target[i] - origin[i]) / encoded_speed);
+    commands.push_back({actuator.motor_id, target[i], encoded_speed});
   }
   if (commands.empty()) {return {false, 1004, "step smaller than protocol resolution"};}
   if (!driver_->set_mode(pi_arm_can::DriverMode::CONTROL)) {
@@ -124,10 +163,11 @@ ManagementResult RealBackend::start_axis_test(
   }
   axis_test_commands_ = commands;
   axis_test_origin_protocol_ = origin;
+  axis_test_target_protocol_ = target;
   if (axis_test_session_origin_.empty()) {axis_test_session_origin_ = origin;}
   axis_test_space_ = space;
   axis_test_started_ = axis_test_heartbeat_ = std::chrono::steady_clock::now();
-  axis_test_timeout_sec_ = duration + 2.0;
+  axis_test_timeout_sec_ = encoded_duration + 2.0;
   axis_test_active_ = true;
   ++axis_test_id_;
   axis_test_status_ = "running: " + space + " axis=" + std::to_string(axis_id) +
@@ -177,6 +217,10 @@ void RealBackend::update_axis_test(const HardwareSample & sample)
     const auto state = driver_->motor_state(actuator.motor_id);
     const auto command = std::find_if(axis_test_commands_.begin(), axis_test_commands_.end(),
       [&](const auto & item) {return item.motor_id == actuator.motor_id;});
+    if (axis_test_space_ == "joint" &&
+      (state.protocol_angle_deg < std::min(axis_test_origin_protocol_[i], axis_test_target_protocol_[i]) - 1e-8 ||
+      state.protocol_angle_deg > std::max(axis_test_origin_protocol_[i], axis_test_target_protocol_[i]) + 1e-8))
+    {stop_axis_test("failed: motor left the validated asynchronous path"); return;}
     const double displacement = std::abs(state.protocol_angle_deg - axis_test_origin_protocol_[i]) /
       actuator.protocol_angle_ratio;
     if (displacement > kStepLimitDeg + 0.05 ||

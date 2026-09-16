@@ -46,6 +46,21 @@ TEST(StateAggregator, PhysicalMotionIsRunningWithoutTask)
   EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::RUNNING);
 }
 
+TEST(StateAggregator, PendingStopDoesNotTurnFinishingTaskIntoHardwareFailure)
+{
+  auto hardware = healthy_hardware();
+  TaskState task;
+  task.status = TaskState::RUNNING;
+  hardware.control_permitted = false;
+  hardware.motion_stop_pending = true;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::RUNNING);
+  task.status = TaskState::IDLE;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISABLED);
+  hardware.motion_stop_failed = true;
+  task.status = TaskState::RUNNING;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::FAULT);
+}
+
 TEST(StateAggregator, AppliesStrictPriority)
 {
   auto hardware = healthy_hardware();

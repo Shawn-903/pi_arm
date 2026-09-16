@@ -461,7 +461,8 @@
       <button data-axis-test="joint" data-sign="1">关节 + 步进</button>
     </div>
     <div id="jointTestReason" role="status"></div>
-    <button id="axisTestStop" class="btn-red">停止当前点动</button>
+    <p>低于电机可用最小速度的指令会被拒绝，其余速度向下取整。关节测试会检查耦合电机不同步时的运动范围；接近限位时可缩小步长，具体拒绝原因显示在日志中。</p>
+    <button id="axisTestStop" class="btn-red">停止当前点动 / 重试停止</button>
     <div id="axisTestStatus" role="status">尚无测试</div>
     <label>本次现场观察 <input id="axisObservation" type="text" placeholder="例如：CAN2 +，J2 朝前，J4 未动（注明观察方向）"></label>
     <button id="saveAxisObservation">保存到最近一次测试</button>
@@ -952,6 +953,8 @@
         if (!state.state_available) reasons.push("未收到新的硬件状态：检查监控进程、CAN 接口和启动终端日志");
         if (state.read_only) reasons.push("只读排查模式：控制服务关闭，故障不影响查看反馈");
         if (state.state_available) {
+          if (state.motion_stop_pending) reasons.push("正在等待电机停止确认，暂不允许新运动");
+          if (state.motion_stop_failed) reasons.push("停止未确认：运动已锁定，请重试停止并检查 CAN 反馈");
           if (!state.hardware_connected) reasons.push("硬件连接异常");
           if (!state.calibrated) reasons.push("标定无效：仍可查看原始电机反馈，模型角可能不可用");
           if (!state.kinematics_valid) reasons.push("运动学无效：关节角和末端姿态不作为有效反馈显示");
@@ -1011,8 +1014,11 @@
       document.getElementById("axisTestStop").disabled = connectionState !== "connected";
       const ratio = lastState?.protocol_angle_ratios?.[index];
       const direction = lastState?.motor_directions?.[index];
+      const minimumSpeed = Number.isFinite(ratio) && ratio > 0 ? 1 / ratio : null;
+      document.getElementById("motorTestSpeed").min = minimumSpeed === null ? "0.05" : String(Math.max(0.05, minimumSpeed));
       document.getElementById("motorTestReason").textContent =
         `CAN ${id} / 协议角 ${formatNumber(lastState?.raw_protocol_positions_deg?.[index], 6)}° / 配置减速比 ${ratio ?? "--"} / 当前 motor_direction ${direction ?? "--"}；` +
+        `最小输出轴速度 ${formatNumber(minimumSpeed, 6)}°/s；` +
         (motorOK ? "可测试（不依赖运动学反解）" : !fresh || !lastState?.motor_test_permitted
           ? "等待六电机反馈新鲜、无错误、静止，且没有其他测试；请查看下方诊断" : !enabled
           ? "请先使能所选电机" : "等待当前测试结束");

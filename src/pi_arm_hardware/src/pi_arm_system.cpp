@@ -129,6 +129,8 @@ PI_ARM_DEFINE_HAS_FIELD(motor_ages_sec);
 PI_ARM_DEFINE_HAS_FIELD(calibrated);
 PI_ARM_DEFINE_HAS_FIELD(kinematics_valid);
 PI_ARM_DEFINE_HAS_FIELD(control_permitted);
+PI_ARM_DEFINE_HAS_FIELD(motion_stop_pending);
+PI_ARM_DEFINE_HAS_FIELD(motion_stop_failed);
 PI_ARM_DEFINE_HAS_FIELD(calibration_id);
 PI_ARM_DEFINE_HAS_FIELD(raw_protocol_positions_deg);
 PI_ARM_DEFINE_HAS_FIELD(raw_output_positions_rad);
@@ -246,6 +248,10 @@ void fill_hardware_state_message(
   }
   if constexpr (has_control_permitted<MessageT>::value) {
     message.control_permitted = sample.control_permitted;
+  }
+  if constexpr (has_motion_stop_pending<MessageT>::value) {
+    message.motion_stop_pending = sample.motion_stop_pending;
+    message.motion_stop_failed = sample.motion_stop_failed;
   }
   if constexpr (has_calibration_id<MessageT>::value) {
     message.calibration_id = sample.calibration_id;
@@ -689,6 +695,11 @@ void PiArmSystem::publish_hardware_state()
   pi_arm_interfaces::msg::HardwareState message;
   fill_hardware_state_message(
     message, sample, joint_names_, backend_config_.actuators, backend_name_, node_->now());
+  message.can_interface = backend_config_.can_interface;
+  for (const auto & actuator : backend_config_.actuators) {
+    message.protocol_angle_ratios.push_back(actuator.protocol_angle_ratio);
+    message.motor_directions.push_back(actuator.motor_direction);
+  }
   state_publisher_->publish(std::move(message));
 }
 

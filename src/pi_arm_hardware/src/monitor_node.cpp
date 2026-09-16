@@ -250,6 +250,8 @@ private:
     message.calibrated = sample.calibrated;
     message.kinematics_valid = sample.kinematics_valid;
     message.control_permitted = false;
+    message.motion_stop_pending = sample.motion_stop_pending;
+    message.motion_stop_failed = sample.motion_stop_failed;
     message.calibration_id = sample.calibration_id;
     message.raw_protocol_positions_deg = sample.raw_protocol_positions_deg;
     message.raw_output_positions_rad = sample.raw_output_positions_rad;

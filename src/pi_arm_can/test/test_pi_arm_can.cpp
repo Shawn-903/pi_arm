@@ -32,6 +32,15 @@ TEST(Protocol, DecodesSigned56BitLimits)
     -(std::int64_t{1} << 55));
 }
 
+TEST(Protocol, NeverRaisesRequestedSpeedLimit)
+{
+  const auto frame = pi_arm_can::make_position_command(4U, 0.6, 1.8);
+  EXPECT_EQ(pi_arm_can::read_le<std::uint16_t>(&frame.data[2]), 1U);
+  EXPECT_THROW(pi_arm_can::make_position_command(4U, 0.6, 0.3), std::out_of_range);
+  EXPECT_THROW(pi_arm_can::make_position_command(1U, 1e300, 1.0), std::out_of_range);
+  EXPECT_THROW(pi_arm_can::make_position_command(1U, 0.0, 1e300), std::out_of_range);
+}
+
 TEST(Protocol, RejectsPositionCommandOutsideProtocolRanges)
 {
   EXPECT_THROW(

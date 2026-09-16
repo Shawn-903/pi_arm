@@ -26,7 +26,8 @@ inline uint8_t aggregate_state(
   {
     return pi_arm_interfaces::msg::RobotState::DISCONNECTED;
   }
-  if (std::any_of(hardware.errors.begin(), hardware.errors.end(), [](bool value) {return value;}) ||
+  if (hardware.motion_stop_failed ||
+    std::any_of(hardware.errors.begin(), hardware.errors.end(), [](bool value) {return value;}) ||
     std::any_of(
       hardware.error_codes.begin(), hardware.error_codes.end(),
       [](int32_t value) {return value != 0;}) ||
@@ -64,6 +65,9 @@ inline uint8_t aggregate_state(
     return pi_arm_interfaces::msg::RobotState::DISABLED;
   }
   if (!hardware.control_permitted) {
+    if (hardware.motion_stop_pending && task.status == pi_arm_interfaces::msg::TaskState::RUNNING) {
+      return pi_arm_interfaces::msg::RobotState::RUNNING;
+    }
     return pi_arm_interfaces::msg::RobotState::DISABLED;
   }
   if (task.status == pi_arm_interfaces::msg::TaskState::RUNNING ||

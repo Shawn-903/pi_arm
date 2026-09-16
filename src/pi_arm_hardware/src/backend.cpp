@@ -221,17 +221,14 @@ void RealBackend::activate()
 void RealBackend::deactivate() noexcept
 {
   control_permitted_.store(false);
-  motion_write_gate_.disarm();
-  if (driver_) {
-    driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
-  }
+  set_motion_armed(false, 0U);
 }
 
 void RealBackend::cleanup() noexcept
 {
   if (axis_test_active_) {stop_axis_test("stopped: process shutdown");}
   control_permitted_.store(false);
-  motion_write_gate_.disarm();
+  set_motion_armed(false, 0U);
   if (driver_) {
     driver_->stop();
     driver_.reset();
@@ -373,6 +370,23 @@ bool RealBackend::read(HardwareSample & sample) noexcept
           sample.kinematics_valid = true;
           sample.kinematics_error_code = "NONE";
           sample.kinematics_error_message.clear();
+          for (size_t i = 0; i < kAxisCount; ++i) {
+            if (recovered[i] < config_.joint_lower_limits_rad[i] ||
+              recovered[i] > config_.joint_upper_limits_rad[i])
+            {
+              sample.kinematics_valid = false;
+              sample.kinematics_error_code = "JOINT_POSITION_LIMIT";
+              sample.kinematics_error_axis = static_cast<int32_t>(i + 1);
+              sample.kinematics_error_value = recovered[i];
+              sample.kinematics_error_message = "joint limit exceeded: " +
+                config_.actuators[i].joint_name + " value=" + std::to_string(recovered[i]) +
+                " rad, limit=[" + std::to_string(config_.joint_lower_limits_rad[i]) + "," +
+                std::to_string(config_.joint_upper_limits_rad[i]) + "] rad";
+              sample.error_message = sample.kinematics_error_message;
+              output_limit_error[i] = true;
+              break;
+            }
+          }
         }
       }
     } else if (calibration_.valid) {
@@ -437,16 +451,27 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       std::all_of(motor_fresh.begin(), motor_fresh.end(), [](const bool value) {return value;});
     const bool any_motor_error =
       std::any_of(motor_error.begin(), motor_error.end(), [](const bool value) {return value;});
+    const auto stop_status = driver_->motion_stop_status();
+    const bool stopping = stop_status == pi_arm_can::MotionStopStatus::PENDING;
+    const bool stop_failed = stop_status == pi_arm_can::MotionStopStatus::FAILED;
+    sample.motion_stop_pending = stopping;
+    sample.motion_stop_failed = stop_failed;
+    if (stop_failed) {
+      sample.error_message = "STOP UNCONFIRMED: retry Stop; motion is inhibited";
+      sample.has_error.assign(kAxisCount, true);
+    } else if (stopping) {
+      sample.error_message = "waiting for motor stop acknowledgements";
+    }
     sample.control_permitted =
       config_.allow_real_control && calibration_.valid && sample.kinematics_valid &&
-      all_enabled && all_fresh && !any_motor_error;
+      all_enabled && all_fresh && !any_motor_error && !stopping && !stop_failed;
 
     control_permitted_.store(sample.control_permitted);
     if (!sample.control_permitted && !axis_test_active_) {
       // Feedback, calibration and kinematics validity are independent of an
       // accepted motion lease. Losing any prerequisite revokes the lease and
       // returns the CAN driver to read-only polling.
-      set_motion_armed(false, 0U);
+      disarm_motion(0U);
     }
     sample.driver_mode = pi_arm_can::to_string(driver_->mode());
     sample.motor_test_permitted = config_.commissioning && !axis_test_active_ &&
@@ -456,27 +481,60 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     return true;
   } catch (const std::exception & error) {
     control_permitted_.store(false);
-    set_motion_armed(false, 0U);
+    disarm_motion(0U);
     sample.error_message = error.what();
     return false;
   }
+}
+
+MotionArmResult RealBackend::disarm_motion(
+  const std::uint64_t lease_id, const bool retry_stop) noexcept
+{
+  std::lock_guard<std::mutex> lock(motion_mutex_);
+  if (!motion_write_gate_.disarm(lease_id)) {
+    return {false, true, "motion lease does not match the active lease"};
+  }
+  if (driver_ && (normal_motion_sent_ ||
+    // Lease zero is an explicit force-stop, including after a process restart
+    // when this backend cannot know what target the device last received.
+    (retry_stop && lease_id == 0U && !config_.read_only && !config_.commissioning) ||
+    (retry_stop && !config_.commissioning &&
+    driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED)))
+  {
+    std::vector<std::uint8_t> ids;
+    for (const auto & actuator : config_.actuators) {ids.push_back(actuator.motor_id);}
+    const bool requested = driver_->request_motor_stop(ids, retry_stop);
+    // The driver retains a failed-stop latch even if enqueue failed.
+    normal_motion_sent_ = false;
+    if (!requested) {return {false, false, "STOP UNCONFIRMED: motion inhibited; retry Stop"};}
+  }
+  if (driver_ && driver_->mode() != pi_arm_can::DriverMode::FAULT &&
+    driver_->mode() != pi_arm_can::DriverMode::OFFLINE)
+  {
+    driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
+  }
+  return {true, false, "real position writes disarmed"};
 }
 
 MotionArmResult RealBackend::set_motion_armed(
   const bool armed, const std::uint64_t lease_id) noexcept
 {
   if (!armed) {
-    if (!motion_write_gate_.disarm(lease_id)) {
-      return {false, true, "motion lease does not match the active lease"};
+    const auto result = disarm_motion(lease_id, true);
+    if (!result.success) {return result;}
+    if (driver_ && !config_.commissioning) {
+      const auto status = driver_->motion_stop_status();
+      if ((status == pi_arm_can::MotionStopStatus::PENDING && !driver_->wait_for_motor_stop()) ||
+        status == pi_arm_can::MotionStopStatus::FAILED)
+      {return {false, false, "STOP UNCONFIRMED: motion inhibited; retry Stop"};}
     }
-    if (driver_ && driver_->mode() != pi_arm_can::DriverMode::FAULT &&
-      driver_->mode() != pi_arm_can::DriverMode::OFFLINE)
-    {
-      driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
-    }
-    return {true, false, "real position writes disarmed"};
+    return {true, false, "position writes disarmed; sent motion stopped or no motion submitted"};
   }
 
+  std::lock_guard<std::mutex> lock(motion_mutex_);
+  if (driver_ && (driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::PENDING ||
+    driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED))
+  {return {false, false, "motor stop pending/unconfirmed"};}
   if (config_.read_only) {
     return {false, false, "read-only backend cannot arm position writes"};
   }
@@ -518,7 +576,7 @@ bool RealBackend::write(
       "write rejected: size/config mismatch (driver=%d pos=%zu vel=%zu actuators=%zu)",
       driver_ ? 1 : 0, positions_rad.size(), velocities_rad_s.size(),
       config_.actuators.size());
-    set_motion_armed(false, 0U);
+    disarm_motion(0U);
     return false;
   }
 
@@ -527,7 +585,7 @@ bool RealBackend::write(
     return true;
   }
   if (!control_permitted_.load()) {
-    set_motion_armed(false, 0U);
+    disarm_motion(0U);
     return true;
   }
   if (!std::all_of(positions_rad.begin(), positions_rad.end(), [](double value) {
@@ -538,29 +596,13 @@ bool RealBackend::write(
     }))
   {
     log_write_reject("write rejected: armed command contains a non-finite value");
-    set_motion_armed(false, 0U);
+    disarm_motion(0U);
     return false;
   }
+  const auto lease_id = motion_write_gate_.active_lease_id();
   if (!motion_write_gate_.permit_write(positions_rad, velocities_rad_s)) {
     // This is the captured idle/hold command, not a new controller command.
     return true;
-  }
-  if (driver_->mode() == pi_arm_can::DriverMode::EXCLUSIVE_MANAGEMENT) {
-    return true;
-  }
-  if (driver_->mode() == pi_arm_can::DriverMode::MONITORING &&
-    !driver_->set_mode(pi_arm_can::DriverMode::CONTROL))
-  {
-    log_write_reject("write rejected: failed to enter CONTROL for active motion lease");
-    set_motion_armed(false, 0U);
-    return false;
-  }
-  if (driver_->mode() != pi_arm_can::DriverMode::CONTROL) {
-    log_write_reject(
-      "write rejected: driver mode is not CONTROL (mode=%d)",
-      static_cast<int>(driver_->mode()));
-    set_motion_armed(false, 0U);
-    return false;
   }
 
   try {
@@ -571,7 +613,7 @@ bool RealBackend::write(
         log_write_reject(
           "write rejected: non-finite command at joint[%zu] pos=%.17g vel=%.17g",
           index, positions_rad[index], velocities_rad_s[index]);
-        set_motion_armed(false, 0U);
+        disarm_motion(0U);
         return false;
       }
       if (positions_rad[index] < config_.joint_lower_limits_rad[index] ||
@@ -581,7 +623,7 @@ bool RealBackend::write(
           "write rejected: position limit exceeded at joint[%zu] pos=%.17g lim=[%.17g,%.17g]",
           index, positions_rad[index],
           config_.joint_lower_limits_rad[index], config_.joint_upper_limits_rad[index]);
-        set_motion_armed(false, 0U);
+        disarm_motion(0U);
         return false;
       }
       joint_positions[index] = positions_rad[index];
@@ -595,7 +637,7 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: cable position mapping failed (%s axis=%zu value=%.17g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
-      set_motion_armed(false, 0U);
+      disarm_motion(0U);
       return false;
     }
     status = kinematics_.check_output_position_limits(output_positions);
@@ -605,7 +647,7 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: output-shaft limit exceeded at motor[%zu] value=%.17g lim=[%.17g,%.17g]",
         status.axis, status.value, limit.lower_position_rad, limit.upper_position_rad);
-      set_motion_armed(false, 0U);
+      disarm_motion(0U);
       return false;
     }
 
@@ -616,14 +658,14 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: cable velocity mapping failed (%s axis=%zu value=%.17g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
-      set_motion_armed(false, 0U);
+      disarm_motion(0U);
       return false;
     }
 
     pi_arm_transmission::Matrix6 jacobian{};
     status = kinematics_.jacobian(joint_positions, jacobian);
     if (!status) {
-      set_motion_armed(false, 0U);
+      disarm_motion(0U);
       return false;
     }
 
@@ -652,7 +694,12 @@ bool RealBackend::write(
             output_positions[index], calibration_.software_output_offsets_rad[index], actuator),
           protocol_speed});
     }
+    std::unique_lock<std::mutex> motion_lock(motion_mutex_);
+    if (!motion_write_gate_.armed() || motion_write_gate_.active_lease_id() != lease_id ||
+      !control_permitted_.load()) {return true;}
+    if (!driver_->set_mode(pi_arm_can::DriverMode::CONTROL)) {return true;}
     if (!driver_->enqueue_position_batch(commands)) {
+      motion_lock.unlock();
       if (!motion_write_gate_.armed() ||
         driver_->mode() == pi_arm_can::DriverMode::MONITORING)
       {
@@ -665,17 +712,18 @@ bool RealBackend::write(
       log_write_reject(
         "write rejected: enqueue_position_batch failed (%s)",
         detail.empty() ? "no detail" : detail.c_str());
-      set_motion_armed(false, 0U);
+      disarm_motion(0U);
       return false;
     }
+    normal_motion_sent_ = true;
     return true;
   } catch (const std::exception & error) {
     log_write_reject("write rejected: %s", error.what());
-    set_motion_armed(false, 0U);
+    disarm_motion(0U);
     return false;
   } catch (...) {
     log_write_reject("write rejected: unexpected exception");
-    set_motion_armed(false, 0U);
+    disarm_motion(0U);
     return false;
   }
 }
@@ -691,7 +739,10 @@ ManagementResult RealBackend::manage(
   }
   // Power and fault-management operations are never motion-authorizing. They
   // revoke an existing lease before any management frame is queued.
-  set_motion_armed(false, 0U);
+  const auto stopped = set_motion_armed(false, 0U);
+  if (!stopped.success && operation == pi_arm_can::ManagementOperation::MOTOR_RUN) {
+    return {false, 2002, stopped.message};
+  }
   if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
     return {
       false, 6,

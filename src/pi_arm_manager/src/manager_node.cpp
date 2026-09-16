@@ -1122,9 +1122,10 @@ private:
     const std::string & command)
   {
     bool direct_disarmed = false;
-    const auto disarm_direct = [this, &command, &direct_disarmed](const std::string & stage) {
+    bool stop_confirmed = true;
+    const auto disarm_direct = [this, &command, &direct_disarmed, &stop_confirmed](const std::string & stage) {
         if (command == "direct_move" && !direct_disarmed) {
-          set_motion_armed(false, 0U, stage);
+          stop_confirmed = set_motion_armed(false, active_task_id(), stage);
           direct_disarmed = true;
         }
       };
@@ -1196,6 +1197,7 @@ private:
     // Stop new real position frames before settling/result processing. The
     // hardware service also purges queued position-control batches.
     disarm_direct("direct_move/follow_result");
+    if (!stop_confirmed) {backend_ok = false; detail = "motor stop unconfirmed";}
     complete_action<ActionT>(handle, backend_ok, command, detail);
   }
 
@@ -1287,9 +1289,11 @@ private:
     const bool already_stopping = stop_requested_.exchange(true);
     // Force-release any lease before controller cancellation/hold handling.
     // stop_motion remains a software stop, not an emergency stop.
-    set_motion_armed(false, 0U, "stop_or_cancel");
     if (already_stopping) {
       return;
+    }
+    if (reason != MotionStopReason::STOP_SERVICE) {
+      set_motion_armed(false, 0U, "stop_or_cancel");
     }
     if (move_group_) {
       move_group_->stop();
@@ -1334,19 +1338,19 @@ private:
     const std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Request>,
     std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Response> response)
   {
-    set_motion_armed(false, 0U, "stop_motion/service");
+    const bool stopped = set_motion_armed(false, 0U, "stop_motion/service");
     if (!task_claimed_.load()) {
       RCLCPP_INFO(get_logger(), "stop_motion: no active motion");
-      response->success = true;
-      response->code = 0;
-      response->message = "no active motion";
+      response->success = stopped;
+      response->code = stopped ? 0 : 2002;
+      response->message = stopped ? "no active motion; stop confirmed" : "STOP UNCONFIRMED; retry Stop";
       return;
     }
     RCLCPP_WARN(get_logger(), "stop_motion: requesting stop of active task");
     request_stop(MotionStopReason::STOP_SERVICE);
-    response->success = true;
-    response->code = 0;
-    response->message = "stop requested";
+    response->success = stopped;
+    response->code = stopped ? 0 : 2002;
+    response->message = stopped ? "stop requested; motor stop confirmed" : "STOP UNCONFIRMED; retry Stop";
   }
 
   double hardware_timeout_;

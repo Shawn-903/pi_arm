@@ -224,6 +224,9 @@ void CanDriver::stop() noexcept
 bool CanDriver::set_mode(const DriverMode requested)
 {
   std::lock_guard<std::mutex> control_lock(control_tx_mutex_);
+  if (requested == DriverMode::CONTROL &&
+    (motion_stop_status_.load() == MotionStopStatus::PENDING ||
+    motion_stop_status_.load() == MotionStopStatus::FAILED)) {return false;}
   const DriverMode current = mode_.load();
   if (requested == current) {
     if (requested == DriverMode::MONITORING) {
@@ -304,6 +307,8 @@ bool CanDriver::enqueue_batch(TxBatch batch, const bool high_priority)
 
 bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & commands)
 {
+  if (motion_stop_status_.load() == MotionStopStatus::PENDING ||
+    motion_stop_status_.load() == MotionStopStatus::FAILED) {return false;}
   std::lock_guard<std::mutex> control_lock(control_tx_mutex_);
   if (mode_.load() != DriverMode::CONTROL || commands.empty()) {
     return false;
@@ -330,22 +335,70 @@ bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & comm
 
 bool CanDriver::stop_motors(const std::vector<std::uint8_t> & motor_ids)
 {
+  return request_motor_stop(motor_ids, true) && wait_for_motor_stop();
+}
+
+bool CanDriver::request_motor_stop(
+  const std::vector<std::uint8_t> & motor_ids, const bool retry_failed)
+{
   if (config_.read_only || motor_ids.empty()) {return false;}
-  std::unique_lock<std::mutex> operation_lock(management_mutex_);
   for (const auto id : motor_ids) {
     if (!validate_motor_id(id)) {return false;}
   }
-  if (!set_mode(DriverMode::MONITORING)) {return false;}
-  const auto requested_at = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> stop_lock(stop_mutex_);
+  if (motion_stop_status_.load() == MotionStopStatus::PENDING) {
+    return stop_motor_ids_ == motor_ids;
+  }
+  if (motion_stop_status_.load() == MotionStopStatus::FAILED && !retry_failed) {return false;}
+  motion_stop_status_.store(MotionStopStatus::PENDING);
+  stop_motor_ids_ = motor_ids;
+  if (!set_mode(DriverMode::MONITORING)) {
+    motion_stop_status_.store(MotionStopStatus::FAILED);
+    return false;
+  }
+  motor_stop_requested_at_ = std::chrono::steady_clock::now();
   TxBatch batch;
   for (const auto id : motor_ids) {batch.frames.push_back(make_request(id, Opcode::MOTOR_STOP));}
-  if (!enqueue_batch(std::move(batch), true)) {return false;}
-  std::unique_lock<std::shared_mutex> state_lock(state_mutex_);
-  return state_cv_.wait_for(state_lock, std::chrono::milliseconds(500), [&]() {
-    return std::all_of(motor_ids.begin(), motor_ids.end(), [&](const auto id) {
-      return states_.at(id).stop_ack_update > requested_at;
+  if (!enqueue_batch(std::move(batch), true)) {
+    motion_stop_status_.store(MotionStopStatus::FAILED);
+    return false;
+  }
+  return true;
+}
+
+void CanDriver::refresh_motor_stop()
+{
+  std::lock_guard<std::mutex> stop_lock(stop_mutex_);
+  if (motion_stop_status_.load() != MotionStopStatus::PENDING) {return;}
+  std::shared_lock<std::shared_mutex> state_lock(state_mutex_);
+  const bool confirmed = std::all_of(stop_motor_ids_.begin(), stop_motor_ids_.end(), [&](auto id) {
+      return states_.at(id).stop_ack_update > motor_stop_requested_at_;
     });
-  });
+  if (confirmed) {
+    motion_stop_status_.store(MotionStopStatus::CONFIRMED);
+  } else if (std::chrono::steady_clock::now() - motor_stop_requested_at_ >=
+    std::chrono::milliseconds(500))
+  {
+    motion_stop_status_.store(MotionStopStatus::FAILED);
+  }
+  stop_cv_.notify_all();
+}
+
+MotionStopStatus CanDriver::motion_stop_status()
+{
+  refresh_motor_stop();
+  return motion_stop_status_.load();
+}
+
+bool CanDriver::wait_for_motor_stop()
+{
+  {
+    std::unique_lock<std::mutex> lock(stop_mutex_);
+    stop_cv_.wait_until(lock, motor_stop_requested_at_ + std::chrono::milliseconds(500), [&]() {
+      return motion_stop_status_.load() != MotionStopStatus::PENDING;
+    });
+  }
+  return motion_stop_status() == MotionStopStatus::CONFIRMED;
 }
 
 bool CanDriver::execute_management(
@@ -359,6 +412,9 @@ bool CanDriver::execute_management(
   }
   std::unique_lock<std::mutex> operation_lock(management_mutex_);
   const DriverMode previous = mode_.load();
+  if (operation == ManagementOperation::MOTOR_RUN &&
+    (motion_stop_status_.load() == MotionStopStatus::PENDING ||
+    motion_stop_status_.load() == MotionStopStatus::FAILED)) {return false;}
   if (previous != DriverMode::MONITORING && previous != DriverMode::CONTROL) {
     return false;
   }
@@ -528,7 +584,9 @@ bool CanDriver::write_batch(
   std::unique_lock<std::mutex> control_lock(control_tx_mutex_, std::defer_lock);
   if (requires_control) {
     control_lock.lock();
-    if (mode_.load() != DriverMode::CONTROL) {
+    if (mode_.load() != DriverMode::CONTROL ||
+      motion_stop_status_.load() == MotionStopStatus::PENDING ||
+      motion_stop_status_.load() == MotionStopStatus::FAILED) {
       return false;
     }
   }
@@ -656,6 +714,7 @@ void CanDriver::process_received_frame(const CanFrame & frame)
   state.last_update = now;
   lock.unlock();
   state_cv_.notify_all();
+  refresh_motor_stop();
 }
 
 void CanDriver::set_fault(const std::string & message) noexcept

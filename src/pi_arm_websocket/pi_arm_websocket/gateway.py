@@ -160,6 +160,51 @@ class RosBridge(Node):
         self.get_logger().info(f"服务成功: {command}")
         return result
 
+    def _track_goal(self, goal_handle: Any) -> Any:
+        result_future = goal_handle.get_result_async()
+        with self._goal_lock:
+            self._active_goals.append(goal_handle)
+
+        def release(_: Any) -> None:
+            with self._goal_lock:
+                if goal_handle in self._active_goals:
+                    self._active_goals.remove(goal_handle)
+
+        result_future.add_done_callback(release)
+        return result_future
+
+    def _cancel_late_goal(self, future: Any) -> None:
+        """Runs on the ROS executor even after the WebSocket request timed out."""
+        try:
+            handle = future.result()
+            if handle is not None and handle.accepted:
+                self._track_goal(handle)
+                cancel_future = handle.cancel_goal_async()
+
+                def cancellation_done(result: Any) -> None:
+                    try:
+                        reply = result.result()
+                        if not reply.goals_canceling:
+                            self.get_logger().error("迟到目标取消未被接受，请检查任务状态并停止")
+                    except Exception as exc:
+                        self.get_logger().error(f"迟到目标取消失败，停止未确认: {exc}")
+
+                cancel_future.add_done_callback(cancellation_done)
+                self.get_logger().warning("已请求取消超时后接受的目标，等待终态确认")
+        except Exception as exc:
+            self.get_logger().error(f"目标接受状态确认失败: {exc}")
+
+    async def _cancel_accepted_goal(self, handle: Any, result_future: Any) -> bool:
+        try:
+            if not result_future.done():
+                await self.wait_future(handle.cancel_goal_async())
+            # A cancel response alone does not prove that motion has stopped.
+            result = await self.wait_future(result_future)
+            return result.status in (4, 5, 6)  # SUCCEEDED, CANCELED, ABORTED
+        except Exception as exc:
+            self.get_logger().error(f"已接受目标停止未确认: {exc}")
+            return False
+
     async def send_goal(self, action_name: str, goal: Any) -> int:
         state = self.state_snapshot()
         if state is None:
@@ -197,28 +242,23 @@ class RosBridge(Node):
                 task_id_box.append(int(message.feedback.task_id))
                 feedback_ready.set()
 
-        goal_handle = await self.wait_future(
-            client.send_goal_async(goal, feedback_callback=feedback_callback)
-        )
+        acceptance = client.send_goal_async(goal, feedback_callback=feedback_callback)
+        try:
+            goal_handle = await self.wait_future(acceptance)
+        except (ProtocolError, asyncio.CancelledError):
+            acceptance.add_done_callback(self._cancel_late_goal)
+            raise ProtocolError(CODE_COMMAND_FAILED,
+                "目标接受状态未知；已安排取消迟到目标，请检查任务状态，必要时点击停止")
         if not goal_handle.accepted:
             self.get_logger().warning(f"action goal 被 manager 拒绝: {action_name}")
             raise ProtocolError(CODE_MOTION_BUSY, "运动目标被拒绝")
-        result_future = goal_handle.get_result_async()
-        with self._goal_lock:
-            self._active_goals.append(goal_handle)
-
-        def release(_: Any) -> None:
-            with self._goal_lock:
-                try:
-                    self._active_goals.remove(goal_handle)
-                except ValueError:
-                    pass
-
-        result_future.add_done_callback(release)
+        result_future = self._track_goal(goal_handle)
         received = await asyncio.to_thread(feedback_ready.wait, self.timeout)
         if not received:
             self.get_logger().error(f"action {action_name} 未在超时内返回 task_id")
-            raise ProtocolError(CODE_COMMAND_FAILED, "manager 未返回任务 ID")
+            ended = await self._cancel_accepted_goal(goal_handle, result_future)
+            detail = "已请求取消，目标已结束" if ended else "停止未确认，请点击停止并检查任务状态"
+            raise ProtocolError(CODE_COMMAND_FAILED, f"目标已接受但任务 ID 反馈超时；{detail}")
         self.get_logger().info(f"action {action_name} 已接受: task_id={task_id_box[0]}")
         return task_id_box[0]
 
@@ -624,6 +664,8 @@ class WebSocketGateway:
         }
         body["protocol_angle_ratios"] = list(hardware.protocol_angle_ratios) if hardware else []
         body["motor_directions"] = list(hardware.motor_directions) if hardware else []
+        body["motion_stop_pending"] = bool(hardware and hardware.motion_stop_pending)
+        body["motion_stop_failed"] = bool(hardware and hardware.motion_stop_failed)
         body["state_available"] = state is not None
         body["joint_names"] = list(state.hardware.joint_names) if state else []
         body["hardware_connected"] = state.hardware.connected if state else False

@@ -26,6 +26,8 @@ float64[] motor_ages_sec
 bool calibrated
 bool kinematics_valid
 bool control_permitted
+bool motion_stop_pending
+bool motion_stop_failed
 string calibration_id
 float64[] raw_protocol_positions_deg
 float64[] raw_output_positions_rad

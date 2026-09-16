@@ -60,6 +60,8 @@ struct HardwareSample
   bool calibrated{false};
   bool kinematics_valid{false};
   bool control_permitted{false};
+  bool motion_stop_pending{false};
+  bool motion_stop_failed{false};
   std::string calibration_id;
   std::vector<double> raw_protocol_positions_deg;
   std::vector<double> raw_output_positions_rad;
@@ -146,6 +148,11 @@ public:
   std::string axis_test_status() const {return axis_test_status_;}
 
 private:
+  MotionArmResult disarm_motion(std::uint64_t lease_id, bool retry_stop = false) noexcept;
+  // Serialize the final command submission with lease changes. ACK waiting
+  // happens after releasing this mutex, never in read()/write().
+  std::mutex motion_mutex_;
+  bool normal_motion_sent_{false};
   bool axis_test_raw_ready(bool require_still) const;
   bool axis_test_active_{false};
   bool axis_test_stop_failed_{false};
@@ -154,6 +161,7 @@ private:
   std::string axis_test_space_;
   std::vector<pi_arm_can::PositionCommand> axis_test_commands_;
   std::vector<double> axis_test_origin_protocol_;
+  std::vector<double> axis_test_target_protocol_;
   std::vector<double> axis_test_session_origin_;
   std::chrono::steady_clock::time_point axis_test_started_{};
   std::chrono::steady_clock::time_point axis_test_heartbeat_{};

@@ -58,6 +58,19 @@ def main():
             page.locator("#exportDiagnosticBtn").click()
         data = json.loads(Path(download.value.path()).read_text())
         assert data["state"]["kinematics_error"]["value"] == -8.146277666983426
+        page.evaluate('''handleMessage({...lastState, motion_stop_failed:true,
+          kinematics_error:{code:"JOINT_POSITION_LIMIT",axis:4,value:0.610865,
+            message:"joint limit exceeded: joint_05 value=0.610865 rad, limit=[-0.523599,0.523599] rad"}})''')
+        summary = page.locator("#diagnosticSummary").inner_text()
+        assert "JOINT_POSITION_LIMIT" in summary and "joint_05" in summary
+        assert "停止未确认" in summary and "重试停止" in summary
+        page.evaluate('''handleMessage({...lastState, read_only:false, commissioning:true,
+          motor_test_permitted:false, protocol_angle_ratios:[36,36,36,6,6,6]})''')
+        page.locator("#testMotorId").select_option("4")
+        assert abs(float(page.locator("#motorTestSpeed").get_attribute("min")) - 1/6) < 1e-10
+        assert "0.166667" in page.locator("#motorTestReason").inner_text()
+        assert page.locator("#axisTestStop").is_enabled()
+        assert page.locator('[data-axis-test="motor"][data-sign="1"]').is_disabled()
         page.evaluate("lastStateAt = Date.now() - 2000; refreshControlGate()")
         assert "状态已过期" in page.locator("#diagnosticSummary").inner_text()
         assert page.locator('[data-coordinate-row="2"] [data-coordinate="fresh"]').inner_text() == "缺失/过期"
@@ -65,7 +78,7 @@ def main():
         assert "检查监控进程" in page.locator("#diagnosticSummary").inner_text()
         assert not errors, errors
         browser.close()
-    print("PASS fault connection, raw feedback mapping, full errors, export, read-only and stale state")
+    print("PASS fault connection, raw feedback, joint limits, stop retry, minimum speed, export, read-only and stale state")
 
 
 if __name__ == "__main__":
