@@ -1,0 +1,13 @@
+# Dedicated commissioning mode only. Motor sign follows protocol, not motor_direction.
+# operation: start | heartbeat | stop
+string operation
+string space
+int32 axis_id
+float64 delta_deg
+float64 speed_deg_s
+uint64 test_id
+---
+bool success
+int32 code
+string message
+uint64 test_id

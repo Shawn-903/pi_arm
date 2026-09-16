@@ -31,6 +31,8 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_direct_move_validation test/test_direct_move_validation.cpp)
+  target_include_directories(test_direct_move_validation PRIVATE include)
   ament_add_gtest(test_state_aggregator test/test_state_aggregator.cpp)
   target_include_directories(test_state_aggregator PRIVATE include)
   ament_target_dependencies(test_state_aggregator pi_arm_interfaces)

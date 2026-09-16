@@ -2,6 +2,8 @@
 
 #include "hardware_interface/component_parser.hpp"
 #include "pi_arm_interfaces/msg/hardware_state.hpp"
+#include "pi_arm_interfaces/srv/axis_test.hpp"
+#include "pi_arm_interfaces/srv/manage_motor.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <chrono>
@@ -136,6 +138,8 @@ public:
     }
 
     config_ = backend_config_from_robot_description(robot_description);
+    config_.commissioning = declare_parameter<bool>("commissioning", false);
+    config_.read_only = !config_.commissioning;
     joint_names_.reserve(config_.actuators.size());
     for (const auto & actuator : config_.actuators) {
       joint_names_.push_back(actuator.joint_name);
@@ -144,6 +148,50 @@ public:
     backend_ = std::make_unique<RealBackend>(config_);
     backend_->configure();
     backend_->activate();
+    if (config_.commissioning) {
+      using AxisTest = pi_arm_interfaces::srv::AxisTest;
+      axis_test_service_ = create_service<AxisTest>("/pi_arm/commissioning/axis_test",
+        [this](const std::shared_ptr<AxisTest::Request> request,
+          std::shared_ptr<AxisTest::Response> response) {
+          ManagementResult result;
+          if (request->operation == "start") {
+            result = backend_->start_axis_test(request->space, request->axis_id,
+              request->delta_deg, request->speed_deg_s);
+          } else if (request->operation == "heartbeat") {
+            const bool ok = backend_->heartbeat_axis_test(request->test_id);
+            result = {ok, ok ? 0 : 2001, ok ? "ok" : "axis test is no longer active"};
+          } else if (request->operation == "stop") {
+            if (request->test_id != 0 && request->test_id != backend_->axis_test_id()) {
+              result = {false, 2001, "test ID does not match"};
+            } else {result = backend_->stop_axis_test("stopped: operator request");}
+          } else {result = {false, 1004, "unknown axis-test operation"};}
+          response->success = result.success;
+          response->code = result.code;
+          response->message = result.message;
+          response->test_id = backend_->axis_test_id();
+          if (request->operation != "heartbeat") {
+            RCLCPP_INFO(get_logger(), "axis test: operation=%s space=%s axis=%d delta=%.9g speed=%.9g id=%llu success=%d %s",
+              request->operation.c_str(), request->space.c_str(), request->axis_id,
+              request->delta_deg, request->speed_deg_s,
+              static_cast<unsigned long long>(response->test_id), result.success, result.message.c_str());
+          }
+        });
+      using ManageMotor = pi_arm_interfaces::srv::ManageMotor;
+      for (const auto & entry : std::vector<std::pair<std::string, pi_arm_can::ManagementOperation>>{
+          {"enable_motor", pi_arm_can::ManagementOperation::MOTOR_RUN},
+          {"disable_motor", pi_arm_can::ManagementOperation::MOTOR_OFF},
+          {"reset_motor", pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS}})
+      {
+        management_services_.push_back(create_service<ManageMotor>(
+          "/pi_arm/commissioning/" + entry.first,
+          [this, operation = entry.second](const std::shared_ptr<ManageMotor::Request> request,
+            std::shared_ptr<ManageMotor::Response> response) {
+            const auto result = backend_->manage(operation, request->motor_id);
+            response->success = result.success; response->code = result.code;
+            response->message = result.message;
+          }));
+      }
+    }
     publisher_ = create_publisher<pi_arm_interfaces::msg::HardwareState>(
       "/pi_arm/hardware_state", rclcpp::SensorDataQoS());
     timer_ = create_wall_timer(
@@ -152,8 +200,8 @@ public:
 
     RCLCPP_WARN(
       get_logger(),
-      "Read-only monitor owns SocketCAN '%s'; only status polling is enabled and no control services exist",
-      config_.can_interface.c_str());
+      "Monitor owns SocketCAN '%s'; mode=%s",
+      config_.can_interface.c_str(), config_.commissioning ? "BOUNDED AXIS TESTS" : "READ ONLY");
   }
 
   ~HardwareMonitorNode() override
@@ -169,10 +217,12 @@ private:
   {
     HardwareSample sample;
     if (!backend_->read(sample)) {
+      backend_->stop_axis_test("failed: hardware read failed");
       RCLCPP_ERROR_THROTTLE(
         get_logger(), *get_clock(), 2000, "Hardware monitor read failed");
       return;
     }
+    backend_->update_axis_test(sample);
 
     pi_arm_interfaces::msg::HardwareState message;
     message.stamp = now();
@@ -210,6 +260,17 @@ private:
     message.kinematics_error_value = sample.kinematics_error_value;
     message.kinematics_error_message = sample.kinematics_error_message;
     message.diagnostic = sample.error_message;
+    message.commissioning = config_.commissioning;
+    message.can_interface = config_.can_interface;
+    message.motor_test_permitted = sample.motor_test_permitted;
+    message.joint_test_permitted = sample.joint_test_permitted;
+    message.axis_test_active = backend_->axis_test_active();
+    message.axis_test_id = backend_->axis_test_id();
+    message.axis_test_status = backend_->axis_test_status();
+    for (const auto & actuator : config_.actuators) {
+      message.protocol_angle_ratios.push_back(actuator.protocol_angle_ratio);
+      message.motor_directions.push_back(actuator.motor_direction);
+    }
     publisher_->publish(std::move(message));
   }
 
@@ -218,6 +279,8 @@ private:
   std::unique_ptr<RealBackend> backend_;
   rclcpp::Publisher<pi_arm_interfaces::msg::HardwareState>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Service<pi_arm_interfaces::srv::AxisTest>::SharedPtr axis_test_service_;
+  std::vector<rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr> management_services_;
 };
 
 }  // namespace pi_arm_hardware

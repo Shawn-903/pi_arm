@@ -65,7 +65,7 @@ double clamp_joint_velocity(
     return velocity;
   }
   log_write_warn(
-    "write velocity clamped at joint[%zu]: vel=%.6g -> lim=%.6g",
+    "write velocity clamped at joint[%zu]: vel=%.17g -> lim=%.17g",
     index, velocity, velocity_limit);
   return std::copysign(velocity_limit, velocity);
 }
@@ -229,6 +229,7 @@ void RealBackend::deactivate() noexcept
 
 void RealBackend::cleanup() noexcept
 {
+  if (axis_test_active_) {stop_axis_test("stopped: process shutdown");}
   control_permitted_.store(false);
   motion_write_gate_.disarm();
   if (driver_) {
@@ -441,13 +442,17 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       all_enabled && all_fresh && !any_motor_error;
 
     control_permitted_.store(sample.control_permitted);
-    if (!sample.control_permitted) {
+    if (!sample.control_permitted && !axis_test_active_) {
       // Feedback, calibration and kinematics validity are independent of an
       // accepted motion lease. Losing any prerequisite revokes the lease and
       // returns the CAN driver to read-only polling.
       set_motion_armed(false, 0U);
     }
     sample.driver_mode = pi_arm_can::to_string(driver_->mode());
+    sample.motor_test_permitted = config_.commissioning && !axis_test_active_ &&
+      !axis_test_stop_failed_ && axis_test_raw_ready(true);
+    sample.joint_test_permitted = sample.motor_test_permitted && sample.calibrated &&
+      sample.kinematics_valid && all_enabled;
     return true;
   } catch (const std::exception & error) {
     control_permitted_.store(false);
@@ -475,6 +480,9 @@ MotionArmResult RealBackend::set_motion_armed(
   if (config_.read_only) {
     return {false, false, "read-only backend cannot arm position writes"};
   }
+  if (config_.commissioning) {
+    return {false, false, "commissioning mode cannot arm normal controller writes"};
+  }
   if (!config_.allow_real_control || !calibration_.valid || !control_permitted_.load()) {
     return {false, false, "real-control prerequisites are not satisfied"};
   }
@@ -499,6 +507,7 @@ bool RealBackend::write(
   const std::vector<double> & positions_rad,
   const std::vector<double> & velocities_rad_s) noexcept
 {
+  if (config_.commissioning) {return false;}
   if (!driver_ || positions_rad.size() != kAxisCount ||
     velocities_rad_s.size() != kAxisCount ||
     config_.joint_lower_limits_rad.size() != kAxisCount ||
@@ -560,7 +569,7 @@ bool RealBackend::write(
     for (std::size_t index = 0; index < kAxisCount; ++index) {
       if (!std::isfinite(positions_rad[index]) || !std::isfinite(velocities_rad_s[index])) {
         log_write_reject(
-          "write rejected: non-finite command at joint[%zu] pos=%.6g vel=%.6g",
+          "write rejected: non-finite command at joint[%zu] pos=%.17g vel=%.17g",
           index, positions_rad[index], velocities_rad_s[index]);
         set_motion_armed(false, 0U);
         return false;
@@ -569,7 +578,7 @@ bool RealBackend::write(
         positions_rad[index] > config_.joint_upper_limits_rad[index])
       {
         log_write_reject(
-          "write rejected: position limit exceeded at joint[%zu] pos=%.6g lim=[%.6g,%.6g]",
+          "write rejected: position limit exceeded at joint[%zu] pos=%.17g lim=[%.17g,%.17g]",
           index, positions_rad[index],
           config_.joint_lower_limits_rad[index], config_.joint_upper_limits_rad[index]);
         set_motion_armed(false, 0U);
@@ -584,7 +593,7 @@ bool RealBackend::write(
     auto status = kinematics_.joint_to_output_position(joint_positions, output_positions);
     if (!status) {
       log_write_reject(
-        "write rejected: cable position mapping failed (%s axis=%zu value=%.6g)",
+        "write rejected: cable position mapping failed (%s axis=%zu value=%.17g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
       set_motion_armed(false, 0U);
       return false;
@@ -594,7 +603,7 @@ bool RealBackend::write(
       const std::size_t index = status.axis - 1U;
       const auto & limit = kinematics_.parameters().output_limits[index];
       log_write_reject(
-        "write rejected: output-shaft limit exceeded at motor[%zu] value=%.6g lim=[%.6g,%.6g]",
+        "write rejected: output-shaft limit exceeded at motor[%zu] value=%.17g lim=[%.17g,%.17g]",
         status.axis, status.value, limit.lower_position_rad, limit.upper_position_rad);
       set_motion_armed(false, 0U);
       return false;
@@ -605,7 +614,7 @@ bool RealBackend::write(
       joint_positions, joint_velocities, output_velocities);
     if (!status) {
       log_write_reject(
-        "write rejected: cable velocity mapping failed (%s axis=%zu value=%.6g)",
+        "write rejected: cable velocity mapping failed (%s axis=%zu value=%.17g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
       set_motion_armed(false, 0U);
       return false;
@@ -674,6 +683,9 @@ bool RealBackend::write(
 ManagementResult RealBackend::manage(
   const pi_arm_can::ManagementOperation operation, const int motor_id) noexcept
 {
+  if (axis_test_active_) {
+    return {false, 2003, "stop the active axis test before changing motor power"};
+  }
   if (!driver_) {
     return {false, 2, "CAN driver is not configured"};
   }

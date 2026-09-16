@@ -8,6 +8,9 @@ from pi_arm_websocket.gateway import WebSocketGateway
 class _Bridge:
     def __init__(self, state):
         self._state = state
+        self.hardware_type = "mock"
+        self.read_only = False
+        self.commissioning = False
 
     def state_snapshot(self):
         return self._state
@@ -71,3 +74,40 @@ def test_state_payload_separates_joint_and_motor_enabled_fields():
     assert payload["raw_protocol_positions_deg"] == [1.0] * 6
     assert payload["model_output_positions_rad"] == [0.3] * 6
     assert payload["kinematics_error"]["code"] == "NONE"
+
+
+def test_nonfinite_feedback_is_valid_browser_json():
+    state = RobotState()
+    state.hardware.positions = [float("nan")]
+    state.hardware.motor_ages_sec = [float("inf")]
+    gateway = WebSocketGateway(_Bridge(state))
+    gateway._pose = lambda: {"x": float("nan")}
+    payload = gateway._state_message()
+    def reject_constant(value):
+        raise AssertionError(value)
+    data = json.loads(payload, parse_constant=reject_constant)
+    assert data["current_joint_angles"] == [None]
+    assert data["motor_ages_sec"] == [None]
+    assert data["pose"]["x"] is None
+
+
+def test_stale_ros_state_is_unavailable():
+    import threading
+    import time
+    from pi_arm_websocket.gateway import RosBridge
+    bridge = object.__new__(RosBridge)
+    bridge._state_lock = threading.Lock()
+    bridge._state = RobotState()
+    bridge.state_timeout = 1.0
+    bridge._state_received_at = time.monotonic()
+    assert bridge.state_snapshot() is bridge._state
+    bridge._state_received_at -= 2.0
+    assert bridge.state_snapshot() is None
+
+
+def test_disconnected_payload_does_not_show_cached_pose():
+    gateway = WebSocketGateway(_Bridge(None))
+    gateway._pose = lambda: {"x": 100.0}
+    payload = json.loads(gateway._state_message())
+    assert payload["control_permitted"] is False
+    assert payload["pose"] == {}

@@ -22,6 +22,7 @@ add_library(pi_arm_hardware SHARED
   src/actuator_coordinates.cpp
   src/calibration.cpp
   src/backend.cpp
+  src/axis_test.cpp
   src/pi_arm_system.cpp
 )
 target_include_directories(pi_arm_hardware

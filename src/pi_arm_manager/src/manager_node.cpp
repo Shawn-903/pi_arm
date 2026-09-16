@@ -28,6 +28,7 @@
 #include "pi_arm_interfaces/srv/set_motion_armed.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
 #include "pi_arm_manager/management_gate.hpp"
+#include "pi_arm_manager/direct_move_validation.hpp"
 #include "pi_arm_manager/motion_stop_reason.hpp"
 #include "pi_arm_manager/state_aggregator.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -40,17 +41,6 @@ namespace pi_arm_manager
 {
 namespace
 {
-
-// Filled at startup from the robot model (URDF position/velocity limits plus
-// robot_description_planning acceleration limits) so the robot description
-// stays the single source of truth.
-struct JointLimits
-{
-  double lower{0.0};
-  double upper{0.0};
-  double velocity{0.0};
-  double acceleration{0.0};
-};
 
 // MoveL / goal-reject TCP caps (SI). Keep numerically aligned with
 // pi_arm_moveit_config/config/pilz_cartesian_limits.yaml used by move_group Pilz.
@@ -299,7 +289,8 @@ private:
           }
         }
         const auto state = aggregate_state(hardware_snapshot, task_snapshot);
-        const bool still = still_frames_.load() >= 3;
+        const bool still = (operation == Operation::DISABLE ?
+          raw_still_frames_.load() : still_frames_.load()) >= 3;
         const bool task_claimed = task_claimed_.load();
         bool allowed = false;
         int rejection_code = 2001;
@@ -430,6 +421,14 @@ private:
       message->velocities.begin(), message->velocities.end(),
       [this](double v) {return std::isfinite(v) && std::abs(v) <= still_velocity_;});
     still_frames_.store(no_motion ? std::min(3, still_frames_.load() + 1) : 0);
+    // Joint feedback can be invalid when cable inversion fails. Power-off
+    // relies on the independent, fresh motor motion flags in that case.
+    const bool raw_still = message->connected && complete_raw_motor_state(*message) &&
+      std::all_of(message->motor_fresh.begin(), message->motor_fresh.end(),
+      [](bool fresh) {return fresh;}) &&
+      std::none_of(message->motor_moving.begin(), message->motor_moving.end(),
+      [](bool moving) {return moving;});
+    raw_still_frames_.store(raw_still ? std::min(3, raw_still_frames_.load() + 1) : 0);
     MotionStopReason hardware_stop_reason = MotionStopReason::NONE;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
@@ -1029,6 +1028,7 @@ private:
       }
       goal.trajectory.joint_names = hardware_.joint_names;
       point.positions = hardware_.positions;
+      validate_direct_positions(joint_limits_, goal.trajectory.joint_names, point.positions, "start/hold");
       for (size_t i = 0; i < request->joint_names.size(); ++i) {
         const auto found = std::find(
           hardware_.joint_names.begin(), hardware_.joint_names.end(), request->joint_names[i]);
@@ -1043,6 +1043,7 @@ private:
         point.positions[index] = request->positions[i];
       }
     }
+    validate_direct_positions(joint_limits_, goal.trajectory.joint_names, point.positions, "target/hold");
     point.time_from_start = rclcpp::Duration::from_seconds(duration);
     goal.trajectory.points.push_back(point);
     const auto lease_id = active_task_id();
@@ -1373,6 +1374,7 @@ private:
   std::atomic<MotionStopReason> stop_reason_;
   std::atomic_uint64_t next_task_id_;
   std::atomic_int still_frames_;
+  std::atomic_int raw_still_frames_{0};
 
   std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
   rclcpp_action::Client<Follow>::SharedPtr follow_client_;

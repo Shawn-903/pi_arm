@@ -231,6 +231,7 @@ def generate_launch_description():
                 executable="pi_arm_websocket",
                 name="pi_arm_websocket",
                 output="screen",
+                parameters=[{"hardware_type": hardware_type}],
                 condition=IfCondition(use_websocket),
             ),
             rviz,

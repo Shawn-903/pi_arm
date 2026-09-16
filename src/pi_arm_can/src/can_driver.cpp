@@ -140,6 +140,12 @@ void CanDriver::start()
   }
 
   try {
+    // An unplugged/unpowered bus must not leave the TX thread blocked forever,
+    // preventing commissioning watchdog stops or process shutdown.
+    const struct timeval send_timeout {0, 100000};
+    if (::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout)) < 0) {
+      throw std::runtime_error("failed to configure bounded SocketCAN transmit timeout");
+    }
     struct ifreq request {};
     std::strncpy(request.ifr_name, config_.interface_name.c_str(), IFNAMSIZ - 1U);
     if (::ioctl(fd, SIOCGIFINDEX, &request) < 0) {
@@ -320,6 +326,26 @@ bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & comm
     return false;
   }
   return enqueue_batch(std::move(batch));
+}
+
+bool CanDriver::stop_motors(const std::vector<std::uint8_t> & motor_ids)
+{
+  if (config_.read_only || motor_ids.empty()) {return false;}
+  std::unique_lock<std::mutex> operation_lock(management_mutex_);
+  for (const auto id : motor_ids) {
+    if (!validate_motor_id(id)) {return false;}
+  }
+  if (!set_mode(DriverMode::MONITORING)) {return false;}
+  const auto requested_at = std::chrono::steady_clock::now();
+  TxBatch batch;
+  for (const auto id : motor_ids) {batch.frames.push_back(make_request(id, Opcode::MOTOR_STOP));}
+  if (!enqueue_batch(std::move(batch), true)) {return false;}
+  std::unique_lock<std::shared_mutex> state_lock(state_mutex_);
+  return state_cv_.wait_for(state_lock, std::chrono::milliseconds(500), [&]() {
+    return std::all_of(motor_ids.begin(), motor_ids.end(), [&](const auto id) {
+      return states_.at(id).stop_ack_update > requested_at;
+    });
+  });
 }
 
 bool CanDriver::execute_management(
@@ -620,6 +646,9 @@ void CanDriver::process_received_frame(const CanFrame & frame)
     case Opcode::SET_CURRENT_POSITION_ZERO:
       state.zero_ack_valid = true;
       state.zero_ack_update = now;
+      break;
+    case Opcode::MOTOR_STOP:
+      state.stop_ack_update = now;
       break;
     default:
       return;

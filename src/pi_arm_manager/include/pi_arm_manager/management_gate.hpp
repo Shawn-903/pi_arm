@@ -39,8 +39,8 @@ inline bool complete_raw_motor_state(
 }
 
 // This is the actual enable/disable service gate used by ManagerNode.  It
-// permits power-state changes only with complete, fresh, fault-free and still
-// feedback, while allowing READY <-> partially DISABLED transitions.
+// Requires complete, fresh and still raw feedback. A fault forbids enabling,
+// but must not prevent a controlled power-off after motion has stopped.
 inline MotorPowerDecision decide_motor_power_operation(
   const MotorPowerOperation operation,
   const pi_arm_interfaces::msg::HardwareState & hardware,
@@ -71,7 +71,8 @@ inline MotorPowerDecision decide_motor_power_operation(
   {
     return {false, false, 2001, "motor state feedback is disconnected or stale"};
   }
-  if (robot_state == pi_arm_interfaces::msg::RobotState::FAULT) {
+  if (robot_state == pi_arm_interfaces::msg::RobotState::FAULT &&
+    operation == MotorPowerOperation::ENABLE) {
     return {false, false, 2001, "motor power operation rejected while hardware is in FAULT"};
   }
   if (task_claimed || robot_state == pi_arm_interfaces::msg::RobotState::RUNNING ||
@@ -85,7 +86,9 @@ inline MotorPowerDecision decide_motor_power_operation(
     return {false, false, 2001, "motor power operation requires three stationary feedback frames"};
   }
   if (robot_state != pi_arm_interfaces::msg::RobotState::READY &&
-    robot_state != pi_arm_interfaces::msg::RobotState::DISABLED)
+    robot_state != pi_arm_interfaces::msg::RobotState::DISABLED &&
+    !(robot_state == pi_arm_interfaces::msg::RobotState::FAULT &&
+    operation == MotorPowerOperation::DISABLE))
   {
     return {false, false, 2001, "motor power operation rejected by robot state"};
   }

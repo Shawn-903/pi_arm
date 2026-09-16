@@ -14,6 +14,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ManageMotor.srv"
   "srv/SetMotionArmed.srv"
   "srv/StopMotion.srv"
+  "srv/AxisTest.srv"
   "action/MoveJ.action"
   "action/MoveJs.action"
   "action/MoveL.action"

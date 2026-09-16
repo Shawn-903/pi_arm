@@ -48,6 +48,68 @@ colcon test-result --verbose
 
 ## 运行
 
+### 网页测试快速入口
+
+#### 电机输出轴与关节轴的方向核验
+
+使用专用方向测试模式，同时显示两种单轴点动控制（不与普通 bringup 或只读监控同时运行）：
+
+```bash
+bash scripts/start_web.sh --commissioning can_interface:=can0 \
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R02.recorded.yaml
+```
+
+- **电机输出轴点动**：按 CAN ID 选择一台电机，先使能该电机，再点击 `+` / `−`。只向该电机发送位置命令。步长是按配置减速比折算的输出轴角，“+”严格表示协议角增加，不使用 `motor_direction`、标定偏置或绳索反解。这使电机方向核验可以在 `kinematics_valid=false` 时进行；六台电机原始反馈仍必须新鲜、无电机错误且静止。其他电机保持原有状态，不自动使能或失能。
+- **关节轴点动**：选择 `joint_01 / joint_02 / joint_04 / joint_05 / joint_06 / joint_09`，按当前绳索模型生成耦合电机目标，可能向多台电机发命令。只有标定、反解有效且全部电机使能时才开放；起点、目标和输出插补路径仍检查软件限位。反解无效时页面保留控件并说明禁用原因，不能将未知关节姿态当作控制起点。
+
+默认步长 0.1°、速度 0.2°/s；单次步长限制 0.01～0.5°，速度 0.05～0.5°/s，所有实际电机输出轴单次目标变化不超过 0.5°。协议速度按整数 °/s 编码，小于一个协议速度单位的耦合轴使用最小单位；输出轴速度上限仍不超过 0.5°/s。各输出轴目标距离本服务首次成功测试时的位置限制为 ±2°，超出后拒绝请求，不自动重新定义参考位置。参数含义及这些初始测试范围不构成实机限位认证。
+
+一次只能运行一个点动。网页自动发送测试心跳，切换到后台页面会请求停止；关闭连接、心跳超过 0.8s、原始反馈失效、运动超时或超出预期输出轴位移时，后端请求厂家协议 `0x81` 停止并等待应答。它不修改 ROM 零位，也不关闭电机。停止未获应答会显示 `STOP UNCONFIRMED` 并阻止下一次点动，需重试停止/检查设备；总线失联时仍依赖独立物理急停。网页普通 `stop_motion` 的语义不变，此处的心跳仅约束方向测试。
+
+建议逐台电机小步测试正/负方向，观察所有受影响关节，固定观察方向并按 URDF 关节轴的右手正方向记录。每次点动会保存指令、动作前后六轴反馈和最终结果；在“本次现场观察”中填写实际方向并保存，再用“下载当前诊断 JSON”导出。记录保存在当前页面内，刷新前请导出。软件不会把运动学预测当作现场观察，也不会自动修改方向或耦合参数。
+
+`scripts/test_axis_vcan.py` 和 `scripts/test_web_axis.py` 用于虚拟 CAN 的接口与浏览器回归，检查所选 CAN ID、耦合命令、限步、心跳和停止。二者在发送命令前均拒绝真实 CAN。`vcan_motor_emulator.py --freeze-motion` 可模拟未到达目标以验证停止路径。
+
+#### 实机有故障时的只读网页排查
+
+J2/J4 反馈或运动学异常不妨碍连接网页。此时可使用独立的只读监控链：
+
+```bash
+# 若 can0 尚未启动：
+sudo bash scripts/setup_can.sh real can0
+bash scripts/start_web.sh --monitor can_interface:=can0 calibration_file:=/绝对路径/R02标定.yaml
+```
+
+打开 `http://机器IP:8000/control.html` 并点击“连接”。此模式只启动 CAN 只读监控、WebSocket 和网页，不启动 manager、MoveIt、运动控制器或电机管理服务，不要求 `allow_real_control:=true`。不要和其他占用同一 CAN 的监控/控制进程同时运行。
+
+没有可用标定文件时可省略 `calibration_file`，仍可查看协议角、原始输出轴角和电机状态；默认未审批模板会明确显示 `CALIBRATION_INVALID`，不会伪装成已完成标定。要查看有效的软件偏置和模型输出角，应提供当前配置匹配的实机标定文件。下方交接记录保留了 R02 数据。
+
+从该交接记录恢复的历史副本位于 `src/pi_arm_hardware/config/pack_reference_calibration.R02.recorded.yaml`，可将其绝对路径传给只读入口。它保留历史审批字段，不是新标定或当前实机姿态验证；配置指纹仍由后端检查。若启动时 CAN 未启用，先启用 CAN，再重启只读入口，以清除驱动连接错误。
+
+页面的“实机排查 / 坐标换算链”显示驱动状态、标定 ID、标定/运动学有效性、禁止运动原因、错误轴序号和完整错误详情。六台电机分别显示协议角、原始输出轴角、软件偏置、模型输出轴角、错误码、反馈年龄和新鲜度。运动学无效时关节角与末端姿态显示 `--`，原始数据继续更新；电机数据缺失时会标为过期。可点击“下载当前诊断 JSON”保存精确数值和时间戳，与现场测量配对排查。故障不会阻止网页连接；即使监控进程启动失败，网页仍能显示未收到硬件状态的提示，此时需结合启动终端中的错误。
+
+#### mock 运动测试
+
+构建完成后，在工作区执行：
+
+```bash
+bash scripts/start_web.sh
+```
+
+脚本默认启动 **mock**、WebSocket（8765）和网页 HTTP 服务（8000），不需要桌面或 RViz。打开 `http://localhost:8000/control.html`；在另一台电脑上访问时，将 `localhost` 换成运行本项目的机器 IP。页面自动使用该主机的 WebSocket 地址，也可直接打开 `web/control.html` 并手动填入 `ws://机器IP:8765`。HTTP 端口可通过 `PI_ARM_WEB_PORT=8001 bash scripts/start_web.sh` 修改。不要与已启动的 bringup 重复运行；Ctrl+C 会关闭脚本启动的服务。
+
+1. 点击“连接”，等待显示 `mock / DISABLED` 和六轴状态。
+2. 点击“所有电机使能”，等待 `READY`。
+3. 页面首次收到有效反馈会将当前角度填入目标。将 J1 目标小幅修改，例如从 0° 改为 1°，保留默认 1°/s，点击该轴“运动”。
+4. 查看“测试结果”的任务编号、最终状态及实际角度；“运动请求已接受”不代表最终成功。服务拒绝、参数错误和任务失败都直接显示在页面。
+5. 多关节页的“运动”使用该页目标和速度；“按单关节目标全部运动”使用单轴卡片中的六个目标及最低速度。两者均走 DirectMove。测试后可“停止运动”及“所有电机关闭”。
+
+关节目标是绝对角度，单位 °，速度单位 °/s；“读取当前角度为目标”可重新填入保持位置。直线插补仅在 mock 中开放，实机当前仅开放 DirectMove。网关默认按实机限制规划命令；单独启动 mock 网关时需传入 `hardware_type:=mock`。过期状态、断线或运行中的任务会禁用新运动。
+
+可选浏览器回归：在安装了 Python Playwright 和 Chromium 的测试环境中，保持上述 mock 服务运行，执行 `python3 scripts/test_web_mock.py`（也可用 `--browser-path` 指定 Chromium）。该脚本检查单轴、多轴、停止、失败反馈和断线交互，只允许连接标记为 mock 的网关，并会改变模拟关节位置。
+
+实机准备完成后，启动脚本可以透传 bringup 参数，例如 `hardware_type:=real can_interface:=can0 calibration_file:=/绝对路径/已验证标定.yaml allow_real_control:=true`。**本仓库下方交接记录中的第二静态姿态核对仍需完成，当前网页/mock 验证不能替代该核对；不要通过修改关节限位或标定审批标志绕过实机问题。**
+
 无硬件调试：
 
 ```bash
@@ -224,6 +286,72 @@ ros2 run pi_arm_can pi_arm_rom_zero_cli --interface vcan0 --execute --yes
 真实 ROM 写入成功后必须断电重启，再在工装中采集 `r_pack`。该工具不是普通控制 API，网页和 WebSocket 不接受 `set_zero`。
 
 验收：启动日志含 `MoveL TCP caps (compile-time)`；`ros2 param list /move_group --filter cartesian_limits` 应列出 Pilz 四项。
+
+## 2026-09-16 实机交接状态
+
+本节是删除临时构建产物和过程日志前保留的实机交接记录。它记录已观察事实和待解决问题，不能代替原始日志，也不构成实机运动安全认证。
+
+### ROM 基准与 R02 标定
+
+- 机器人：`PIARM-R1-SN0001`。
+- ROM 写零时机械臂固定在打包姿态 `[0°, 100.7°, -85.6°, 0°, 0°, 0°]`。
+- CAN ID 1～6 各执行并确认一次 `0x19`；随后使用厂家协议 `0x07` 完成三个独立重启/只读周期。
+- 三周期共 90 个只读样本，减速器输出轴角的最大跨周期变化为 `2.908882086657216e-05 rad`。
+- R02 批准标定的原文件 SHA256 为 `2603d8d48737c175a22d2eb4291498b14575523aee80ec59875aa8bf1646a2ea`。临时日志目录清理后如需重建文件，内容如下；配置发生任何变化后不得继续复用该指纹：
+
+```yaml
+calibration:
+  schema_version: 1
+  robot_id: PIARM-R1-SN0001
+  calibration_id: PIARM-R1-SN0001-PACKCAL-20260916-R02
+  approved: true
+  model_version: 3
+  created_at_utc: '2026-09-16T12:05:56Z'
+  configuration_fingerprint: fnv1a64:0a5596b5685ec6cc
+  joint_names: [joint_01, joint_02, joint_04, joint_05, joint_06, joint_09]
+  motor_ids: [1, 2, 3, 4, 5, 6]
+  packing_pose_joint_rad:
+    [0.0, 1.75754655675829, -1.494001839707146, 0.0, 0.0, 0.0]
+  raw_output_at_packing_rad:
+    [1.9392547244381436e-05, 7.433809777012883e-05,
+     -5.8177641733144315e-05, -4.84813681109536e-05,
+     -4.84813681109536e-05, 5.817764173314432e-05]
+```
+
+### R5 DirectMove 已确认事实
+
+- 操作者请求 `joint_01` 从约 `0°` 相对运动 `+2°`，速度 `1°/s`；发送的是正确的 J1 绝对目标，不存在 J1/J2 名称映射错误。
+- manager 会将单关节 DirectMove 扩展为六关节轨迹，未选关节使用当前位置保持值。Action 被接受后，backend 在首次写周期以 `position limit exceeded at joint[1]` 拒绝整批命令；`joint[1]` 是零基下标，对应 `joint_02`。
+- Action 终态为 `ABORTED`，`success=false`、`code=3001`，消息为 `Current goal cancelled during deactivate transition.`。
+- 该场景从接受到结束均未观察到 `0xA4`，因此没有位置命令发给任何真实电机；J1 反馈变化约 `0.00023°`，属于协议量化范围。
+- 关节限位判断本身允许等于上下限，只拒绝严格小于 lower 或严格大于 upper。当前日志使用 `%.6g`，无法显示 J2 命令相对上限的实际微小超出量；不要把它简单解释为“等于上限被拒绝”。
+
+### 网页测试与运动学故障
+
+- `web/control.html` 的单关节“运动”调用 DirectMove，但“所有关节运动”和多关节页调用 MoveJ；真实 backend 当前只允许 DirectMove 获得位置写入租约。
+- 网页把命令响应写入浏览器开发者 Console，没有明显错误弹窗；网页显示“命令成功”只代表 Action 已接受，不代表 Action 最终成功。
+- 后续只读状态曾显示六台 `motor_enabled=true`、无电机错误且静止，但 `kinematics_valid=false`、`control_permitted=false`、manager 为 `FAULT`。关键数据为：
+
+```text
+raw_protocol_positions_deg = [0.03, -319.55, 631.27, 0.04, -0.04, 0.03]
+model_output_positions_rad =
+  [-4.848136811095359e-06, 1.6025500068619676, -8.146277666983426,
+   3.082398394860722, 3.0826311054276547, 2.9045814064449265]
+motor_03 configured output limit = [-7.841, 7.841] rad
+```
+
+- 协议角到减速器输出轴角已经应用一次减速比：CAN 1～3 使用 `36`，CAN 4～6 使用 `6`；读取时除以该比值并应用 `motor_direction`，写入时反向乘回。以 CAN 3 为例，`631.27° / 36 * -1 = -0.306048 rad`，与发布的 raw output 一致。输出限位本身位于减速器输出轴坐标，不应再次应用减速比。
+- 在当前运动学参数下，上述输出反解约为 `joint_02=+91.819°`、`joint_04=-95.996°`。如果现场实测不是该姿态，则需依次核对具体电机实际减速比、方向、CAN ID、ROM 基准以及绳索耦合系数/符号。打包姿态单点标定只校准偏置，不能验证离开该点后的比例和耦合关系。
+
+### 下一轮必须先处理
+
+1. 在机械断能状态人工测量第二个静态姿态的 J2/J4，并与只读 `0x92` 反馈和运动学反解比较；未完成前不恢复实机运动。
+2. 修正 manager：硬件处于 `FAULT` 时必须继续允许受控失能，不能把“禁止运动”扩展为“禁止断能”。
+3. 修正网页：直接显示服务拒绝原因和 Action 最终结果，不能只写浏览器 Console。
+4. 提高限位拒绝日志精度，并在武装真实位置写入前验证完整六关节控制器轨迹/保持值。
+5. 所有修复先在 mock/vcan0 验证，再恢复实机单轴低速测试。
+
+本轮收尾时，在没有其他 SocketCAN 进程占用的情况下，CAN ID 1～6 各收到一次直接 `0x80` 关闭请求并分别返回应答。ROS 进程均已退出；`can0` 仍须由现场执行 `sudo bash scripts/setup_can.sh down can0` 关闭。
 
 ## 安全警告
 

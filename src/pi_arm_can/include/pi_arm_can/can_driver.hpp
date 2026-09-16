@@ -70,6 +70,7 @@ struct MotorState
   std::chrono::steady_clock::time_point status1_update{};
   std::chrono::steady_clock::time_point status2_update{};
   std::chrono::steady_clock::time_point zero_ack_update{};
+  std::chrono::steady_clock::time_point stop_ack_update{};
   std::chrono::steady_clock::time_point last_update{};
 };
 
@@ -98,6 +99,8 @@ public:
   std::string last_error() const;
 
   bool enqueue_position_batch(const std::vector<PositionCommand> & commands);
+  // Purges queued position commands, then sends protocol 0x81 and waits for ACKs.
+  bool stop_motors(const std::vector<std::uint8_t> & motor_ids);
   bool execute_management(
     ManagementOperation operation, const std::vector<std::uint8_t> & motor_ids,
     std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});

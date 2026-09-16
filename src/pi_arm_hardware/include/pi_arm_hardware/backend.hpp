@@ -25,6 +25,7 @@ struct BackendConfig
   std::string calibration_file;
   bool allow_real_control{false};
   bool read_only{false};
+  bool commissioning{false};
   std::vector<ActuatorConfig> actuators;
   // Per-joint limits, filled by the hardware plugin from the URDF <limit> tags.
   // The single source of truth for these values is the robot description.
@@ -72,6 +73,8 @@ struct HardwareSample
   std::string driver_mode{"OFFLINE"};
   std::string management_operation{"NONE"};
   std::string error_message;
+  bool motor_test_permitted{false};
+  bool joint_test_permitted{false};
 };
 
 struct ManagementResult
@@ -132,7 +135,29 @@ public:
   MotionArmResult set_motion_armed(
     bool armed, std::uint64_t lease_id) noexcept override;
 
+  // Only the dedicated, single-threaded commissioning node may call these.
+  ManagementResult start_axis_test(const std::string & space, int axis_id,
+    double delta_deg, double speed_deg_s);
+  ManagementResult stop_axis_test(const std::string & reason);
+  bool heartbeat_axis_test(std::uint64_t test_id);
+  void update_axis_test(const HardwareSample & sample);
+  bool axis_test_active() const {return axis_test_active_;}
+  std::uint64_t axis_test_id() const {return axis_test_id_;}
+  std::string axis_test_status() const {return axis_test_status_;}
+
 private:
+  bool axis_test_raw_ready(bool require_still) const;
+  bool axis_test_active_{false};
+  bool axis_test_stop_failed_{false};
+  std::uint64_t axis_test_id_{0};
+  std::string axis_test_status_{"idle"};
+  std::string axis_test_space_;
+  std::vector<pi_arm_can::PositionCommand> axis_test_commands_;
+  std::vector<double> axis_test_origin_protocol_;
+  std::vector<double> axis_test_session_origin_;
+  std::chrono::steady_clock::time_point axis_test_started_{};
+  std::chrono::steady_clock::time_point axis_test_heartbeat_{};
+  double axis_test_timeout_sec_{0.0};
   BackendConfig config_;
   pi_arm_transmission::CableKinematics kinematics_;
   CalibrationResult calibration_;

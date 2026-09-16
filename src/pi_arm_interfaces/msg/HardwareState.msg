@@ -36,3 +36,13 @@ int32 kinematics_error_axis
 float64 kinematics_error_value
 string kinematics_error_message
 string diagnostic
+# Dedicated direction-verification mode, independent of normal motion permission.
+bool commissioning
+string can_interface
+bool motor_test_permitted
+bool joint_test_permitted
+bool axis_test_active
+uint64 axis_test_id
+string axis_test_status
+float64[] protocol_angle_ratios
+int32[] motor_directions

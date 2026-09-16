@@ -34,6 +34,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("can_interface", default_value="can0"),
+            DeclareLaunchArgument("commissioning", default_value="false", choices=["true", "false"]),
             DeclareLaunchArgument(
                 "cable_kinematics_file",
                 default_value=PathJoinSubstitution(
@@ -59,7 +60,7 @@ def generate_launch_description():
                 executable="pi_arm_hardware_monitor_node",
                 name="pi_arm_hardware_monitor",
                 output="screen",
-                parameters=[robot_description],
+                parameters=[robot_description, {"commissioning": LaunchConfiguration("commissioning")}],
             ),
         ]
     )
