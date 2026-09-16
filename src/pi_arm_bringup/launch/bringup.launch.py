@@ -21,6 +21,15 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     use_manager = LaunchConfiguration("use_manager")
     use_websocket = LaunchConfiguration("use_websocket")
+    # controller_manager accepts the first transient-local robot description it
+    # receives and ignores later ones.  A stale publisher on /robot_description
+    # can therefore select hardware parameters from an older launch.  Keep the
+    # control description on a launch-specific configuration path so an
+    # explicit backend/interface selection cannot be replaced by that stale
+    # global sample.
+    controller_robot_description_topic = PathJoinSubstitution(
+        ["/pi_arm/controller_robot_description", hardware_type, can_interface]
+    )
 
     description_file = PathJoinSubstitution(
         [FindPackageShare("pi_arm_description"), "urdf", "pi_arm.urdf.xacro"]
@@ -158,13 +167,18 @@ def generate_launch_description():
                 executable="robot_state_publisher",
                 output="screen",
                 parameters=[robot_description],
+                remappings=[
+                    ("robot_description", controller_robot_description_topic)
+                ],
             ),
             Node(
                 package="controller_manager",
                 executable="ros2_control_node",
                 output="screen",
                 parameters=[controllers_file],
-                remappings=[("~/robot_description", "/robot_description")],
+                remappings=[
+                    ("robot_description", controller_robot_description_topic)
+                ],
             ),
             Node(
                 package="controller_manager",

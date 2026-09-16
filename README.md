@@ -136,6 +136,11 @@ ros2 launch pi_arm_bringup bringup.launch.py \
 
 `vcan` 不是 ros2_control 的 `mock` 后端：前者配合仓库内电机响应器验证 SocketCAN 和协议层；一般 MoveIt 与控制器联调应优先使用 `hardware_type:=mock`。
 
+控制 bringup 不让 controller manager 直接订阅全局 `/robot_description`。它将本轮 xacro 结果发布并订阅到
+`/pi_arm/controller_robot_description/<hardware_type>/<can_interface>`，避免残留的 transient-local
+`/robot_description` 发布者抢先注入旧 backend 或 CAN 接口参数。显示用 launch 仍可使用标准
+`/robot_description`；控制链排障时应以 controller manager 启动日志打印的实际订阅 topic 为准。
+
 ## ROS API
 
 主要接口位于 `/pi_arm` 命名空间：
