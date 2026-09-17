@@ -39,6 +39,7 @@ def main():
         finish(previous)
         print('PASS full joint target through normal control chain', flush=True)
 
+        page.locator('[data-tab="outputControlCard"]').click()
         page.locator('#copyOutputTargets').click()
         value = float(page.locator('#outputTarget1').input_value())
         page.locator('#outputTarget1').fill(str(value+.2))
@@ -50,6 +51,7 @@ def main():
         print('PASS model output target with 0.5 deg/s ceiling', flush=True)
 
         # All Cartesian execution in this test is initiated via webpage clicks.
+        page.locator('[data-tab="multi"]').click()
         page.locator('input[name="motionMode"][value="line"]').check()
         page.wait_for_timeout(300)
         for target, source in [('targetX','endX'),('targetY','endY'),('targetZ','endZ'),

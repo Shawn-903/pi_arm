@@ -65,6 +65,7 @@ def main():
 
         assert page.locator('#outputSpeedLimit').input_value() == '5'
         page.locator('#outputSpeedLimit').fill('0.5')
+        page.locator('[data-tab="outputControlCard"]').click()
         page.locator('#copyOutputTargets').click()
         output_before = float(page.locator('#outputTarget1').input_value())
         page.locator('#outputTarget1').fill(str(output_before+.1))
@@ -78,6 +79,7 @@ def main():
 
         page.locator("#copyCurrentBtn").click()
         # The top-level button must read single-joint cards, even on the multi tab.
+        page.locator('[data-tab="multi"]').click()
         page.locator("#multiJoint1").fill("500")
         before = previous_task()
         page.locator("#moveAllBtn").click()

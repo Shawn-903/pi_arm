@@ -3,6 +3,12 @@
 树莓派六自由度绳索机械臂，基于 Ubuntu 24.04 ARM64、ROS 2 Jazzy、SocketCAN、ros2_control 和 MoveIt 2。
 阶段版本 **v0.1.0-stage1**（2026-09-17）：操作者确认当前版本可稳定运动，冻结为前端开发的控制基线。
 
+## 前端开发分支
+
+当前分支 `feature/web-console-v2` 已按 [前端计划](docs/frontend/PLAN.md) 完成首轮工作台重构。
+阶段一控制基线保留在标签 `v0.1.0-stage1`。
+新界面说明见 [Web README](web/README.md)，截图及测试见 [前端验收](docs/frontend/REVIEW.md)。
+
 ## 已完成
 
 | 功能 | 当前实现 |

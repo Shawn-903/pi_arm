@@ -21,6 +21,8 @@ def main():
         page.locator("#connectBtn").click()
         page.wait_for_function("lastState !== null")
         assert page.evaluate('lastState.commissioning && lastState.can_interface === "vcan0"')
+        page.locator('#viewRole').select_option('developer')
+        page.locator('[data-view-target="commissioning"]').click()
         assert page.locator('#motorTestStep').input_value() == '5'
         assert page.locator('#motorTestStep').get_attribute('max') == '5'
         assert page.locator('#motorTestSpeed').input_value() == '1'
@@ -41,6 +43,7 @@ def main():
         assert "acknowledged" in page.locator("#axisTestStatus").inner_text()
         page.locator("#axisObservation").fill("VCAN TEST: observed direction placeholder")
         page.locator("#saveAxisObservation").click()
+        page.locator('[data-view-target="diagnostics"]').click()
         with page.expect_download() as download:
             page.locator("#exportDiagnosticBtn").click()
         snapshot = json.loads(Path(download.value.path()).read_text())
@@ -55,6 +58,7 @@ def main():
         assert "VCAN TEST" in record["observation"]
         assert record["after"]["axis_test"]["active"] is False
         if args.stall:
+            page.locator('[data-view-target="commissioning"]').click()
             before = page.evaluate("lastState.axis_test.test_id")
             positive.click()
             page.wait_for_function("lastState.axis_test.active")

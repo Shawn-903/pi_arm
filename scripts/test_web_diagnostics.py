@@ -44,6 +44,8 @@ def main():
         page.goto((Path(__file__).resolve().parents[1] / "web/control.html").as_uri())
         page.locator("#connectBtn").click()
         page.wait_for_function('lastState?.robot_state === "FAULT"')
+        page.locator('#viewRole').select_option('developer')
+        page.locator('[data-view-target="diagnostics"]').click()
         summary = page.locator("#diagnosticSummary").inner_text()
         assert "只读排查" in summary and "OUTPUT_POSITION_LIMIT" in summary
         assert "-8.146277666983426" in summary and "limit=[-7.841,7.841]" in summary
@@ -66,6 +68,7 @@ def main():
         assert "停止未确认" in summary and "重试停止" in summary
         page.evaluate('''handleMessage({...lastState, read_only:false, commissioning:true,
           motor_test_permitted:false, protocol_angle_ratios:[36,36,36,6,6,6]})''')
+        page.locator('[data-view-target="commissioning"]').click()
         page.locator("#testMotorId").select_option("4")
         assert abs(float(page.locator("#motorTestSpeed").get_attribute("min")) - 1/6) < 1e-10
         assert "0.166667" in page.locator("#motorTestReason").inner_text()
@@ -75,6 +78,7 @@ def main():
           packing:{target_joint_angles_deg:[0,100.7,-85.6,0,0,0],available:false,
                    reason:"方向测试模式未启动整臂轨迹控制器；标定尚未确认"},
           zero:{target_joint_angles_deg:[0,0,0,0,0,0],available:false,reason:"标定尚未确认"}}})''')
+        page.locator('[data-view-target="workbench"]').click()
         assert page.locator('#movePackingPose').is_visible() and page.locator('#movePackingPose').is_disabled()
         assert page.locator('#moveZeroPose').is_visible() and page.locator('#moveZeroPose').is_disabled()
         assert '100.700' in page.locator('#packingPoseStatus').inner_text()
