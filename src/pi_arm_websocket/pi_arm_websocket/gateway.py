@@ -683,6 +683,11 @@ class WebSocketGateway:
                     "progress": state.task.progress,
                     "code": state.task.code,
                     "message": state.task.message,
+                    "arrival_state": getattr(state.task, "arrival_state", ""),
+                    "goal_tolerance_deg": getattr(state.task, "goal_position_tolerance", 0.0) * RAD_TO_DEG,
+                    "joint_names": list(getattr(state.task, "joint_names", [])),
+                    "target_joint_angles_deg": [v * RAD_TO_DEG for v in getattr(state.task, "target_positions", [])],
+                    "error_joint_angles_deg": [v * RAD_TO_DEG for v in getattr(state.task, "position_errors", [])],
                 },
             }
         body["pose"] = self._pose() if state is not None else {}

@@ -5,8 +5,9 @@
 
 ## 前端开发分支
 
-当前分支 `feature/web-console-v2` 已按 [前端计划](docs/frontend/PLAN.md) 完成首轮工作台重构。
-已加入 URDF 实时三维姿态、关节选择、坐标轴及独立目标预览，软件验证完成，待实机比对。
+三维显示已通过操作者实机只读确认，存档为 **v0.2.0-viewer-baseline**（`85974a2`）。
+当前分支 `feature/motion-accuracy-and-interactive-preview` 按 [交互计划](docs/frontend/INTERACTIVE_PLAN.md) 继续开发。
+到位判定已增加每轴 0.2° 容差、连续稳定检查及停止后复核，见 [修复记录](docs/releases/arrival-accuracy.md)。
 阶段一控制基线保留在标签 `v0.1.0-stage1`。
 新界面说明见 [Web README](web/README.md)，截图及测试见 [前端验收](docs/frontend/REVIEW.md)。
 三维模型实现与现场确认步骤见 [三维验收](docs/frontend/VIEWER_REVIEW.md)。
@@ -100,6 +101,7 @@ p 是协议角，φ 是物理输出轴相对模型零位的角，q 是关节角�
 | 打包/零位共同关节限速 | `src/pi_arm_websocket/pi_arm_websocket/presets.py`：`PRESET_JOINT_SPEED_DEG_S = 1.0` |
 | 单次输出轴限速 | 网页输入框 / API 的 `output_speed_limit`，单位 °/s |
 | 轨迹控制器 | `src/pi_arm_bringup/config/controllers.yaml` |
+| 到位容差、稳定时间、收敛等待 | `src/pi_arm_bringup/config/manager.yaml`（默认 0.2° / 0.5 s / 10 s） |
 
 仅修改绳索整体方向时，先停止服务，再生成新标定并在下次启动使用其路径：
 

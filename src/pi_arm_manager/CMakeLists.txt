@@ -33,6 +33,8 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_arrival_check test/test_arrival_check.cpp)
+  target_include_directories(test_arrival_check PRIVATE include)
   ament_add_gtest(test_direct_move_validation test/test_direct_move_validation.cpp)
   target_include_directories(test_direct_move_validation PRIVATE include)
   ament_add_gtest(test_state_aggregator test/test_state_aggregator.cpp)

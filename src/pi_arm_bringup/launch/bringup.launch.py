@@ -152,6 +152,8 @@ def generate_launch_description():
             DeclareLaunchArgument("use_manager", default_value="true"),
             DeclareLaunchArgument("use_websocket", default_value="true"),
             DeclareLaunchArgument("websocket_port", default_value="8765"),
+            DeclareLaunchArgument("manager_config", default_value=PathJoinSubstitution(
+                [FindPackageShare("pi_arm_bringup"), "config", "manager.yaml"])),
             Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
@@ -223,7 +225,8 @@ def generate_launch_description():
                         "still_velocity_rad_s": 0.00017453292519943296,
                         "follow_joint_trajectory_action":
                             "/joint_trajectory_controller/follow_joint_trajectory",
-                    }
+                    },
+                    LaunchConfiguration("manager_config"),
                 ],
                 condition=IfCondition(use_manager),
             ),

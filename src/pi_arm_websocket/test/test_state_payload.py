@@ -111,3 +111,20 @@ def test_disconnected_payload_does_not_show_cached_pose():
     payload = json.loads(gateway._state_message())
     assert payload["control_permitted"] is False
     assert payload["pose"] == {}
+
+
+def test_arrival_target_error_and_status_are_exposed_in_degrees():
+    import math
+    state = RobotState()
+    state.task.arrival_state = "not_reached"
+    state.task.joint_names = ["joint_01"]
+    state.task.target_positions = [math.radians(10)]
+    state.task.position_errors = [math.radians(1)]
+    state.task.goal_position_tolerance = math.radians(.2)
+    gateway = WebSocketGateway(_Bridge(state))
+    gateway._pose = lambda: {}
+    task = json.loads(gateway._state_message())["task"]
+    assert task["arrival_state"] == "not_reached"
+    assert task["target_joint_angles_deg"] == [10.0]
+    assert task["error_joint_angles_deg"] == [1.0]
+    assert math.isclose(task["goal_tolerance_deg"], .2)

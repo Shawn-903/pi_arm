@@ -1395,6 +1395,11 @@ body[data-view="commissioning"] .workspace-grid {
 }
 
 /* The 3D panel is a read-only view of the existing state stream. */
+.arrival-errors {
+  font-size: 11px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
 .robot-viewer {
   margin-bottom: 20px;
   overflow: hidden;

@@ -10,3 +10,11 @@ uint8 status
 float32 progress
 int32 code
 string message
+
+# Arrival verification. Position/error units are radians; errors = target - feedback.
+# Errors are the latest verification sample and are retained at task completion.
+string[] joint_names
+float64[] target_positions
+float64[] position_errors
+float64 goal_position_tolerance
+string arrival_state

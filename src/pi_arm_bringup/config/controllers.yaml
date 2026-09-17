@@ -30,4 +30,10 @@ joint_trajectory_controller:
     allow_integration_in_goal_trajectories: false
     constraints:
       stopped_velocity_tolerance: 0.00017453292519943296
-      goal_time: 2.0
+      goal_time: 10.0
+      joint_01: {goal: 0.003490658503988659}
+      joint_02: {goal: 0.003490658503988659}
+      joint_04: {goal: 0.003490658503988659}
+      joint_05: {goal: 0.003490658503988659}
+      joint_06: {goal: 0.003490658503988659}
+      joint_09: {goal: 0.003490658503988659}

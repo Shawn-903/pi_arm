@@ -191,6 +191,36 @@
           : "暂无运动任务",
     );
     text("taskCaption", task?.message || "以控制器最终结果为准");
+    const arrivalLabels = {
+      planning: "规划中",
+      tracking: "跟随中",
+      settling: "终点收敛中",
+      verifying_after_stop: "停止后核验",
+      reached: "到位已核验",
+      not_reached: "未到位",
+      canceled: "已取消",
+      failed: "任务失败",
+    };
+    text(
+      "arrivalSummary",
+      fresh && task?.arrival_state
+        ? `到位状态：${arrivalLabels[task.arrival_state] || task.arrival_state} · 容差 ±${Number(task.goal_tolerance_deg).toFixed(2)}°`
+        : "到位状态：尚未验证",
+    );
+    const arrivalErrors = document.getElementById("arrivalErrors");
+    arrivalErrors.replaceChildren();
+    if (fresh && task?.target_joint_angles_deg?.length === 6) {
+      task.target_joint_angles_deg.forEach((target, i) => {
+        const error = task.error_joint_angles_deg?.[i];
+        const row = document.createElement("div");
+        row.className =
+          number(error) && Math.abs(error) > task.goal_tolerance_deg
+            ? "status-error"
+            : "";
+        row.textContent = `J${i + 1} 目标 ${number(target) ? target.toFixed(2) : "--"}° · 末次核验误差 ${number(error) ? error.toFixed(3) : "--"}°`;
+        arrivalErrors.appendChild(row);
+      });
+    }
     const progress = number(task?.progress)
       ? Math.max(0, Math.min(100, task.progress * 100))
       : 0;

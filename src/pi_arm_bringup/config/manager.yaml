@@ -1,0 +1,6 @@
+pi_arm_manager:
+  ros__parameters:
+    # Applied explicitly to every controller action, then independently verified.
+    goal_position_tolerance_deg: 0.2
+    arrival_stable_time_sec: 0.5
+    arrival_timeout_sec: 10.0

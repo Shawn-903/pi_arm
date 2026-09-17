@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -28,6 +29,7 @@
 #include "pi_arm_interfaces/srv/set_motion_armed.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
 #include "pi_arm_manager/management_gate.hpp"
+#include "pi_arm_manager/arrival_check.hpp"
 #include "pi_arm_manager/direct_move_validation.hpp"
 #include "pi_arm_transmission/config_loader.hpp"
 #include "pi_arm_transmission/cable_kinematics.hpp"
@@ -117,6 +119,14 @@ public:
     motion_timeout_ = declare_parameter("motion_timeout_sec", 120.0);
     still_velocity_ = declare_parameter(
       "still_velocity_rad_s", 0.00017453292519943296);
+    goal_position_tolerance_ = declare_parameter("goal_position_tolerance_deg", 0.2) * M_PI / 180.0;
+    arrival_stable_time_ = declare_parameter("arrival_stable_time_sec", 0.5);
+    arrival_timeout_ = declare_parameter("arrival_timeout_sec", 10.0);
+    if (!std::isfinite(goal_position_tolerance_) || goal_position_tolerance_ <= 0.0 ||
+      !std::isfinite(arrival_stable_time_) || arrival_stable_time_ <= 0.0 ||
+      !std::isfinite(arrival_timeout_) || arrival_timeout_ <= arrival_stable_time_) {
+      throw std::runtime_error("invalid arrival verification parameters");
+    }
     state_rate_ = declare_parameter("state_publish_rate_hz", 10.0);
     follow_action_name_ = declare_parameter(
       "follow_joint_trajectory_action",
@@ -125,7 +135,7 @@ public:
     task_.status = pi_arm_interfaces::msg::TaskState::IDLE;
     task_.message = "idle";
     hardware_sub_ = create_subscription<pi_arm_interfaces::msg::HardwareState>(
-      "/pi_arm/hardware_state", rclcpp::SensorDataQoS(),
+      declare_parameter("hardware_state_topic", std::string("/pi_arm/hardware_state")), rclcpp::SensorDataQoS(),
       std::bind(&ManagerNode::hardware_callback, this, std::placeholders::_1));
     state_pub_ = create_publisher<pi_arm_interfaces::msg::RobotState>(
       "/pi_arm/state", rclcpp::QoS(10).reliable().transient_local());
@@ -564,6 +574,14 @@ private:
       std::lock_guard<std::mutex> lock(state_mutex_);
       hardware_ = *message;
       last_hardware_time_ = now();
+      ++hardware_sequence_;
+      if (task_claimed_.load() && task_.joint_names == hardware_.joint_names &&
+        task_.target_positions.size() == hardware_.positions.size()) {
+        task_.position_errors.clear();
+        for (size_t i = 0; i < task_.target_positions.size(); ++i) {
+          task_.position_errors.push_back(task_.target_positions[i] - hardware_.positions[i]);
+        }
+      }
       const auto state = aggregate_state(hardware_, task_);
       if (task_claimed_.load()) {
         hardware_stop_reason = motion_stop_reason_for_robot_state(state);
@@ -663,6 +681,11 @@ private:
     task_.progress = 0.0F;
     task_.code = 0;
     task_.message = "running";
+    task_.joint_names.clear();
+    task_.target_positions.clear();
+    task_.position_errors.clear();
+    task_.goal_position_tolerance = goal_position_tolerance_;
+    task_.arrival_state = "planning";
   }
 
   void finish_task(uint8_t status, int32_t code, const std::string & message)
@@ -677,6 +700,9 @@ private:
       task_.progress = status == pi_arm_interfaces::msg::TaskState::SUCCEEDED ? 1.0F : task_.progress;
       task_.code = code;
       task_.message = message;
+      if (status == pi_arm_interfaces::msg::TaskState::CANCELED) {task_.arrival_state = "canceled";}
+      else if (status == pi_arm_interfaces::msg::TaskState::FAILED &&
+        task_.arrival_state != "not_reached") {task_.arrival_state = "failed";}
     }
     task_claimed_.store(false);
     if (status == pi_arm_interfaces::msg::TaskState::SUCCEEDED) {
@@ -718,6 +744,52 @@ private:
       std::this_thread::sleep_for(20ms);
     }
     return false;
+  }
+
+  bool wait_arrival(const std::string & stage)
+  {
+    ArrivalWindow window(arrival_stable_time_);
+    const auto start = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      task_.arrival_state = stage;
+    }
+    while (rclcpp::ok() && !stop_requested_.load()) {
+      const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+      if (elapsed >= arrival_timeout_) {break;}
+      ArrivalCheck check;
+      std::uint64_t sequence;
+      {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        const bool fresh = (now() - last_hardware_time_).seconds() <= hardware_timeout_ &&
+          hardware_.connected && hardware_.kinematics_valid &&
+          hardware_.fresh.size() == task_.joint_names.size() &&
+          std::all_of(hardware_.fresh.begin(), hardware_.fresh.end(), [](bool v) {return v;}) &&
+          hardware_.motor_fresh.size() == task_.joint_names.size() &&
+          std::all_of(hardware_.motor_fresh.begin(), hardware_.motor_fresh.end(), [](bool v) {return v;});
+        check = check_arrival(task_.joint_names, task_.target_positions, hardware_.joint_names,
+          hardware_.positions, hardware_.velocities, fresh, goal_position_tolerance_, still_velocity_);
+        sequence = hardware_sequence_;
+        task_.position_errors = check.errors;
+      }
+      if (window.update(check.valid && check.reached, elapsed, sequence)) {return true;}
+      std::this_thread::sleep_for(20ms);
+    }
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    task_.arrival_state = "not_reached";
+    return false;
+  }
+
+  std::string arrival_error(const std::string & stage)
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    std::ostringstream text;
+    text << "GOAL_NOT_REACHED (" << stage << "), tolerance=" << goal_position_tolerance_ * 180.0 / M_PI << "deg; errors:";
+    if (task_.position_errors.empty()) {text << " feedback unavailable";}
+    for (size_t i = 0; i < task_.position_errors.size(); ++i) {
+      text << " J" << i + 1 << "=" << task_.position_errors[i] * 180.0 / M_PI << "deg";
+    }
+    return text.str();
   }
 
   bool valid_joint_goal(
@@ -1269,6 +1341,22 @@ private:
   {
     const double output_speed = resolved_output_speed(handle->get_goal()->max_output_velocity);
     prepare_trajectory(goal.trajectory, output_speed);
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      task_.joint_names = goal.trajectory.joint_names;
+      task_.target_positions = goal.trajectory.points.back().positions;
+      task_.arrival_state = "tracking";
+    }
+    // Explicit action tolerances cannot silently inherit a zero/disabled controller default.
+    goal.goal_tolerance.clear();
+    for (const auto & name : goal.trajectory.joint_names) {
+      control_msgs::msg::JointTolerance tolerance;
+      tolerance.name = name;
+      tolerance.position = goal_position_tolerance_;
+      tolerance.velocity = still_velocity_;
+      goal.goal_tolerance.push_back(tolerance);
+    }
+    goal.goal_time_tolerance = rclcpp::Duration::from_seconds(arrival_timeout_);
     const auto lease_id = active_task_id();
     if (!set_motion_armed(true, lease_id, command + "/accepted", output_speed)) {
       throw std::runtime_error("failed to arm motion");
@@ -1280,7 +1368,7 @@ private:
     const double result_timeout = !goal.trajectory.points.empty() ?
       direct_result_timeout(
       rclcpp::Duration(goal.trajectory.points.back().time_from_start).seconds(),
-      motion_timeout_, operation_timeout_) : motion_timeout_;
+      motion_timeout_, arrival_timeout_ + operation_timeout_ + arrival_stable_time_ + 1.0) : motion_timeout_;
     bool direct_disarmed = false;
     bool stop_confirmed = true;
     const auto disarm_direct = [this, lease_id, &direct_disarmed, &stop_confirmed](const std::string & stage) {
@@ -1339,6 +1427,13 @@ private:
         wrapped.code == rclcpp_action::ResultCode::SUCCEEDED &&
         wrapped.result->error_code == Follow::Result::SUCCESSFUL;
       detail = wrapped.result ? wrapped.result->error_string : "trajectory returned no result";
+      if (wrapped.result && wrapped.result->error_code == Follow::Result::GOAL_TOLERANCE_VIOLATED) {
+        {
+          std::lock_guard<std::mutex> lock(state_mutex_);
+          task_.arrival_state = "not_reached";
+        }
+        detail = arrival_error("controller timeout");
+      }
       RCLCPP_INFO(
         get_logger(),
         "%s follow: result ready ok=%d result_code=%d error_code=%d detail=%s",
@@ -1354,8 +1449,14 @@ private:
       std::lock_guard<std::mutex> lock(follow_mutex_);
       active_follow_goal_.reset();
     }
-    // Stop new real position frames before settling/result processing. The
-    // hardware service also purges queued position-control batches.
+    // Keep the final position command active until fresh feedback has remained
+    // within position AND velocity tolerances. A controller success alone is insufficient.
+    if (backend_ok && !stop_requested_.load() && !wait_arrival("settling")) {
+      backend_ok = false;
+      detail = arrival_error("before stop");
+    }
+    // Fault/cancel/timeout still revoke the lease immediately. Normal completion
+    // stops only after the pre-stop arrival check, then verifies the stopped pose.
     disarm_direct("direct_move/follow_result");
     if (!stop_confirmed) {backend_ok = false; detail = "motor stop unconfirmed";}
     complete_action<ActionT>(handle, backend_ok, command, detail);
@@ -1404,10 +1505,8 @@ private:
       handle->abort(result);
       return;
     }
-    still_frames_.store(0);
-    RCLCPP_INFO(get_logger(), "%s waiting for still (timeout=%.1fs)", command.c_str(), motion_timeout_);
-    publish_feedback<ActionT>(handle, 0.9F, "waiting_still");
-    if (!wait_still()) {
+    publish_feedback<ActionT>(handle, 0.9F, "verifying_arrival_after_stop");
+    if (!wait_arrival("verifying_after_stop")) {
       RCLCPP_ERROR(
         get_logger(),
         "%s wait_still FAILED still_frames=%d stop=%d",
@@ -1417,8 +1516,8 @@ private:
         return;
       }
       result->success = false;
-      result->code = 3002;
-      result->message = command + " did not become stationary";
+      result->code = 3003;
+      result->message = arrival_error("after stop");
       finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
       handle->abort(result);
       return;
@@ -1427,6 +1526,10 @@ private:
     result->success = true;
     result->code = 0;
     result->message = "ok";
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      task_.arrival_state = "reached";
+    }
     publish_feedback<ActionT>(handle, 1.0F, "completed");
     finish_task(pi_arm_interfaces::msg::TaskState::SUCCEEDED, 0, "ok");
     handle->succeed(result);
@@ -1517,6 +1620,10 @@ private:
   double operation_timeout_;
   double motion_timeout_;
   double still_velocity_;
+  double goal_position_tolerance_;
+  double arrival_stable_time_;
+  double arrival_timeout_;
+  std::uint64_t hardware_sequence_{0};
   std::map<std::string, JointLimits> joint_limits_;
   std::unique_ptr<pi_arm_transmission::CableKinematics> cable_;
   pi_arm_transmission::Vector6 protocol_ratios_{};
