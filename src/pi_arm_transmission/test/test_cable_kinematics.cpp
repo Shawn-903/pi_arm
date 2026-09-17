@@ -66,6 +66,51 @@ TEST(CableKinematics, RejectsInvalidAndIncompatibleParameters)
     std::invalid_argument);
 }
 
+TEST(CableKinematics, OutputDirectionsRoundTripAndDifferentiateForAllSignCombinations)
+{
+  const auto base = parameters();
+  const pi_arm_transmission::CableKinematics original(base);
+  const pi_arm_transmission::Vector6 q{0.1, 0.2, -0.3, 0.4, -0.5, 0.6};
+  const pi_arm_transmission::Vector6 dq{0.01, -0.02, 0.03, -0.04, 0.05, -0.06};
+  pi_arm_transmission::Vector6 reference{}, reference_velocity{};
+  ASSERT_TRUE(original.joint_to_output_position(q, reference));
+  ASSERT_TRUE(original.joint_to_output_velocity(q, dq, reference_velocity));
+  const auto reference_residual = original.axis6_residual(q[1], q[5], reference[5]);
+  for (unsigned mask = 0; mask < 64; ++mask) {
+    auto config = base;
+    for (std::size_t i = 0; i < 6; ++i) {
+      config.output_directions[i] = (mask & (1U << i)) ? -1 : 1;
+    }
+    const pi_arm_transmission::CableKinematics model(config);
+    pi_arm_transmission::Vector6 output{}, velocity{}, recovered{}, recovered_velocity{};
+    ASSERT_TRUE(model.joint_to_output_position(q, output));
+    ASSERT_TRUE(model.output_to_joint_position(output, recovered));
+    ASSERT_TRUE(model.joint_to_output_velocity(q, dq, velocity));
+    ASSERT_TRUE(model.output_to_joint_velocity(q, velocity, recovered_velocity));
+    pi_arm_transmission::Matrix6 jacobian{};
+    ASSERT_TRUE(model.jacobian(q, jacobian));
+    for (std::size_t i = 0; i < 6; ++i) {
+      EXPECT_NEAR(output[i], config.output_directions[i] * reference[i], kTolerance);
+      EXPECT_NEAR(velocity[i], config.output_directions[i] * reference_velocity[i], kTolerance);
+      EXPECT_NEAR(recovered[i], q[i], kTolerance);
+      EXPECT_NEAR(recovered_velocity[i], dq[i], kTolerance);
+      auto shifted = q;
+      shifted[i] += 1e-7;
+      pi_arm_transmission::Vector6 perturbed{};
+      ASSERT_TRUE(model.joint_to_output_position(shifted, perturbed));
+      for (std::size_t row = 0; row < 6; ++row) {
+        EXPECT_NEAR((perturbed[row] - output[row]) / 1e-7, jacobian[row][i], 1e-7);
+      }
+    }
+    const auto residual = model.axis6_residual(q[1], q[5], output[5]);
+    EXPECT_NEAR(residual.branch_a_mm, reference_residual.branch_a_mm, kTolerance);
+    EXPECT_NEAR(residual.branch_b_mm, reference_residual.branch_b_mm, kTolerance);
+  }
+  auto invalid = base;
+  invalid.output_directions[2] = 0;
+  EXPECT_THROW(pi_arm_transmission::CableKinematics model(invalid), std::invalid_argument);
+}
+
 TEST(CableKinematics, MapsJointPositionWithJoint2Coupling)
 {
   const pi_arm_transmission::CableKinematics kinematics(parameters());
@@ -159,6 +204,36 @@ TEST(CableKinematics, ChecksConfiguredOutputPositionLimitsWithoutClamping)
   EXPECT_EQ(status.error, pi_arm_transmission::KinematicsError::OUTPUT_POSITION_LIMIT);
   EXPECT_EQ(status.axis, 3U);
   EXPECT_DOUBLE_EQ(status.value, output[2]);
+}
+
+TEST(CableKinematics, FeedbackAllowanceIncludesCouplingButDoesNotChangeCommandLimits)
+{
+  for (const int sign : {-1, 1}) {
+    auto value = parameters();
+    value.axis3.coupling_sign = sign;
+    const pi_arm_transmission::CableKinematics kinematics(value);
+    const double allowance = 3.0 * kPi / 180.0;
+    pi_arm_transmission::Vector6 tolerance{0, allowance, allowance, 0, 0, 0};
+    const pi_arm_transmission::Vector6 margins{
+      0, allowance, (kAxis3Gain + kAxis345CouplingGain) * allowance,
+      kAxis345CouplingGain * allowance, kAxis345CouplingGain * allowance,
+      kAxis6CouplingGain * allowance};
+    for (std::size_t axis = 1; axis < 6; ++axis) {
+      for (const int side : {-1, 1}) {
+        pi_arm_transmission::Vector6 output{};
+        output[axis] = side * (10.0 + margins[axis]);
+        EXPECT_TRUE(kinematics.check_output_feedback_limits(output, tolerance));
+        EXPECT_FALSE(kinematics.check_output_position_limits(output));
+        EXPECT_FALSE(kinematics.check_output_feedback_limits(output, {}));
+        output[axis] += side * 1e-4;
+        EXPECT_FALSE(kinematics.check_output_feedback_limits(output, tolerance));
+      }
+    }
+    tolerance[1] = -allowance;
+    EXPECT_FALSE(kinematics.check_output_feedback_limits({}, tolerance));
+    tolerance[1] = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_FALSE(kinematics.check_output_feedback_limits({}, tolerance));
+  }
 }
 
 TEST(CableKinematics, VelocityMatchesAnalyticAndInverseMapping)

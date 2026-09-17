@@ -15,6 +15,7 @@ constexpr std::size_t kCanPayloadSize = 8U;
 enum class Opcode : std::uint8_t
 {
   MOTOR_OFF = 0x80,
+  MOTOR_STOP = 0x81,
   MOTOR_RUN = 0x88,
   SET_CURRENT_POSITION_ZERO = 0x19,
   READ_MULTI_TURN_ANGLE = 0x92,

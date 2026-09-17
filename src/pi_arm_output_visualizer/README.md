@@ -7,7 +7,7 @@ The interactive path is:
 
 ```text
 motor output-shaft sliders (rad)
-  -> /pi_arm/output_shaft_states
+  -> /pi_arm/model_output_shaft_states
   -> pi_arm_transmission::output_to_joint_position()
   -> six active ROS joint positions
   -> /joint_states
@@ -28,7 +28,11 @@ Output active-joint order is fixed to:
 joint_01, joint_02, joint_04, joint_05, joint_06, joint_09
 ```
 
-Angles follow `sensor_msgs/JointState` conventions and are in radians. The GUI
+Angles follow `sensor_msgs/JointState` conventions and are in radians. The input
+is explicitly **model_output**, i.e. the reducer-output coordinate used by the
+`model_version: 3` cable model. Do not publish ROM-relative feedback directly.
+ROM-relative values must first be converted with an approved, fingerprint-matched
+calibration using `model_output = rom_relative_output + software_offset`. The GUI
 slider ranges are generated from `pi_arm_description/config/cable_kinematics.yaml`.
 The mapper rejects a complete sample if any output shaft exceeds its configured
 range; it never clamps one motor independently.
@@ -56,7 +60,7 @@ If a combination of output-shaft angles is outside the inverse model domain
 keeps the last valid RViz pose.
 
 The converter can also be driven without the GUI by publishing all six named
-positions to `/pi_arm/output_shaft_states`:
+positions to `/pi_arm/model_output_shaft_states`:
 
 ```bash
 ros2 launch pi_arm_output_visualizer output_shaft_visualizer.launch.py use_gui:=false
@@ -65,6 +69,6 @@ ros2 launch pi_arm_output_visualizer output_shaft_visualizer.launch.py use_gui:=
 In another sourced terminal, publish one complete output-shaft state in radians:
 
 ```bash
-ros2 topic pub --once /pi_arm/output_shaft_states sensor_msgs/msg/JointState \
+ros2 topic pub --once /pi_arm/model_output_shaft_states sensor_msgs/msg/JointState \
   "{name: [motor_01_output, motor_02_output, motor_03_output, motor_04_output, motor_05_output, motor_06_output], position: [0.1, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```

@@ -77,6 +77,9 @@ const char * to_string(const KinematicsError error) noexcept
 CableKinematics::CableKinematics(CableKinematicsParameters parameters)
 : parameters_(parameters)
 {
+  for (const int direction : parameters_.output_directions) {
+    require_direction(direction, "output_directions");
+  }
   require_positive_finite(parameters_.axis1.motor_radius_mm, "axis1.motor_radius_mm");
   require_positive_finite(parameters_.axis1.joint_radius_mm, "axis1.joint_radius_mm");
   require_positive_finite(parameters_.axis2.motor_radius_mm, "axis2.motor_radius_mm");
@@ -184,6 +187,20 @@ CableKinematics::CableKinematics(CableKinematicsParameters parameters)
   }
   alpha6_ = 0.5 * (alpha6a + alpha6b);
   axis6_coupling_gain_ = 0.5 * (kappa6a + kappa6b);
+
+  // Apply to the whole row, including J2 compensation. Signed gains are shared
+  // by forward/inverse position, velocity and Jacobian calculations.
+  const auto & direction = parameters_.output_directions;
+  alpha1_ *= direction[0];
+  alpha2_ *= direction[1];
+  axis3_self_gain_ *= direction[2];
+  axis3_coupling_gain_ *= direction[2];
+  axis4_self_gain_ *= direction[3];
+  axis4_coupling_gain_ *= direction[3];
+  axis5_self_gain_ *= direction[4];
+  axis5_coupling_gain_ *= direction[4];
+  alpha6_ *= direction[5];
+  axis6_coupling_gain_ *= direction[5];
 }
 
 KinematicsStatus CableKinematics::joint_to_output_position(
@@ -263,6 +280,37 @@ KinematicsStatus CableKinematics::check_output_position_limits(
       value > limit.upper_position_rad + parameters_.output_limit_tolerance_rad)
     {
       return {KinematicsError::OUTPUT_POSITION_LIMIT, index + 1U, value};
+    }
+  }
+  return KinematicsStatus::success();
+}
+
+KinematicsStatus CableKinematics::check_output_feedback_limits(
+  const Vector6 & output_position_rad,
+  const Vector6 & joint_tolerances_rad) const noexcept
+{
+  const auto finite = require_finite_vector(output_position_rad);
+  if (!finite) {return finite;}
+  for (std::size_t i = 0; i < joint_tolerances_rad.size(); ++i) {
+    if (!std::isfinite(joint_tolerances_rad[i]) || joint_tolerances_rad[i] < 0.0) {
+      return {KinematicsError::NON_FINITE_INPUT, i + 1U, joint_tolerances_rad[i]};
+    }
+  }
+  // All linear gains are constant and |d(sin q)/dq| <= 1. The absolute
+  // Jacobian at zero therefore bounds each output's change over the entire
+  // joint allowance, including coupled J2 motion and either coupling sign.
+  Matrix6 gain{};
+  jacobian(Vector6{}, gain);
+  for (std::size_t i = 0; i < output_position_rad.size(); ++i) {
+    double margin = parameters_.output_limit_tolerance_rad;
+    for (std::size_t j = 0; j < joint_tolerances_rad.size(); ++j) {
+      margin += std::abs(gain[i][j]) * joint_tolerances_rad[j];
+    }
+    const auto & limit = parameters_.output_limits[i];
+    if (output_position_rad[i] < limit.lower_position_rad - margin ||
+      output_position_rad[i] > limit.upper_position_rad + margin)
+    {
+      return {KinematicsError::OUTPUT_POSITION_LIMIT, i + 1U, output_position_rad[i]};
     }
   }
   return KinematicsStatus::success();
@@ -362,11 +410,11 @@ Axis6Residual CableKinematics::axis6_residual(
   const auto & branch_a = parameters_.axis6_branch_a;
   const auto & branch_b = parameters_.axis6_branch_b;
   return {
-    branch_a.motor_radius_mm * output6_position_rad -
+    branch_a.motor_radius_mm * parameters_.output_directions[5] * output6_position_rad -
     branch_a.joint_radius_mm * joint6_position_rad -
     static_cast<double>(branch_a.coupling_sign) *
     branch_a.joint2_guide_radius_mm * joint2_position_rad,
-    branch_b.motor_radius_mm * output6_position_rad -
+    branch_b.motor_radius_mm * parameters_.output_directions[5] * output6_position_rad -
     branch_b.joint_radius_mm * joint6_position_rad -
     static_cast<double>(branch_b.coupling_sign) *
     branch_b.joint2_guide_radius_mm * joint2_position_rad};

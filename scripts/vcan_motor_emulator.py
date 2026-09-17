@@ -40,6 +40,8 @@ def response(motor: Motor, request: bytes) -> bytes | None:
         motor.enabled = True
     elif command == 0x80:
         motor.enabled = False
+    elif command == 0x81:
+        motor.speed_dps = 0
     elif command == 0x9B:
         motor.error = 0
     elif command == 0x19:
@@ -54,6 +56,8 @@ def response(motor: Motor, request: bytes) -> bytes | None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("interface", nargs="?", default="vcan0")
+    parser.add_argument("--trace", action="store_true", help="print each received request")
+    parser.add_argument("--freeze-motion", action="store_true", help="ACK positions without moving (watchdog tests)")
     args = parser.parse_args()
 
     bus = socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
@@ -79,7 +83,15 @@ def main() -> None:
         motor_id = (can_id & 0x7FF) - CAN_BASE
         if length != 8 or motor_id not in motors:
             continue
-        reply = response(motors[motor_id], payload)
+        if args.trace:
+            print(
+                f"RX motor_id={motor_id} opcode=0x{payload[0]:02X}",
+                flush=True,
+            )
+        if args.freeze_motion and payload[0] == 0xA4:
+            reply = response(motors[motor_id], bytes([0x9C]) + bytes(7))
+        else:
+            reply = response(motors[motor_id], payload)
         if reply is not None:
             bus.send(CAN_FRAME.pack(CAN_BASE + motor_id, 8, reply))
 

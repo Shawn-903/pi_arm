@@ -1,6 +1,9 @@
 string[] joint_names
 float64[] positions
 float64 max_velocity
+# Output-shaft speed ceiling, rad/s; zero selects 5 deg/s.
+float64 max_output_velocity
+bool output_space
 ---
 bool success
 int32 code

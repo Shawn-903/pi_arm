@@ -16,9 +16,20 @@ def generate_launch_description():
     can_interface = LaunchConfiguration("can_interface")
     bitrate = LaunchConfiguration("bitrate")
     cable_kinematics_file = LaunchConfiguration("cable_kinematics_file")
+    calibration_file = LaunchConfiguration("calibration_file")
+    allow_real_control = LaunchConfiguration("allow_real_control")
     use_rviz = LaunchConfiguration("use_rviz")
     use_manager = LaunchConfiguration("use_manager")
     use_websocket = LaunchConfiguration("use_websocket")
+    # controller_manager accepts the first transient-local robot description it
+    # receives and ignores later ones.  A stale publisher on /robot_description
+    # can therefore select hardware parameters from an older launch.  Keep the
+    # control description on a launch-specific configuration path so an
+    # explicit backend/interface selection cannot be replaced by that stale
+    # global sample.
+    controller_robot_description_topic = PathJoinSubstitution(
+        ["/pi_arm/controller_robot_description", hardware_type, can_interface]
+    )
 
     description_file = PathJoinSubstitution(
         [FindPackageShare("pi_arm_description"), "urdf", "pi_arm.urdf.xacro"]
@@ -37,6 +48,10 @@ def generate_launch_description():
                 bitrate,
                 " cable_kinematics_file:=",
                 cable_kinematics_file,
+                " calibration_file:=",
+                calibration_file,
+                " allow_real_control:=",
+                allow_real_control,
             ]
         )
     }
@@ -74,6 +89,8 @@ def generate_launch_description():
             "can_interface": can_interface,
             "bitrate": bitrate,
             "cable_kinematics_file": cable_kinematics_file,
+            "calibration_file": calibration_file,
+            "allow_real_control": allow_real_control,
         }.items(),
     )
     rviz = IncludeLaunchDescription(
@@ -87,6 +104,8 @@ def generate_launch_description():
             "can_interface": can_interface,
             "bitrate": bitrate,
             "cable_kinematics_file": cable_kinematics_file,
+            "calibration_file": calibration_file,
+            "allow_real_control": allow_real_control,
         }.items(),
         condition=IfCondition(use_rviz),
     )
@@ -112,9 +131,27 @@ def generate_launch_description():
                 ),
                 description="Installed six-axis cable kinematics YAML",
             ),
+            DeclareLaunchArgument(
+                "calibration_file",
+                default_value=PathJoinSubstitution(
+                    [
+                        FindPackageShare("pi_arm_hardware"),
+                        "config",
+                        "pack_reference_calibration.template.yaml",
+                    ]
+                ),
+                description="Pack-reference actuator calibration YAML",
+            ),
+            DeclareLaunchArgument(
+                "allow_real_control",
+                default_value="false",
+                choices=["true", "false"],
+                description="Explicitly allow real CAN position commands after calibration gates pass",
+            ),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_manager", default_value="true"),
             DeclareLaunchArgument("use_websocket", default_value="true"),
+            DeclareLaunchArgument("websocket_port", default_value="8765"),
             Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
@@ -131,13 +168,18 @@ def generate_launch_description():
                 executable="robot_state_publisher",
                 output="screen",
                 parameters=[robot_description],
+                remappings=[
+                    ("robot_description", controller_robot_description_topic)
+                ],
             ),
             Node(
                 package="controller_manager",
                 executable="ros2_control_node",
                 output="screen",
                 parameters=[controllers_file],
-                remappings=[("~/robot_description", "/robot_description")],
+                remappings=[
+                    ("robot_description", controller_robot_description_topic)
+                ],
             ),
             Node(
                 package="controller_manager",
@@ -190,6 +232,8 @@ def generate_launch_description():
                 executable="pi_arm_websocket",
                 name="pi_arm_websocket",
                 output="screen",
+                parameters=[{"hardware_type": hardware_type, "calibration_file": calibration_file,
+                             "port": LaunchConfiguration("websocket_port")}],
                 condition=IfCondition(use_websocket),
             ),
             rviz,

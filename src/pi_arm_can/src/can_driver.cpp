@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -13,6 +14,7 @@
 #include <linux/can/raw.h>
 #include <net/if.h>
 #include <poll.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -71,6 +73,15 @@ CanDriver::CanDriver(DriverConfig config)
   if (config_.interface_name.empty() || config_.interface_name.size() >= 16U) {
     throw std::invalid_argument("SocketCAN interface name is empty or too long");
   }
+  if (!std::all_of(
+      config_.interface_name.begin(), config_.interface_name.end(),
+      [](const unsigned char value) {
+        return std::isalnum(value) != 0 || value == '_' || value == '-';
+      }))
+  {
+    throw std::invalid_argument(
+            "SocketCAN interface name may contain only letters, digits, '_' and '-'");
+  }
   if (config_.motor_ids.empty()) {
     throw std::invalid_argument("at least one motor ID is required");
   }
@@ -107,12 +118,34 @@ void CanDriver::start()
     last_error_.clear();
   }
 
+  const std::string lease_path = "/run/lock/pi_arm_can_" + config_.interface_name + ".lock";
+  lease_fd_ = ::open(lease_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0660);
+  if (lease_fd_ < 0) {
+    throw std::runtime_error(
+            "failed to open SocketCAN interface lease '" + lease_path + "': " +
+            std::strerror(errno));
+  }
+  if (::flock(lease_fd_, LOCK_EX | LOCK_NB) < 0) {
+    const std::string detail = std::strerror(errno);
+    release_interface_lease();
+    throw std::runtime_error(
+            "SocketCAN interface '" + config_.interface_name +
+            "' is already owned by another Pi Arm process: " + detail);
+  }
+
   const int fd = ::socket(PF_CAN, SOCK_RAW, CAN_RAW);
   if (fd < 0) {
+    release_interface_lease();
     throw std::runtime_error("failed to create SocketCAN socket: " + std::string(std::strerror(errno)));
   }
 
   try {
+    // An unplugged/unpowered bus must not leave the TX thread blocked forever,
+    // preventing commissioning watchdog stops or process shutdown.
+    const struct timeval send_timeout {0, 100000};
+    if (::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout)) < 0) {
+      throw std::runtime_error("failed to configure bounded SocketCAN transmit timeout");
+    }
     struct ifreq request {};
     std::strncpy(request.ifr_name, config_.interface_name.c_str(), IFNAMSIZ - 1U);
     if (::ioctl(fd, SIOCGIFINDEX, &request) < 0) {
@@ -141,6 +174,7 @@ void CanDriver::start()
     }
   } catch (...) {
     ::close(fd);
+    release_interface_lease();
     throw;
   }
 
@@ -170,6 +204,7 @@ void CanDriver::stop() noexcept
     rx_thread_.join();
   }
   close_socket();
+  release_interface_lease();
 
   std::deque<TxBatch> abandoned;
   {
@@ -188,8 +223,15 @@ void CanDriver::stop() noexcept
 
 bool CanDriver::set_mode(const DriverMode requested)
 {
+  std::lock_guard<std::mutex> control_lock(control_tx_mutex_);
+  if (requested == DriverMode::CONTROL &&
+    (motion_stop_status_.load() == MotionStopStatus::PENDING ||
+    motion_stop_status_.load() == MotionStopStatus::FAILED)) {return false;}
   const DriverMode current = mode_.load();
   if (requested == current) {
+    if (requested == DriverMode::MONITORING) {
+      discard_pending_control_batches();
+    }
     return true;
   }
   if (!running_.load() || current == DriverMode::FAULT ||
@@ -200,8 +242,36 @@ bool CanDriver::set_mode(const DriverMode requested)
   if (requested != DriverMode::MONITORING && requested != DriverMode::CONTROL) {
     return false;
   }
+  if (config_.read_only && requested == DriverMode::CONTROL) {
+    return false;
+  }
   mode_.store(requested);
+  if (requested == DriverMode::MONITORING) {
+    discard_pending_control_batches();
+  }
   return true;
+}
+
+void CanDriver::discard_pending_control_batches() noexcept
+{
+  std::deque<TxBatch> discarded;
+  {
+    std::lock_guard<std::mutex> lock(tx_mutex_);
+    auto iterator = tx_queue_.begin();
+    while (iterator != tx_queue_.end()) {
+      if (iterator->requires_control) {
+        discarded.push_back(std::move(*iterator));
+        iterator = tx_queue_.erase(iterator);
+      } else {
+        ++iterator;
+      }
+    }
+  }
+  for (auto & batch : discarded) {
+    if (batch.completion) {
+      try {batch.completion->set_value(false);} catch (...) {}
+    }
+  }
 }
 
 std::string CanDriver::last_error() const
@@ -237,10 +307,14 @@ bool CanDriver::enqueue_batch(TxBatch batch, const bool high_priority)
 
 bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & commands)
 {
+  if (motion_stop_status_.load() == MotionStopStatus::PENDING ||
+    motion_stop_status_.load() == MotionStopStatus::FAILED) {return false;}
+  std::lock_guard<std::mutex> control_lock(control_tx_mutex_);
   if (mode_.load() != DriverMode::CONTROL || commands.empty()) {
     return false;
   }
   TxBatch batch;
+  batch.requires_control = true;
   batch.frames.reserve(commands.size());
   try {
     for (const auto & command : commands) {
@@ -259,15 +333,88 @@ bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & comm
   return enqueue_batch(std::move(batch));
 }
 
+bool CanDriver::stop_motors(const std::vector<std::uint8_t> & motor_ids)
+{
+  return request_motor_stop(motor_ids, true) && wait_for_motor_stop();
+}
+
+bool CanDriver::request_motor_stop(
+  const std::vector<std::uint8_t> & motor_ids, const bool retry_failed)
+{
+  if (config_.read_only || motor_ids.empty()) {return false;}
+  for (const auto id : motor_ids) {
+    if (!validate_motor_id(id)) {return false;}
+  }
+  std::lock_guard<std::mutex> stop_lock(stop_mutex_);
+  if (motion_stop_status_.load() == MotionStopStatus::PENDING) {
+    return stop_motor_ids_ == motor_ids;
+  }
+  if (motion_stop_status_.load() == MotionStopStatus::FAILED && !retry_failed) {return false;}
+  motion_stop_status_.store(MotionStopStatus::PENDING);
+  stop_motor_ids_ = motor_ids;
+  if (!set_mode(DriverMode::MONITORING)) {
+    motion_stop_status_.store(MotionStopStatus::FAILED);
+    return false;
+  }
+  motor_stop_requested_at_ = std::chrono::steady_clock::now();
+  TxBatch batch;
+  for (const auto id : motor_ids) {batch.frames.push_back(make_request(id, Opcode::MOTOR_STOP));}
+  if (!enqueue_batch(std::move(batch), true)) {
+    motion_stop_status_.store(MotionStopStatus::FAILED);
+    return false;
+  }
+  return true;
+}
+
+void CanDriver::refresh_motor_stop()
+{
+  std::lock_guard<std::mutex> stop_lock(stop_mutex_);
+  if (motion_stop_status_.load() != MotionStopStatus::PENDING) {return;}
+  std::shared_lock<std::shared_mutex> state_lock(state_mutex_);
+  const bool confirmed = std::all_of(stop_motor_ids_.begin(), stop_motor_ids_.end(), [&](auto id) {
+      return states_.at(id).stop_ack_update > motor_stop_requested_at_;
+    });
+  if (confirmed) {
+    motion_stop_status_.store(MotionStopStatus::CONFIRMED);
+  } else if (std::chrono::steady_clock::now() - motor_stop_requested_at_ >=
+    std::chrono::milliseconds(500))
+  {
+    motion_stop_status_.store(MotionStopStatus::FAILED);
+  }
+  stop_cv_.notify_all();
+}
+
+MotionStopStatus CanDriver::motion_stop_status()
+{
+  refresh_motor_stop();
+  return motion_stop_status_.load();
+}
+
+bool CanDriver::wait_for_motor_stop()
+{
+  {
+    std::unique_lock<std::mutex> lock(stop_mutex_);
+    stop_cv_.wait_until(lock, motor_stop_requested_at_ + std::chrono::milliseconds(500), [&]() {
+      return motion_stop_status_.load() != MotionStopStatus::PENDING;
+    });
+  }
+  return motion_stop_status() == MotionStopStatus::CONFIRMED;
+}
+
 bool CanDriver::execute_management(
   const ManagementOperation operation, const std::vector<std::uint8_t> & motor_ids,
   const std::chrono::milliseconds timeout)
 {
-  if (operation == ManagementOperation::NONE || motor_ids.empty() || timeout.count() <= 0) {
+  if (config_.read_only || operation == ManagementOperation::NONE || motor_ids.empty() ||
+    timeout.count() <= 0)
+  {
     return false;
   }
   std::unique_lock<std::mutex> operation_lock(management_mutex_);
   const DriverMode previous = mode_.load();
+  if (operation == ManagementOperation::MOTOR_RUN &&
+    (motion_stop_status_.load() == MotionStopStatus::PENDING ||
+    motion_stop_status_.load() == MotionStopStatus::FAILED)) {return false;}
   if (previous != DriverMode::MONITORING && previous != DriverMode::CONTROL) {
     return false;
   }
@@ -410,11 +557,11 @@ void CanDriver::tx_loop() noexcept
     }
 
     if (have_batch) {
-      const bool success = write_batch(batch.frames);
+      const bool success = write_batch(batch.frames, batch.requires_control);
       if (batch.completion) {
         try {batch.completion->set_value(success);} catch (...) {}
       }
-      if (!success) {
+      if (!success && (!batch.requires_control || mode_.load() == DriverMode::FAULT)) {
         break;
       }
     }
@@ -431,8 +578,18 @@ void CanDriver::tx_loop() noexcept
   }
 }
 
-bool CanDriver::write_batch(const std::vector<CanFrame> & frames) noexcept
+bool CanDriver::write_batch(
+  const std::vector<CanFrame> & frames, const bool requires_control) noexcept
 {
+  std::unique_lock<std::mutex> control_lock(control_tx_mutex_, std::defer_lock);
+  if (requires_control) {
+    control_lock.lock();
+    if (mode_.load() != DriverMode::CONTROL ||
+      motion_stop_status_.load() == MotionStopStatus::PENDING ||
+      motion_stop_status_.load() == MotionStopStatus::FAILED) {
+      return false;
+    }
+  }
   for (const auto & frame : frames) {
     struct can_frame native {};
     native.can_id = frame.id;
@@ -548,12 +705,16 @@ void CanDriver::process_received_frame(const CanFrame & frame)
       state.zero_ack_valid = true;
       state.zero_ack_update = now;
       break;
+    case Opcode::MOTOR_STOP:
+      state.stop_ack_update = now;
+      break;
     default:
       return;
   }
   state.last_update = now;
   lock.unlock();
   state_cv_.notify_all();
+  refresh_motor_stop();
 }
 
 void CanDriver::set_fault(const std::string & message) noexcept
@@ -573,6 +734,15 @@ void CanDriver::close_socket() noexcept
     ::close(socket_fd_);
   }
   socket_fd_ = -1;
+}
+
+void CanDriver::release_interface_lease() noexcept
+{
+  if (lease_fd_ >= 0) {
+    ::flock(lease_fd_, LOCK_UN);
+    ::close(lease_fd_);
+  }
+  lease_fd_ = -1;
 }
 
 }  // namespace pi_arm_can

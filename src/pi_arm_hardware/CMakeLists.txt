@@ -15,10 +15,14 @@ find_package(pi_arm_transmission REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(yaml_cpp_vendor REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 add_library(pi_arm_hardware SHARED
   src/actuator_coordinates.cpp
+  src/calibration.cpp
   src/backend.cpp
+  src/axis_test.cpp
   src/pi_arm_system.cpp
 )
 target_include_directories(pi_arm_hardware
@@ -35,7 +39,17 @@ ament_target_dependencies(pi_arm_hardware
   rclcpp
   rclcpp_lifecycle
 )
+target_link_libraries(pi_arm_hardware yaml-cpp)
 target_compile_options(pi_arm_hardware PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(pi_arm_hardware_monitor_node src/monitor_node.cpp)
+target_link_libraries(pi_arm_hardware_monitor_node pi_arm_hardware)
+ament_target_dependencies(pi_arm_hardware_monitor_node
+  hardware_interface
+  pi_arm_interfaces
+  rclcpp
+)
+target_compile_options(pi_arm_hardware_monitor_node PRIVATE -Wall -Wextra -Wpedantic)
 
 pluginlib_export_plugin_description_file(hardware_interface pi_arm_hardware_plugin.xml)
 
@@ -44,10 +58,22 @@ install(
   DESTINATION include
 )
 install(
+  PROGRAMS scripts/pi_arm_calibration_candidate
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(
+  DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
+)
+install(
   TARGETS pi_arm_hardware
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
+)
+install(
+  TARGETS pi_arm_hardware_monitor_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
@@ -60,6 +86,11 @@ if(BUILD_TESTING)
       PI_ARM_TEST_CABLE_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/test/cable_kinematics.yaml"
     )
     target_compile_options(test_backend PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+  ament_add_gtest(test_motion_write_gate test/test_motion_write_gate.cpp)
+  if(TARGET test_motion_write_gate)
+    target_include_directories(test_motion_write_gate PRIVATE include)
+    target_compile_options(test_motion_write_gate PRIVATE -Wall -Wextra -Wpedantic)
   endif()
 endif()
 

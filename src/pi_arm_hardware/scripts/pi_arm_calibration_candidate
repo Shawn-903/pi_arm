@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Generate an unapproved pack-reference calibration candidate from expanded URDF."""
+
+import argparse
+from datetime import datetime, timezone
+from pathlib import Path
+import xml.etree.ElementTree as ET
+
+import yaml
+
+
+JOINT_NAMES = ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"]
+
+
+def fnv1a64(data: bytes, value: int = 14695981039346656037) -> int:
+    for byte in data:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return value
+
+
+def required_params(parent: ET.Element) -> dict[str, str]:
+    return {
+        node.attrib["name"]: (node.text or "").strip()
+        for node in parent.findall("param")
+    }
+
+
+def parse_robot_description(path: Path) -> tuple[Path, list[dict[str, object]]]:
+    root = ET.parse(path).getroot()
+    controls = root.findall("ros2_control")
+    if len(controls) != 1:
+        raise ValueError("expanded URDF must contain exactly one ros2_control block")
+    control = controls[0]
+    hardware = control.find("hardware")
+    if hardware is None:
+        raise ValueError("ros2_control hardware block is missing")
+    hardware_params = required_params(hardware)
+    cable_file = Path(hardware_params.get("cable_kinematics_file", ""))
+    if not cable_file.is_file():
+        raise ValueError(f"cable_kinematics_file is not readable: {cable_file}")
+
+    joints = []
+    for expected_name, joint in zip(JOINT_NAMES, control.findall("joint"), strict=True):
+        if joint.attrib.get("name") != expected_name:
+            raise ValueError("active joint order does not match the six-axis model")
+        params = required_params(joint)
+        joints.append(
+            {
+                "joint_name": expected_name,
+                "motor_id": int(params["motor_id"]),
+                "protocol_angle_ratio": float(params["protocol_angle_ratio"]),
+                "motor_direction": int(params["motor_direction"]),
+            }
+        )
+    if len(joints) != 6 or [item["motor_id"] for item in joints] != list(range(1, 7)):
+        raise ValueError("expected six active joints mapped to CAN IDs 1..6")
+    return cable_file, joints
+
+
+def configuration_fingerprint(cable_file: Path, joints: list[dict[str, object]]) -> str:
+    value = fnv1a64(cable_file.read_bytes())
+    mapping = "".join(
+        f"{item['joint_name']}|{item['motor_id']}|"
+        f"{format(item['protocol_angle_ratio'], '.17g')}|{item['motor_direction']}\n"
+        for item in joints
+    ).encode("utf-8")
+    value = fnv1a64(mapping, value)
+    return f"fnv1a64:{value:016x}"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate an approved:false calibration candidate; this tool never writes motor ROM."
+    )
+    parser.add_argument("--robot-description", type=Path, required=True)
+    parser.add_argument("--robot-id", required=True)
+    parser.add_argument("--calibration-id", required=True)
+    parser.add_argument("--packing-pose", type=float, nargs=6, required=True, metavar="RAD")
+    parser.add_argument(
+        "--raw-output-at-packing", type=float, nargs=6, required=True, metavar="RAD"
+    )
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+
+    cable_file, joints = parse_robot_description(args.robot_description)
+    model = yaml.safe_load(cable_file.read_text(encoding="utf-8"))
+    model_version = model["cable_kinematics"]["model_version"]
+    if model_version != 3:
+        raise ValueError(f"expected cable model_version 3, got {model_version}")
+    fingerprint = configuration_fingerprint(cable_file, joints)
+    document = {
+        "calibration": {
+            "schema_version": 1,
+            "robot_id": args.robot_id,
+            "calibration_id": args.calibration_id,
+            "approved": False,
+            "model_version": 3,
+            "created_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+                "+00:00", "Z"
+            ),
+            "configuration_fingerprint": fingerprint,
+            "joint_names": JOINT_NAMES,
+            "motor_ids": [item["motor_id"] for item in joints],
+            "packing_pose_joint_rad": args.packing_pose,
+            "raw_output_at_packing_rad": args.raw_output_at_packing,
+        }
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        "# REVIEW REQUIRED: generated candidates always remain approved: false.\n"
+        + yaml.safe_dump(document, sort_keys=False),
+        encoding="utf-8",
+    )
+    print(f"configuration_fingerprint={fingerprint}")
+    print(f"wrote unapproved candidate: {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

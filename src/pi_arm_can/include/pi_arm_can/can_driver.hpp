@@ -37,10 +37,15 @@ enum class ManagementOperation
   SET_CURRENT_POSITION_ZERO,
 };
 
+enum class MotionStopStatus {IDLE, PENDING, CONFIRMED, FAILED};
+
 struct DriverConfig
 {
   std::string interface_name{"can0"};
   std::vector<std::uint8_t> motor_ids;
+  // A read-only driver may poll 0x92/0x9A/0x9C but can never enter CONTROL
+  // or execute management commands.
+  bool read_only{false};
   std::chrono::milliseconds state_poll_interval{20};
   std::size_t status1_poll_divider{5U};
   std::size_t max_pending_batches{64U};
@@ -67,6 +72,7 @@ struct MotorState
   std::chrono::steady_clock::time_point status1_update{};
   std::chrono::steady_clock::time_point status2_update{};
   std::chrono::steady_clock::time_point zero_ack_update{};
+  std::chrono::steady_clock::time_point stop_ack_update{};
   std::chrono::steady_clock::time_point last_update{};
 };
 
@@ -95,6 +101,12 @@ public:
   std::string last_error() const;
 
   bool enqueue_position_batch(const std::vector<PositionCommand> & commands);
+  // Purges queued position commands, then sends protocol 0x81 and waits for ACKs.
+  bool stop_motors(const std::vector<std::uint8_t> & motor_ids);
+  // Non-blocking ACK wait: suitable for faults detected in the control loop.
+  bool request_motor_stop(const std::vector<std::uint8_t> & motor_ids, bool retry_failed = false);
+  MotionStopStatus motion_stop_status();
+  bool wait_for_motor_stop();
   bool execute_management(
     ManagementOperation operation, const std::vector<std::uint8_t> & motor_ids,
     std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
@@ -110,6 +122,7 @@ private:
   {
     std::vector<CanFrame> frames;
     std::shared_ptr<std::promise<bool>> completion;
+    bool requires_control{false};
   };
 
   bool validate_motor_id(std::uint8_t motor_id) const noexcept;
@@ -117,9 +130,12 @@ private:
   std::vector<CanFrame> make_poll_batch(std::size_t poll_sequence) const;
   void rx_loop() noexcept;
   void tx_loop() noexcept;
-  bool write_batch(const std::vector<CanFrame> & frames) noexcept;
+  bool write_batch(const std::vector<CanFrame> & frames, bool requires_control = false) noexcept;
+  void discard_pending_control_batches() noexcept;
   void set_fault(const std::string & message) noexcept;
   void close_socket() noexcept;
+  void release_interface_lease() noexcept;
+  void refresh_motor_stop();
 
   DriverConfig config_;
   std::unordered_map<std::uint8_t, MotorState> states_;
@@ -134,11 +150,21 @@ private:
   std::atomic<bool> stop_requested_{false};
 
   std::mutex tx_mutex_;
+  // Serializes a CONTROL -> MONITORING transition with an in-flight position
+  // batch. Once set_mode(MONITORING) returns, no later 0xA4 from an older
+  // queued batch can be written.
+  std::mutex control_tx_mutex_;
   std::condition_variable tx_cv_;
   std::deque<TxBatch> tx_queue_;
   std::mutex management_mutex_;
+  std::mutex stop_mutex_;
+  std::condition_variable stop_cv_;
+  std::atomic<MotionStopStatus> motion_stop_status_{MotionStopStatus::IDLE};
+  std::vector<std::uint8_t> stop_motor_ids_;
+  std::chrono::steady_clock::time_point motor_stop_requested_at_{};
   std::thread rx_thread_;
   std::thread tx_thread_;
+  int lease_fd_{-1};
   int socket_fd_{-1};
 };
 

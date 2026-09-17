@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import threading
+import time
 from itertools import count
 from typing import Any
 
@@ -11,14 +12,16 @@ import rclpy
 from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import PoseStamped
 from pi_arm_interfaces.action import DirectMove, MoveJ, MoveJs, MoveL
-from pi_arm_interfaces.msg import RobotState, TaskState
-from pi_arm_interfaces.srv import ManageMotor, StopMotion
+from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState
+from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from tf2_ros import Buffer, TransformException, TransformListener
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import websockets
 from websockets.exceptions import ConnectionClosed
+from .presets import PosePresets, JOINT_NAMES, PRESET_JOINT_SPEED_DEG_S
 
 from .protocol import (
     CODE_COMMAND_FAILED,
@@ -42,6 +45,11 @@ class RosBridge(Node):
     def __init__(self) -> None:
         super().__init__("pi_arm_websocket")
         self.declare_parameter("host", "0.0.0.0")
+        self.declare_parameter("hardware_type", "real")
+        self.declare_parameter("read_only", False)
+        self.declare_parameter("commissioning", False)
+        self.declare_parameter("calibration_file", "")
+        self.declare_parameter("state_timeout_sec", 1.0)
         self.declare_parameter("port", 8765)
         self.declare_parameter("state_push_interval_ms", 100)
         self.declare_parameter("max_size_bytes", 32 * 1024 * 1024)
@@ -50,6 +58,14 @@ class RosBridge(Node):
             "joint_names",
             ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"],
         )
+        self.hardware_type = str(self.get_parameter("hardware_type").value)
+        self.read_only = bool(self.get_parameter("read_only").value)
+        self.commissioning = bool(self.get_parameter("commissioning").value)
+        self.presets = PosePresets(str(self.get_parameter("calibration_file").value), self.hardware_type)
+        if self.read_only and self.commissioning:
+            raise ValueError("read_only and commissioning are mutually exclusive")
+        self.state_timeout = float(self.get_parameter("state_timeout_sec").value)
+        self._state_received_at = 0.0
         self.host = str(self.get_parameter("host").value)
         self.port = int(self.get_parameter("port").value)
         self.push_interval = max(
@@ -59,6 +75,8 @@ class RosBridge(Node):
         self.timeout = float(self.get_parameter("request_timeout_sec").value)
         if not self.host or not 1 <= self.port <= 65535 or self.timeout <= 0.0:
             raise ValueError("WebSocket host、port 或 request_timeout_sec 参数非法")
+        if self.hardware_type not in {"real", "mock"} or not math.isfinite(self.state_timeout) or self.state_timeout <= 0:
+            raise ValueError("hardware_type 或 state_timeout_sec 参数非法")
         self.default_joint_names = list(self.get_parameter("joint_names").value)
         self._state: RobotState | None = None
         self._state_lock = threading.Lock()
@@ -66,29 +84,53 @@ class RosBridge(Node):
         self._active_goals: list[Any] = []
         self._goal_lock = threading.Lock()
 
-        self.create_subscription(RobotState, "/pi_arm/state", self._on_state, 10)
+        if self.read_only or self.commissioning:
+            self.create_subscription(
+                HardwareState, "/pi_arm/hardware_state", self._on_hardware_state,
+                qos_profile_sensor_data,
+            )
+        else:
+            self.create_subscription(RobotState, "/pi_arm/state", self._on_state, 10)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.service_clients = {
+        self.service_clients = {} if self.read_only or self.commissioning else {
             "enable_motor": self.create_client(ManageMotor, "/pi_arm/enable_motor"),
             "disable_motor": self.create_client(ManageMotor, "/pi_arm/disable_motor"),
             "reset_motor": self.create_client(ManageMotor, "/pi_arm/reset_motor"),
-            "set_zero": self.create_client(ManageMotor, "/pi_arm/set_zero"),
+
             "stop_motion": self.create_client(StopMotion, "/pi_arm/stop_motion"),
         }
-        self.action_clients = {
+        self.action_clients = {} if self.read_only or self.commissioning else {
             "movej": ActionClient(self, MoveJ, "/pi_arm/movej"),
             "movejs": ActionClient(self, MoveJs, "/pi_arm/movejs"),
             "movel": ActionClient(self, MoveL, "/pi_arm/movel"),
             "direct": ActionClient(self, DirectMove, "/pi_arm/direct_move"),
         }
+        if self.commissioning:
+            # No normal manager/controller commands exist in this mode.
+            for client in self.service_clients.values():
+                self.destroy_client(client)
+            for client in self.action_clients.values():
+                client.destroy()
+            self.action_clients = {}
+            self.service_clients = {
+                name: self.create_client(ManageMotor, "/pi_arm/commissioning/" + name)
+                for name in ("enable_motor", "disable_motor", "reset_motor")
+            }
+            self.service_clients["axis_test"] = self.create_client(AxisTest, "/pi_arm/commissioning/axis_test")
+
+    def _on_hardware_state(self, hardware: HardwareState) -> None:
+        self._on_state(monitor_state(hardware))
 
     def _on_state(self, message: RobotState) -> None:
         with self._state_lock:
             self._state = message
+            self._state_received_at = time.monotonic()
 
     def state_snapshot(self) -> RobotState | None:
         with self._state_lock:
+            if time.monotonic() - self._state_received_at > self.state_timeout:
+                return None
             return self._state
 
     async def wait_future(self, future: Any, timeout: float | None = None) -> Any:
@@ -120,6 +162,51 @@ class RosBridge(Node):
             raise ProtocolError(code, result.message)
         self.get_logger().info(f"服务成功: {command}")
         return result
+
+    def _track_goal(self, goal_handle: Any) -> Any:
+        result_future = goal_handle.get_result_async()
+        with self._goal_lock:
+            self._active_goals.append(goal_handle)
+
+        def release(_: Any) -> None:
+            with self._goal_lock:
+                if goal_handle in self._active_goals:
+                    self._active_goals.remove(goal_handle)
+
+        result_future.add_done_callback(release)
+        return result_future
+
+    def _cancel_late_goal(self, future: Any) -> None:
+        """Runs on the ROS executor even after the WebSocket request timed out."""
+        try:
+            handle = future.result()
+            if handle is not None and handle.accepted:
+                self._track_goal(handle)
+                cancel_future = handle.cancel_goal_async()
+
+                def cancellation_done(result: Any) -> None:
+                    try:
+                        reply = result.result()
+                        if not reply.goals_canceling:
+                            self.get_logger().error("迟到目标取消未被接受，请检查任务状态并停止")
+                    except Exception as exc:
+                        self.get_logger().error(f"迟到目标取消失败，停止未确认: {exc}")
+
+                cancel_future.add_done_callback(cancellation_done)
+                self.get_logger().warning("已请求取消超时后接受的目标，等待终态确认")
+        except Exception as exc:
+            self.get_logger().error(f"目标接受状态确认失败: {exc}")
+
+    async def _cancel_accepted_goal(self, handle: Any, result_future: Any) -> bool:
+        try:
+            if not result_future.done():
+                await self.wait_future(handle.cancel_goal_async())
+            # A cancel response alone does not prove that motion has stopped.
+            result = await self.wait_future(result_future)
+            return result.status in (4, 5, 6)  # SUCCEEDED, CANCELED, ABORTED
+        except Exception as exc:
+            self.get_logger().error(f"已接受目标停止未确认: {exc}")
+            return False
 
     async def send_goal(self, action_name: str, goal: Any) -> int:
         state = self.state_snapshot()
@@ -158,28 +245,23 @@ class RosBridge(Node):
                 task_id_box.append(int(message.feedback.task_id))
                 feedback_ready.set()
 
-        goal_handle = await self.wait_future(
-            client.send_goal_async(goal, feedback_callback=feedback_callback)
-        )
+        acceptance = client.send_goal_async(goal, feedback_callback=feedback_callback)
+        try:
+            goal_handle = await self.wait_future(acceptance)
+        except (ProtocolError, asyncio.CancelledError):
+            acceptance.add_done_callback(self._cancel_late_goal)
+            raise ProtocolError(CODE_COMMAND_FAILED,
+                "目标接受状态未知；已安排取消迟到目标，请检查任务状态，必要时点击停止")
         if not goal_handle.accepted:
             self.get_logger().warning(f"action goal 被 manager 拒绝: {action_name}")
             raise ProtocolError(CODE_MOTION_BUSY, "运动目标被拒绝")
-        result_future = goal_handle.get_result_async()
-        with self._goal_lock:
-            self._active_goals.append(goal_handle)
-
-        def release(_: Any) -> None:
-            with self._goal_lock:
-                try:
-                    self._active_goals.remove(goal_handle)
-                except ValueError:
-                    pass
-
-        result_future.add_done_callback(release)
+        result_future = self._track_goal(goal_handle)
         received = await asyncio.to_thread(feedback_ready.wait, self.timeout)
         if not received:
             self.get_logger().error(f"action {action_name} 未在超时内返回 task_id")
-            raise ProtocolError(CODE_COMMAND_FAILED, "manager 未返回任务 ID")
+            ended = await self._cancel_accepted_goal(goal_handle, result_future)
+            detail = "已请求取消，目标已结束" if ended else "停止未确认，请点击停止并检查任务状态"
+            raise ProtocolError(CODE_COMMAND_FAILED, f"目标已接受但任务 ID 反馈超时；{detail}")
         self.get_logger().info(f"action {action_name} 已接受: task_id={task_id_box[0]}")
         return task_id_box[0]
 
@@ -224,13 +306,51 @@ class CommandGateway:
 
     async def dispatch(self, request: Request) -> dict[str, Any]:
         command, params = request.command, request.params
-        if command in {"enable_motor", "disable_motor", "reset_motor", "set_zero"}:
-            motor_id = integer_param(params, "motor_id", allow_zero=True)
-            if command == "set_zero" and motor_id != 0:
+        if self.bridge.read_only:
+            raise ProtocolError(CODE_STATE_UNAVAILABLE, "只读排查模式：仅查看反馈，不提供控制服务")
+        if command == "move_preset":
+            name = params.get("preset")
+            if name not in ("packing", "zero"):
+                raise ProtocolError(CODE_INVALID_PARAMS, "preset 必须为 packing 或 zero")
+            if set(params) - {"preset", "output_speed_limit"}:
+                raise ProtocolError(CODE_INVALID_PARAMS, "仅接受 preset 和 output_speed_limit 参数")
+            state = self.bridge.state_snapshot()
+            catalog = getattr(self.bridge, "presets", PosePresets()).status(self.bridge, state)
+            preset = catalog[name]
+            if not preset["available"]:
+                raise ProtocolError(CODE_STATE_UNAVAILABLE, preset["reason"])
+            task_id = await self._direct(JOINT_NAMES, preset["target_joint_angles_deg"], PRESET_JOINT_SPEED_DEG_S,
+                                         self._output_speed(params))
+            return {"cmd": command, "preset": name, "task_id": task_id,
+                    "target_joint_angles_deg": preset["target_joint_angles_deg"],
+                    "joint_speed_deg_s": PRESET_JOINT_SPEED_DEG_S}
+        if command.startswith("axis_test") or (
+            self.bridge.commissioning and command in {"motor_stop", "stop_motion"}
+        ):
+            if not self.bridge.commissioning:
+                raise ProtocolError(CODE_STATE_UNAVAILABLE, "需要 --commissioning 单轴测试模式")
+            ros_request = AxisTest.Request()
+            ros_request.operation = {"axis_test": "start", "axis_test_heartbeat": "heartbeat"}.get(command, "stop")
+            ros_request.test_id = integer_param(params, "test_id", default=0, allow_zero=True)
+            if ros_request.operation == "start":
+                ros_request.space = str(params.get("space", ""))
+                ros_request.axis_id = integer_param(params, "axis_id")
+                ros_request.delta_deg = required_float(params, "delta_deg")
+                ros_request.speed_deg_s = required_float(params, "speed_deg_s", positive=True)
+            result = await self.bridge.call_service("axis_test", ros_request)
+            return {"cmd": command, "axis_test_id": result.test_id, "message": result.message}
+        if self.bridge.commissioning and command not in {"enable_motor", "disable_motor", "reset_motor"}:
+            raise ProtocolError(CODE_STATE_UNAVAILABLE, "方向测试模式请使用电机/关节小步点动")
+        if command in {"movej", "movejs", "movel", "move", "motor_move", "output_move"}:
+            state = self.bridge.state_snapshot()
+            if state is None or not state.hardware.control_permitted:
                 raise ProtocolError(
-                    CODE_INVALID_PARAMS,
-                    "set_zero 是整机操作，motor_id 必须为 0",
+                    CODE_STATE_UNAVAILABLE,
+                    "运动被禁止：标定、运动学或硬件控制许可未满足",
+                    request.msg_id,
                 )
+        if command in {"enable_motor", "disable_motor", "reset_motor"}:
+            motor_id = integer_param(params, "motor_id", allow_zero=True)
             ros_request = ManageMotor.Request()
             ros_request.motor_id = motor_id
             await self.bridge.call_service(command, ros_request)
@@ -254,8 +374,14 @@ class CommandGateway:
         if command == "move":
             targets = self._joint_vector(params, "targets")
             speed = required_float(params, "max_speed", positive=True)
-            await self._direct(self._joint_names(), targets, speed)
-            return {"cmd": "move"}
+            task_id = await self._direct(self._joint_names(), targets, speed, self._output_speed(params))
+            return {"cmd": "move", "task_id": task_id}
+        if command == "output_move":
+            targets = required_vector(params, "targets", 6)
+            speed = self._output_speed(params)
+            task_id = await self._direct(JOINT_NAMES, targets, 1.0, speed, output_space=True)
+            return {"cmd": command, "task_id": task_id, "target_output_deg": targets,
+                    "output_speed_limit": speed * RAD_TO_DEG}
         if command == "motor_move":
             return await self._motor_move(params, stop=False)
         if command == "motor_stop":
@@ -276,12 +402,13 @@ class CommandGateway:
         velocity = required_float(params, "vel", positive=True)
         acceleration = required_float(params, "acc", positive=True)
         goal = MoveJ.Goal()
+        goal.max_output_velocity = self._output_speed(params)
         goal.joint_names = self._joint_names()
         goal.positions = [value * DEG_TO_RAD for value in target]
         goal.max_velocity = velocity * DEG_TO_RAD
         goal.max_acceleration = acceleration * DEG_TO_RAD
-        await self.bridge.send_goal("movej", goal)
-        return {"cmd": "movej", "target": target, "vel": velocity, "acc": acceleration}
+        task_id = await self.bridge.send_goal("movej", goal)
+        return {"cmd": "movej", "task_id": task_id, "target": target, "vel": velocity, "acc": acceleration}
 
     async def _movejs(self, params: dict[str, Any]) -> dict[str, Any]:
         targets_value = params.get("targets")
@@ -306,6 +433,7 @@ class CommandGateway:
             )
             trajectory.points.append(point)
         goal = MoveJs.Goal()
+        goal.max_output_velocity = self._output_speed(params)
         goal.trajectory = trajectory
         task_id = await self.bridge.send_goal("movejs", goal)
         return {"cmd": "movejs", "task_id": task_id, "point_count": len(targets), "dt": dt_ms}
@@ -331,6 +459,7 @@ class CommandGateway:
         pose.pose.orientation.z = qz
         pose.pose.orientation.w = qw
         goal = MoveL.Goal()
+        goal.max_output_velocity = self._output_speed(params)
         goal.target = pose
         goal.max_linear_velocity = linear_velocity / 1000.0
         goal.max_linear_acceleration = linear_acceleration / 1000.0
@@ -339,9 +468,10 @@ class CommandGateway:
         # derives rotational acceleration from cartesian_limits and does not use
         # this field as an independent timing constraint.
         goal.max_angular_acceleration = angular_acceleration * DEG_TO_RAD
-        await self.bridge.send_goal("movel", goal)
+        task_id = await self.bridge.send_goal("movel", goal)
         return {
             "cmd": "movel",
+            "task_id": task_id,
             "target": target,
             "linear_vel": linear_velocity,
             "linear_acc": linear_acceleration,
@@ -350,38 +480,39 @@ class CommandGateway:
         }
 
     async def _direct(
-        self, names: list[str], targets_deg: list[float], speed_deg_s: float
-    ) -> None:
+        self, names: list[str], targets_deg: list[float], speed_deg_s: float,
+        output_speed: float = 5.0 * DEG_TO_RAD, *, output_space: bool = False
+    ) -> int:
         goal = DirectMove.Goal()
         goal.joint_names = names
         goal.positions = [value * DEG_TO_RAD for value in targets_deg]
         goal.max_velocity = speed_deg_s * DEG_TO_RAD
-        await self.bridge.send_goal("direct", goal)
+        goal.max_output_velocity = output_speed
+        goal.output_space = output_space
+        return await self.bridge.send_goal("direct", goal)
+
+    @staticmethod
+    def _output_speed(params: dict[str, Any]) -> float:
+        speed = required_float({"limit": params.get("output_speed_limit", 5.0)}, "limit", positive=True)
+        if speed < 1.0 / 6.0:
+            raise ProtocolError(CODE_INVALID_PARAMS, "输出轴限速不得低于协议分辨率 1/6 °/s")
+        return speed * DEG_TO_RAD
 
     async def _motor_move(self, params: dict[str, Any], *, stop: bool) -> dict[str, Any]:
         joint_id = integer_param(params, "joint_id")
         names = self._joint_names()
         if joint_id > len(names):
             raise ProtocolError(CODE_INVALID_PARAMS, "joint_id 不在当前机械臂配置中")
-        speed = float(integer_param(params, "max_speed", default=10))
         if stop:
-            state = self.bridge.state_snapshot()
-            if state is None or joint_id > len(state.hardware.positions):
-                raise ProtocolError(CODE_STATE_UNAVAILABLE, "当前关节状态不可用")
-            angle = state.hardware.positions[joint_id - 1] * RAD_TO_DEG
-            if state.state == RobotState.RUNNING:
-                await self.bridge.call_service("stop_motion", StopMotion.Request())
-                return {
-                    "cmd": "motor_stop",
-                    "joint_id": joint_id,
-                    "target_angle": angle,
-                    "max_speed": speed,
-                }
-        else:
-            angle = required_float(params, "target_angle")
-        await self._direct([names[joint_id - 1]], [angle], speed)
+            # Stopping never creates a fresh movement goal or requires READY.
+            await self.bridge.call_service("stop_motion", StopMotion.Request())
+            return {"cmd": "motor_stop", "joint_id": joint_id}
+        speed = required_float({"max_speed": params.get("max_speed", 1)}, "max_speed", positive=True)
+        angle = required_float(params, "target_angle")
+        task_id = await self._direct([names[joint_id - 1]], [angle], speed, self._output_speed(params))
         return {
-            "cmd": "motor_stop" if stop else "motor_move",
+            "cmd": "motor_move",
+            "task_id": task_id,
             "joint_id": joint_id,
             "target_angle": angle,
             "max_speed": speed,
@@ -421,10 +552,15 @@ class WebSocketGateway:
         self.bridge.get_logger().info(
             f"WebSocket 客户端接入: {peer} (连接数={len(self.clients)})"
         )
+        owned_test = None
         try:
             async for message in websocket:
                 raw = message if isinstance(message, str) else "{}"
-                await websocket.send(await self.commands.handle(raw))
+                reply = await self.commands.handle(raw)
+                data = json.loads(reply)
+                if data["code"] == 0 and data["data"].get("cmd") == "axis_test":
+                    owned_test = data["data"]["axis_test_id"]
+                await websocket.send(reply)
         except ConnectionClosed as exc:
             self.bridge.get_logger().info(
                 f"WebSocket 连接关闭: {peer} code={exc.code} reason={exc.reason!r}"
@@ -432,6 +568,12 @@ class WebSocketGateway:
         except Exception as exc:
             self.bridge.get_logger().error(f"WebSocket 客户端异常: {peer} error={exc}")
         finally:
+            if owned_test is not None:
+                try:
+                    request = AxisTest.Request(operation="stop", test_id=owned_test)
+                    await self.bridge.call_service("axis_test", request)
+                except Exception as exc:
+                    self.bridge.get_logger().warning(f"Disconnect stop request: {exc}")
             self.clients.discard(websocket)
             self.bridge.get_logger().info(
                 f"WebSocket 客户端离开: {peer} (连接数={len(self.clients)})"
@@ -471,6 +613,15 @@ class WebSocketGateway:
                 "motor_error_codes": [],
                 "motor_ages_sec": [],
                 "motor_last_update_timestamps": [],
+                "calibrated": False,
+                "kinematics_valid": False,
+                "control_permitted": False,
+                "calibration_id": "",
+                "raw_protocol_positions_deg": [],
+                "raw_output_positions_rad": [],
+                "software_output_offsets_rad": [],
+                "model_output_positions_rad": [],
+                "kinematics_error": {},
                 "all_enabled": False,
                 "any_error": False,
                 "any_in_motion": False,
@@ -502,6 +653,20 @@ class WebSocketGateway:
                     max(0.0, stamp - age) if fresh and math.isfinite(age) else 0.0
                     for fresh, age in zip(hardware.motor_fresh, hardware.motor_ages_sec)
                 ],
+                "calibrated": hardware.calibrated,
+                "kinematics_valid": hardware.kinematics_valid,
+                "control_permitted": hardware.control_permitted,
+                "calibration_id": hardware.calibration_id,
+                "raw_protocol_positions_deg": list(hardware.raw_protocol_positions_deg),
+                "raw_output_positions_rad": list(hardware.raw_output_positions_rad),
+                "software_output_offsets_rad": list(hardware.software_output_offsets_rad),
+                "model_output_positions_rad": list(hardware.model_output_positions_rad),
+                "kinematics_error": {
+                    "code": hardware.kinematics_error_code,
+                    "axis": hardware.kinematics_error_axis,
+                    "value": hardware.kinematics_error_value,
+                    "message": hardware.kinematics_error_message,
+                },
                 "all_enabled": bool(hardware.motor_enabled)
                 and all(hardware.motor_enabled),
                 "any_error": any(hardware.errors)
@@ -510,6 +675,7 @@ class WebSocketGateway:
                 or any(hardware.motor_error_codes),
                 "any_in_motion": any(hardware.moving) or any(hardware.motor_moving),
                 "robot_state": state.state_name,
+                "diagnostic": hardware.diagnostic,
                 "task": {
                     "task_id": state.task.task_id,
                     "command": state.task.command,
@@ -519,9 +685,39 @@ class WebSocketGateway:
                     "message": state.task.message,
                 },
             }
-        body["pose"] = self._pose()
+        body["pose"] = self._pose() if state is not None else {}
+        body["hardware_type"] = self.bridge.hardware_type
+        body["read_only"] = self.bridge.read_only
+        body["commissioning"] = self.bridge.commissioning
+        hardware = state.hardware if state else None
+        body["can_interface"] = hardware.can_interface if hardware else ""
+        body["motor_test_permitted"] = bool(hardware and hardware.motor_test_permitted)
+        body["joint_test_permitted"] = bool(hardware and hardware.joint_test_permitted)
+        body["axis_test"] = {
+            "active": bool(hardware and hardware.axis_test_active),
+            "test_id": hardware.axis_test_id if hardware else 0,
+            "status": hardware.axis_test_status if hardware else "state unavailable",
+        }
+        body["protocol_angle_ratios"] = list(hardware.protocol_angle_ratios) if hardware else []
+        body["motor_directions"] = list(hardware.motor_directions) if hardware else []
+        body["motion_stop_pending"] = bool(hardware and hardware.motion_stop_pending)
+        body["motion_stop_failed"] = bool(hardware and hardware.motion_stop_failed)
+        body["state_available"] = state is not None
+        body["preset_poses"] = getattr(self.bridge, "presets", PosePresets()).status(self.bridge, state)
+        body["joint_names"] = list(state.hardware.joint_names) if state else []
+        body["hardware_connected"] = state.hardware.connected if state else False
+        body["driver_mode"] = state.hardware.driver_mode if state else "UNKNOWN"
+        body["joint_fresh"] = list(state.hardware.fresh) if state else []
+        body["joint_ages_sec"] = list(state.hardware.ages_sec) if state else []
+        if self.bridge.read_only or self.bridge.commissioning:
+            body["control_permitted"] = False
+            body["pose"] = {}
+        body["supported_motion_commands"] = ["move", "motor_move", "output_move", "movej", "movejs", "movel"]
+        if self.bridge.read_only or self.bridge.commissioning:
+            body["supported_motion_commands"] = []
         return json.dumps(
-            {"type": "state", "msg_id": next(self.counter), **body},
+            json_safe({"type": "state", "msg_id": next(self.counter), **body}),
+            allow_nan=False,
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -547,6 +743,33 @@ class WebSocketGateway:
             }
         except TransformException:
             return {"x": None, "y": None, "z": None, "rx": None, "ry": None, "rz": None}
+
+
+def monitor_state(hardware: HardwareState) -> RobotState:
+    """Diagnostic state without MoveIt, controllers, manager or motion services."""
+    state = RobotState()
+    state.hardware = hardware
+    fresh = bool(hardware.motor_ids) and len(hardware.motor_fresh) == len(hardware.motor_ids) and all(hardware.motor_fresh)
+    if not hardware.connected or not fresh:
+        state.state, state.state_name = RobotState.DISCONNECTED, "DISCONNECTED"
+    elif (not hardware.calibrated or not hardware.kinematics_valid or
+          any(hardware.motor_errors) or any(hardware.motor_error_codes) or
+          any(hardware.errors) or any(hardware.error_codes)):
+        state.state, state.state_name = RobotState.FAULT, "FAULT"
+    else:
+        state.state, state.state_name = RobotState.DISABLED, "DISABLED"
+    return state
+
+
+def json_safe(value: Any) -> Any:
+    """ROS unavailable samples may contain NaN/Infinity, which browsers reject."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    return value
 
 
 def quaternion_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, ...]:

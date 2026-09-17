@@ -1,9 +1,13 @@
 #include "pi_arm_hardware/backend.hpp"
 #include "pi_arm_hardware/actuator_coordinates.hpp"
+#include "pi_arm_hardware/calibration.hpp"
+#include "pi_arm_transmission/config_loader.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 #include <string>
 #include <vector>
@@ -197,6 +201,81 @@ TEST(MockBackend, SeparatesRawMotorAndJointDependencyState)
   EXPECT_FALSE(
     backend.manage(
       pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO, 4).success);
+}
+
+
+TEST(ActuatorCoordinates, AppliesSoftwareOffsetOnlyInModelCoordinate)
+{
+  const pi_arm_hardware::ActuatorConfig actuator{"joint_01", 1U, 36.0, 1};
+  constexpr double model_output = 0.7;
+  constexpr double offset = 0.2;
+  const double protocol = pi_arm_hardware::model_output_position_to_protocol_deg(
+    model_output, offset, actuator);
+  EXPECT_NEAR(
+    pi_arm_hardware::protocol_position_to_model_output_rad(protocol, offset, actuator),
+    model_output, 1.0e-12);
+  EXPECT_NEAR(
+    pi_arm_hardware::model_to_rom_relative_output_rad(model_output, offset), 0.5, 1.0e-12);
+  EXPECT_NEAR(
+    pi_arm_hardware::rom_relative_to_model_output_rad(0.5, offset), model_output, 1.0e-12);
+}
+
+TEST(MockBackend, PublishesExplicitMockCalibrationState)
+{
+  pi_arm_hardware::MockBackend backend(make_config());
+  backend.configure();
+  backend.activate();
+  pi_arm_hardware::HardwareSample sample;
+  ASSERT_TRUE(backend.read(sample));
+  EXPECT_TRUE(sample.calibrated);
+  EXPECT_TRUE(sample.kinematics_valid);
+  EXPECT_EQ(sample.calibration_id, "MOCK");
+  EXPECT_FALSE(sample.control_permitted);
+  EXPECT_EQ(sample.raw_protocol_positions_deg.size(), 6U);
+  EXPECT_EQ(sample.model_output_positions_rad.size(), 6U);
+}
+
+TEST(Calibration, UnapprovedCandidateFailsClosedAndApprovedCandidateComputesOffsets)
+{
+  const auto config = make_config();
+  const auto parameters =
+    pi_arm_transmission::load_cable_kinematics_config(config.cable_kinematics_file);
+  const pi_arm_transmission::CableKinematics kinematics(parameters);
+  const auto fingerprint = pi_arm_hardware::calibration_configuration_fingerprint(
+    config.cable_kinematics_file, config.actuators);
+  const auto path = std::filesystem::temp_directory_path() /
+    "pi_arm_pack_reference_calibration_test.yaml";
+
+  const auto write_candidate = [&](const bool approved) {
+    std::ofstream stream(path);
+    stream << "calibration:\n"
+           << "  schema_version: 1\n"
+           << "  robot_id: test-robot\n"
+           << "  calibration_id: test-calibration\n"
+           << "  approved: " << (approved ? "true" : "false") << "\n"
+           << "  model_version: 3\n"
+           << "  created_at_utc: 2026-09-14T00:00:00Z\n"
+           << "  configuration_fingerprint: " << fingerprint << "\n"
+           << "  joint_names: [joint_01, joint_02, joint_04, joint_05, joint_06, joint_09]\n"
+           << "  motor_ids: [1, 2, 3, 4, 5, 6]\n"
+           << "  packing_pose_joint_rad: [0, 0, 0, 0, 0, 0]\n"
+           << "  raw_output_at_packing_rad: [0, 0, 0, 0, 0, 0]\n";
+  };
+
+  write_candidate(false);
+  auto result = pi_arm_hardware::load_pack_reference_calibration(
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics);
+  EXPECT_FALSE(result.valid);
+  EXPECT_NE(result.message.find("approved is false"), std::string::npos);
+
+  write_candidate(true);
+  result = pi_arm_hardware::load_pack_reference_calibration(
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics);
+  EXPECT_TRUE(result.valid) << result.message;
+  for (const double offset : result.software_output_offsets_rad) {
+    EXPECT_NEAR(offset, 0.0, 1.0e-12);
+  }
+  std::filesystem::remove(path);
 }
 
 }  // namespace

@@ -16,30 +16,18 @@ inline uint8_t aggregate_state(
   const pi_arm_interfaces::msg::TaskState & task)
 {
   const auto joint_count = hardware.joint_names.size();
-  const bool complete = joint_count > 0 &&
-    hardware.positions.size() == joint_count &&
-    hardware.velocities.size() == joint_count &&
-    hardware.enabled.size() == joint_count &&
-    hardware.errors.size() == joint_count &&
-    hardware.moving.size() == joint_count &&
-    hardware.fresh.size() == joint_count &&
-    hardware.ages_sec.size() == joint_count &&
-    hardware.error_codes.size() == joint_count &&
+  const bool raw_complete = joint_count > 0 &&
     complete_raw_motor_state(hardware) &&
-    std::all_of(
-    hardware.positions.begin(), hardware.positions.end(),
-    [](double value) {return std::isfinite(value);}) &&
-    std::all_of(
-    hardware.velocities.begin(), hardware.velocities.end(),
-    [](double value) {return std::isfinite(value);});
-  if (!hardware.connected || !complete ||
-    !std::all_of(hardware.fresh.begin(), hardware.fresh.end(), [](bool value) {return value;}) ||
+    hardware.raw_protocol_positions_deg.size() == joint_count &&
+    hardware.raw_output_positions_rad.size() == joint_count;
+  if (!hardware.connected || !raw_complete ||
     !std::all_of(
       hardware.motor_fresh.begin(), hardware.motor_fresh.end(), [](bool value) {return value;}))
   {
     return pi_arm_interfaces::msg::RobotState::DISCONNECTED;
   }
-  if (std::any_of(hardware.errors.begin(), hardware.errors.end(), [](bool value) {return value;}) ||
+  if (hardware.motion_stop_failed ||
+    std::any_of(hardware.errors.begin(), hardware.errors.end(), [](bool value) {return value;}) ||
     std::any_of(
       hardware.error_codes.begin(), hardware.error_codes.end(),
       [](int32_t value) {return value != 0;}) ||
@@ -51,9 +39,35 @@ inline uint8_t aggregate_state(
   {
     return pi_arm_interfaces::msg::RobotState::FAULT;
   }
+  const bool joint_complete =
+    hardware.positions.size() == joint_count &&
+    hardware.velocities.size() == joint_count &&
+    hardware.enabled.size() == joint_count &&
+    hardware.errors.size() == joint_count &&
+    hardware.moving.size() == joint_count &&
+    hardware.fresh.size() == joint_count &&
+    hardware.ages_sec.size() == joint_count &&
+    hardware.error_codes.size() == joint_count &&
+    std::all_of(
+      hardware.positions.begin(), hardware.positions.end(),
+      [](double value) {return std::isfinite(value);}) &&
+    std::all_of(
+      hardware.velocities.begin(), hardware.velocities.end(),
+      [](double value) {return std::isfinite(value);});
+  if (!hardware.calibrated || !hardware.kinematics_valid || !joint_complete ||
+    !std::all_of(hardware.fresh.begin(), hardware.fresh.end(), [](bool value) {return value;}))
+  {
+    return pi_arm_interfaces::msg::RobotState::DISABLED;
+  }
   if (hardware.enabled.empty() ||
     !std::all_of(hardware.enabled.begin(), hardware.enabled.end(), [](bool value) {return value;}))
   {
+    return pi_arm_interfaces::msg::RobotState::DISABLED;
+  }
+  if (!hardware.control_permitted) {
+    if (hardware.motion_stop_pending && task.status == pi_arm_interfaces::msg::TaskState::RUNNING) {
+      return pi_arm_interfaces::msg::RobotState::RUNNING;
+    }
     return pi_arm_interfaces::msg::RobotState::DISABLED;
   }
   if (task.status == pi_arm_interfaces::msg::TaskState::RUNNING ||

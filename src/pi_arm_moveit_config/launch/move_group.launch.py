@@ -23,6 +23,12 @@ def _launch_setup(context):
                 "cable_kinematics_file": LaunchConfiguration(
                     "cable_kinematics_file"
                 ).perform(context),
+                "calibration_file": LaunchConfiguration(
+                    "calibration_file"
+                ).perform(context),
+                "allow_real_control": LaunchConfiguration(
+                    "allow_real_control"
+                ).perform(context),
             },
         )
         .robot_description_semantic(file_path="config/pi_arm.srdf")
@@ -51,6 +57,16 @@ def generate_launch_description():
                     get_package_share_directory("pi_arm_description")
                     + "/config/cable_kinematics.yaml"
                 ),
+            ),
+            DeclareLaunchArgument(
+                "calibration_file",
+                default_value=(
+                    get_package_share_directory("pi_arm_hardware")
+                    + "/config/pack_reference_calibration.template.yaml"
+                ),
+            ),
+            DeclareLaunchArgument(
+                "allow_real_control", default_value="false", choices=["true", "false"]
             ),
             OpaqueFunction(function=_launch_setup),
         ]

@@ -26,6 +26,14 @@ static HardwareState healthy_hardware()
   state.motor_fresh = {true, true};
   state.motor_error_codes = {0, 0};
   state.motor_ages_sec = {0.01, 0.01};
+  state.calibrated = true;
+  state.kinematics_valid = true;
+  state.control_permitted = true;
+  state.calibration_id = "test";
+  state.raw_protocol_positions_deg = {0.0, 0.0};
+  state.raw_output_positions_rad = {0.0, 0.0};
+  state.software_output_offsets_rad = {0.0, 0.0};
+  state.model_output_positions_rad = {0.0, 0.0};
   return state;
 }
 
@@ -36,6 +44,21 @@ TEST(StateAggregator, PhysicalMotionIsRunningWithoutTask)
   task.status = TaskState::IDLE;
   hardware.moving[1] = true;
   EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::RUNNING);
+}
+
+TEST(StateAggregator, PendingStopDoesNotTurnFinishingTaskIntoHardwareFailure)
+{
+  auto hardware = healthy_hardware();
+  TaskState task;
+  task.status = TaskState::RUNNING;
+  hardware.control_permitted = false;
+  hardware.motion_stop_pending = true;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::RUNNING);
+  task.status = TaskState::IDLE;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISABLED);
+  hardware.motion_stop_failed = true;
+  task.status = TaskState::RUNNING;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::FAULT);
 }
 
 TEST(StateAggregator, AppliesStrictPriority)
@@ -60,7 +83,7 @@ TEST(StateAggregator, ReadyRequiresHealthyEnabledHardware)
   task.status = TaskState::IDLE;
   EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::READY);
   hardware.fresh[1] = false;
-  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISCONNECTED);
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISABLED);
 }
 
 TEST(StateAggregator, RejectsIncompleteHardwareFrames)
@@ -69,5 +92,21 @@ TEST(StateAggregator, RejectsIncompleteHardwareFrames)
   TaskState task;
   task.status = TaskState::IDLE;
   hardware.velocities.pop_back();
-  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISCONNECTED);
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISABLED);
+}
+
+TEST(StateAggregator, CalibrationAndControlPermissionFailClosed)
+{
+  auto hardware = healthy_hardware();
+  TaskState task;
+  task.status = TaskState::IDLE;
+
+  hardware.calibrated = false;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISABLED);
+  hardware.calibrated = true;
+  hardware.kinematics_valid = false;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISABLED);
+  hardware.kinematics_valid = true;
+  hardware.control_permitted = false;
+  EXPECT_EQ(pi_arm_manager::aggregate_state(hardware, task), RobotState::DISABLED);
 }

@@ -97,6 +97,26 @@ TEST(ConfigLoader, LoadsStrictValidConfiguration)
   std::filesystem::remove(path);
 }
 
+TEST(ConfigLoader, LoadsDirectionsAndRejectsInvalidOrIncompleteMapping)
+{
+  const std::string prefix = "  output_directions:\n    motor_01: 1\n    motor_02: 1\n";
+  const std::string suffix = "    motor_04: -1\n    motor_05: 1\n    motor_06: 1\n";
+  for (const std::string value : {"-1", "0", "2", "1.5", "true", "missing"}) {
+    std::string contents = valid_config();
+    contents.insert(contents.find("  axes:"), prefix +
+      (value == "missing" ? "" : "    motor_03: " + value + "\n") + suffix);
+    const auto path = write_config(contents, "pi_arm_output_directions.yaml");
+    if (value == "-1") {
+      const auto config = pi_arm_transmission::load_cable_kinematics_config(path.string());
+      EXPECT_EQ(config.output_directions, (std::array<int, 6>{{1, 1, -1, -1, 1, 1}}));
+    } else {
+      EXPECT_THROW(pi_arm_transmission::load_cable_kinematics_config(path.string()),
+        std::invalid_argument);
+    }
+    std::filesystem::remove(path);
+  }
+}
+
 TEST(ConfigLoader, RejectsOldModelVersion)
 {
   std::string contents = valid_config();

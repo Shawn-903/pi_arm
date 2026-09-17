@@ -42,8 +42,13 @@ class DescriptionConfigurationTest(unittest.TestCase):
             }
             self.assertEqual(
                 set(parameters),
-                {"motor_id", "protocol_angle_ratio", "motor_direction"},
+                {"motor_id", "protocol_angle_ratio", "motor_direction"} |
+                ({"feedback_position_tolerance_rad"}
+                 if joint.attrib["name"] in ("joint_02", "joint_04") else set()),
             )
+            tolerance = float(parameters.get("feedback_position_tolerance_rad", "0"))
+            self.assertAlmostEqual(tolerance, math.radians(3)
+                                   if joint.attrib["name"] in ("joint_02", "joint_04") else 0)
 
     def test_hardware_references_global_cable_file(self) -> None:
         arguments = {
@@ -78,6 +83,12 @@ class DescriptionConfigurationTest(unittest.TestCase):
                 "joint_08": ("joint_05", "-1.0"),
             },
         )
+        joints = {joint.attrib["name"]: joint for joint in self.root.findall("joint")}
+        for mimic_name, (target_name, _) in mimic.items():
+            mimic_limit = joints[mimic_name].find("limit")
+            target_limit = joints[target_name].find("limit")
+            self.assertEqual(mimic_limit.attrib["lower"], target_limit.attrib["lower"])
+            self.assertEqual(mimic_limit.attrib["upper"], target_limit.attrib["upper"])
 
     def test_yaml_contains_only_expected_six_axes(self) -> None:
         document = yaml.safe_load(YAML_PATH.read_text(encoding="utf-8"))
@@ -154,7 +165,7 @@ class DescriptionConfigurationTest(unittest.TestCase):
             [name for name in output_limits if name.startswith("motor_")],
             [f"motor_{index:02d}" for index in range(1, 7)],
         )
-        expected_upper = [3.819, 1.746, 7.786, 4.106, 4.870, 6.027]
+        expected_upper = [3.819, 1.758, 7.841, 4.127, 4.892, 6.047]
         for index, upper in enumerate(expected_upper, start=1):
             limit = output_limits[f"motor_{index:02d}"]
             self.assertAlmostEqual(limit["lower_position_rad"], -upper)
@@ -163,8 +174,8 @@ class DescriptionConfigurationTest(unittest.TestCase):
     def test_urdf_joint_limits_match_kinematic_derivation(self) -> None:
         expected = {
             "joint_01": (-3.141592654, 3.141592654),
-            "joint_02": (-1.745329252, 1.745329252),
-            "joint_04": (-1.483529864, 1.483529864),
+            "joint_02": (-math.radians(100.7), math.radians(100.7)),
+            "joint_04": (-math.radians(85.6), math.radians(85.6)),
             "joint_05": (-0.523598776, 0.523598776),
             "joint_06": (-1.047197551, 1.047197551),
             "joint_09": (-3.141592654, 3.141592654),
@@ -175,6 +186,28 @@ class DescriptionConfigurationTest(unittest.TestCase):
             self.assertIsNotNone(limit)
             self.assertAlmostEqual(float(limit.attrib["lower"]), lower)
             self.assertAlmostEqual(float(limit.attrib["upper"]), upper)
+
+    def test_confirmed_packing_pose_is_inside_joint_limits(self) -> None:
+        # Check without a tolerance: rounded URDF bounds must not exclude the
+        # operator's degree-to-radian conversion at a software boundary.
+        joints = {joint.attrib["name"]: joint for joint in self.root.findall("joint")}
+        pose_deg = {
+            "joint_01": 0.0,
+            "joint_02": 100.7,
+            "joint_04": -85.6,
+            "joint_05": 0.0,
+            "joint_06": 0.0,
+            "joint_09": 0.0,
+        }
+        for name, degrees in pose_deg.items():
+            limit = joints[name].find("limit")
+            lower = float(limit.attrib["lower"])
+            upper = float(limit.attrib["upper"])
+            position = math.radians(degrees)
+            self.assertLessEqual(lower, position)
+            self.assertGreaterEqual(upper, position)
+            self.assertLessEqual(lower, -position)
+            self.assertGreaterEqual(upper, -position)
 
     def test_output_limits_enclose_joint_limit_image(self) -> None:
         cable = yaml.safe_load(YAML_PATH.read_text(encoding="utf-8"))[

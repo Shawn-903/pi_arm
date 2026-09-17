@@ -65,7 +65,7 @@ double clamp_joint_velocity(
     return velocity;
   }
   log_write_warn(
-    "write velocity clamped at joint[%zu]: vel=%.6g -> lim=%.6g",
+    "write velocity clamped at joint[%zu]: vel=%.17g -> lim=%.17g",
     index, velocity, velocity_limit);
   return std::copysign(velocity_limit, velocity);
 }
@@ -106,6 +106,8 @@ void validate_backend_config(const BackendConfig & config)
       throw std::invalid_argument("actuator motor IDs must be unique");
     }
     if (!std::isfinite(config.joint_lower_limits_rad[index]) ||
+      !std::isfinite(config.joint_feedback_tolerances_rad[index]) ||
+      config.joint_feedback_tolerances_rad[index] < 0.0 ||
       !std::isfinite(config.joint_upper_limits_rad[index]) ||
       config.joint_lower_limits_rad[index] > config.joint_upper_limits_rad[index] ||
       !std::isfinite(config.joint_velocity_limits_rad_s[index]) ||
@@ -188,6 +190,8 @@ RealBackend::RealBackend(BackendConfig config)
     pi_arm_transmission::load_cable_kinematics_config(config_.cable_kinematics_file))
 {
   validate_backend_config(config_);
+  calibration_ = load_pack_reference_calibration(
+    config_.calibration_file, config_.cable_kinematics_file, config_.actuators, kinematics_);
 }
 
 RealBackend::~RealBackend()
@@ -197,9 +201,9 @@ RealBackend::~RealBackend()
 
 void RealBackend::configure()
 {
-  power_cycle_required_ = false;
   pi_arm_can::DriverConfig driver_config;
   driver_config.interface_name = config_.can_interface;
+  driver_config.read_only = config_.read_only;
   for (const auto & actuator : config_.actuators) {
     driver_config.motor_ids.push_back(actuator.motor_id);
   }
@@ -218,13 +222,15 @@ void RealBackend::activate()
 
 void RealBackend::deactivate() noexcept
 {
-  if (driver_) {
-    driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
-  }
+  control_permitted_.store(false);
+  set_motion_armed(false, 0U);
 }
 
 void RealBackend::cleanup() noexcept
 {
+  if (axis_test_active_) {stop_axis_test("stopped: process shutdown");}
+  control_permitted_.store(false);
+  set_motion_armed(false, 0U);
   if (driver_) {
     driver_->stop();
     driver_.reset();
@@ -241,8 +247,9 @@ bool RealBackend::read(HardwareSample & sample) noexcept
   try {
     const auto snapshot = driver_->snapshot();
     const auto now = std::chrono::steady_clock::now();
-    sample.positions_rad = to_vector(last_joint_positions_rad_);
-    sample.velocities_rad_s.assign(kAxisCount, 0.0);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    sample.positions_rad.assign(kAxisCount, nan);
+    sample.velocities_rad_s.assign(kAxisCount, nan);
     sample.enabled.assign(kAxisCount, false);
     sample.has_error.assign(kAxisCount, false);
     sample.in_motion.assign(kAxisCount, false);
@@ -255,15 +262,27 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     sample.motor_fresh.assign(kAxisCount, false);
     sample.motor_error_codes.assign(kAxisCount, 0);
     sample.motor_ages_sec.assign(kAxisCount, std::numeric_limits<double>::infinity());
+    sample.raw_protocol_positions_deg.assign(kAxisCount, nan);
+    sample.raw_output_positions_rad.assign(kAxisCount, nan);
+    sample.model_output_positions_rad.assign(kAxisCount, nan);
+    sample.software_output_offsets_rad.assign(kAxisCount, nan);
+    sample.calibrated = calibration_.valid;
+    sample.calibration_id = calibration_.data.calibration_id;
+    sample.kinematics_valid = false;
+    sample.control_permitted = false;
+    sample.kinematics_error_code = calibration_.valid ? "NONE" : "CALIBRATION_INVALID";
+    sample.kinematics_error_axis = 0;
+    sample.kinematics_error_value = 0.0;
+    sample.kinematics_error_message = calibration_.valid ? "" : calibration_.message;
     sample.connected = driver_->running() && driver_->mode() != pi_arm_can::DriverMode::FAULT;
     sample.driver_mode = pi_arm_can::to_string(driver_->mode());
     sample.management_operation = pi_arm_can::to_string(driver_->management_operation());
     sample.error_message = driver_->last_error();
-    if (power_cycle_required_) {
-      sample.error_message = "motor zero was written to ROM; power-cycle is required";
+    if (!calibration_.valid && sample.error_message.empty()) {
+      sample.error_message = "control inhibited: " + calibration_.message;
     }
 
-    pi_arm_transmission::Vector6 output_positions{};
+    pi_arm_transmission::Vector6 model_output_positions{};
     pi_arm_transmission::Vector6 output_velocities{};
     std::array<bool, kAxisCount> angle_valid{};
     std::array<bool, kAxisCount> velocity_valid{};
@@ -274,7 +293,6 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     std::array<std::int32_t, kAxisCount> motor_error_codes{};
     std::array<double, kAxisCount> motor_ages{};
     std::array<bool, kAxisCount> output_limit_error{};
-    bool output_positions_within_limits = false;
 
     for (std::size_t index = 0; index < kAxisCount; ++index) {
       const auto & actuator = config_.actuators[index];
@@ -282,8 +300,17 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       angle_valid[index] = state.angle_valid;
       velocity_valid[index] = state.status2_valid;
       if (state.angle_valid) {
-        output_positions[index] =
+        const double raw_output =
           protocol_position_to_output_rad(state.protocol_angle_deg, actuator);
+        sample.raw_protocol_positions_deg[index] = state.protocol_angle_deg;
+        sample.raw_output_positions_rad[index] = raw_output;
+        if (calibration_.valid) {
+          const double offset = calibration_.software_output_offsets_rad[index];
+          const double model_output = rom_relative_to_model_output_rad(raw_output, offset);
+          sample.software_output_offsets_rad[index] = offset;
+          sample.model_output_positions_rad[index] = model_output;
+          model_output_positions[index] = model_output;
+        }
       }
       if (state.status2_valid) {
         output_velocities[index] =
@@ -313,53 +340,109 @@ bool RealBackend::read(HardwareSample & sample) noexcept
 
     const bool all_angles_valid =
       std::all_of(angle_valid.begin(), angle_valid.end(), [](const bool value) {return value;});
-    if (all_angles_valid) {
-      auto status = kinematics_.check_output_position_limits(output_positions);
+    if (calibration_.valid && all_angles_valid) {
+      auto status = kinematics_.check_output_feedback_limits(
+        model_output_positions, config_.joint_feedback_tolerances_rad);
       if (!status) {
         const std::size_t index = status.axis - 1U;
         output_limit_error[index] = true;
         const auto & limit = kinematics_.parameters().output_limits[index];
+        sample.kinematics_error_code = pi_arm_transmission::to_string(status.error);
+        sample.kinematics_error_axis = static_cast<std::int32_t>(status.axis);
+        sample.kinematics_error_value = status.value;
+        sample.kinematics_error_message =
+          "model output feedback envelope exceeded at motor_0" + std::to_string(status.axis);
         sample.error_message =
-          "output-shaft feedback limit exceeded at motor_0" +
-          std::to_string(status.axis) + ": value=" + std::to_string(status.value) +
-          " rad, limit=[" + std::to_string(limit.lower_position_rad) + "," +
-          std::to_string(limit.upper_position_rad) + "] rad";
+          sample.kinematics_error_message + ": value=" + std::to_string(status.value) +
+          " rad, command envelope=[" + std::to_string(limit.lower_position_rad) + "," +
+          std::to_string(limit.upper_position_rad) +
+          "] rad; propagated joint feedback allowance also exceeded";
       } else {
-        output_positions_within_limits = true;
         pi_arm_transmission::Vector6 recovered{};
-        status = kinematics_.output_to_joint_position(output_positions, recovered);
+        status = kinematics_.output_to_joint_position(model_output_positions, recovered);
         if (!status) {
-          sample.error_message =
+          sample.kinematics_error_code = pi_arm_transmission::to_string(status.error);
+          sample.kinematics_error_axis = static_cast<std::int32_t>(status.axis);
+          sample.kinematics_error_value = status.value;
+          sample.kinematics_error_message =
             std::string("cable position inverse failed: ") +
             pi_arm_transmission::to_string(status.error);
-          return false;
+          sample.error_message = sample.kinematics_error_message;
+        } else {
+          {
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            last_joint_positions_rad_ = recovered;
+          }
+          sample.positions_rad = to_vector(recovered);
+          sample.kinematics_valid = true;
+          sample.kinematics_error_code = "NONE";
+          sample.kinematics_error_message.clear();
+          for (size_t i = 0; i < kAxisCount; ++i) {
+            const double lower = config_.joint_lower_limits_rad[i];
+            const double upper = config_.joint_upper_limits_rad[i];
+            const double tolerance = config_.joint_feedback_tolerances_rad[i];
+            if (recovered[i] < lower - tolerance || recovered[i] > upper + tolerance)
+            {
+              sample.kinematics_valid = false;
+              sample.kinematics_error_code = "JOINT_POSITION_LIMIT";
+              sample.kinematics_error_axis = static_cast<int32_t>(i + 1);
+              sample.kinematics_error_value = recovered[i];
+              sample.kinematics_error_message = "joint feedback limit exceeded: " +
+                config_.actuators[i].joint_name + " value=" + std::to_string(recovered[i]) +
+                " rad, feedback limit=[" + std::to_string(lower - tolerance) + "," +
+                std::to_string(upper + tolerance) + "] rad";
+              sample.error_message = sample.kinematics_error_message;
+              output_limit_error[i] = true;
+              break;
+            }
+            if ((recovered[i] < lower || recovered[i] > upper) &&
+              sample.kinematics_error_code == "NONE")
+            {
+              sample.kinematics_error_code = "JOINT_COMMAND_LIMIT_WARNING";
+              sample.kinematics_error_axis = static_cast<int32_t>(i + 1);
+              sample.kinematics_error_value = recovered[i];
+              sample.kinematics_error_message =
+                "feedback outside command limits, within feedback allowance: " +
+                config_.actuators[i].joint_name + " command=[" + std::to_string(lower) +
+                "," + std::to_string(upper) + "] rad, feedback allowance=" +
+                std::to_string(tolerance) + " rad; command limits remain enforced";
+              sample.error_message = sample.kinematics_error_message;
+            }
+          }
         }
-        last_joint_positions_rad_ = recovered;
-        position_initialized_ = true;
-        sample.positions_rad = to_vector(recovered);
       }
+    } else if (calibration_.valid) {
+      sample.kinematics_error_code = "RAW_ANGLE_STALE";
+      sample.kinematics_error_message = "not all raw motor angles are available";
     }
 
     const bool all_velocities_valid =
       std::all_of(
       velocity_valid.begin(), velocity_valid.end(), [](const bool value) {return value;});
-    if (position_initialized_ && output_positions_within_limits && all_velocities_valid) {
+    if (sample.kinematics_valid && all_velocities_valid) {
       pi_arm_transmission::Vector6 recovered_velocity{};
       const auto status = kinematics_.output_to_joint_velocity(
         last_joint_positions_rad_, output_velocities, recovered_velocity);
       if (!status) {
-        sample.error_message =
+        sample.kinematics_valid = false;
+        sample.positions_rad.assign(kAxisCount, nan);
+        sample.kinematics_error_code = pi_arm_transmission::to_string(status.error);
+        sample.kinematics_error_axis = static_cast<std::int32_t>(status.axis);
+        sample.kinematics_error_value = status.value;
+        sample.kinematics_error_message =
           std::string("cable velocity inverse failed: ") +
           pi_arm_transmission::to_string(status.error);
-        return false;
+        sample.error_message = sample.kinematics_error_message;
+      } else {
+        sample.velocities_rad_s = to_vector(recovered_velocity);
       }
-      sample.velocities_rad_s = to_vector(recovered_velocity);
     }
+    position_initialized_ = sample.kinematics_valid;
 
     for (std::size_t joint_index = 0; joint_index < kAxisCount; ++joint_index) {
       bool enabled = true;
       bool has_error = false;
-      bool fresh = position_initialized_;
+      bool fresh = sample.kinematics_valid;
       std::int32_t error_code = 0;
       double age = 0.0;
       for (std::size_t motor_index = 0; motor_index < kAxisCount; ++motor_index) {
@@ -378,6 +461,7 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       sample.error_codes[joint_index] = error_code;
       sample.ages_sec[joint_index] = age;
       sample.in_motion[joint_index] =
+        std::isfinite(sample.velocities_rad_s[joint_index]) &&
         std::abs(sample.velocities_rad_s[joint_index]) >
         config_.moving_speed_threshold_rad_s;
     }
@@ -387,30 +471,135 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       motor_enabled.begin(), motor_enabled.end(), [](const bool value) {return value;});
     const bool all_fresh =
       std::all_of(motor_fresh.begin(), motor_fresh.end(), [](const bool value) {return value;});
-    if (driver_->mode() == pi_arm_can::DriverMode::MONITORING &&
-      all_enabled && all_fresh && position_initialized_ && output_positions_within_limits &&
-      !power_cycle_required_)
-    {
-      driver_->set_mode(pi_arm_can::DriverMode::CONTROL);
-      sample.driver_mode = pi_arm_can::to_string(driver_->mode());
-    } else if (driver_->mode() == pi_arm_can::DriverMode::CONTROL &&
-      (!all_enabled || !all_fresh || !position_initialized_ ||
-      !output_positions_within_limits || power_cycle_required_))
-    {
-      driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
-      sample.driver_mode = pi_arm_can::to_string(driver_->mode());
+    const bool any_motor_error =
+      std::any_of(motor_error.begin(), motor_error.end(), [](const bool value) {return value;});
+    const auto stop_status = driver_->motion_stop_status();
+    const bool stopping = stop_status == pi_arm_can::MotionStopStatus::PENDING;
+    const bool stop_failed = stop_status == pi_arm_can::MotionStopStatus::FAILED;
+    sample.motion_stop_pending = stopping;
+    sample.motion_stop_failed = stop_failed;
+    if (stop_failed) {
+      sample.error_message = "STOP UNCONFIRMED: retry Stop; motion is inhibited";
+      sample.has_error.assign(kAxisCount, true);
+    } else if (stopping) {
+      sample.error_message = "waiting for motor stop acknowledgements";
     }
+    sample.control_permitted =
+      config_.allow_real_control && calibration_.valid && sample.kinematics_valid &&
+      all_enabled && all_fresh && !any_motor_error && !stopping && !stop_failed;
+
+    control_permitted_.store(sample.control_permitted);
+    if (!sample.control_permitted && !axis_test_active_) {
+      // Feedback, calibration and kinematics validity are independent of an
+      // accepted motion lease. Losing any prerequisite revokes the lease and
+      // returns the CAN driver to read-only polling.
+      disarm_motion(0U);
+    }
+    sample.driver_mode = pi_arm_can::to_string(driver_->mode());
+    sample.motor_test_permitted = config_.commissioning && !axis_test_active_ &&
+      !axis_test_stop_failed_ && axis_test_raw_ready(true);
+    sample.joint_test_permitted = sample.motor_test_permitted && sample.calibrated &&
+      sample.kinematics_valid && all_enabled;
     return true;
   } catch (const std::exception & error) {
+    control_permitted_.store(false);
+    disarm_motion(0U);
     sample.error_message = error.what();
     return false;
   }
+}
+
+MotionArmResult RealBackend::disarm_motion(
+  const std::uint64_t lease_id, const bool retry_stop) noexcept
+{
+  std::lock_guard<std::mutex> lock(motion_mutex_);
+  if (!motion_write_gate_.disarm(lease_id)) {
+    return {false, true, "motion lease does not match the active lease"};
+  }
+  if (driver_ && (normal_motion_sent_ ||
+    // Lease zero is an explicit force-stop, including after a process restart
+    // when this backend cannot know what target the device last received.
+    (retry_stop && lease_id == 0U && !config_.read_only && !config_.commissioning) ||
+    (retry_stop && !config_.commissioning &&
+    driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED)))
+  {
+    std::vector<std::uint8_t> ids;
+    for (const auto & actuator : config_.actuators) {ids.push_back(actuator.motor_id);}
+    const bool requested = driver_->request_motor_stop(ids, retry_stop);
+    // The driver retains a failed-stop latch even if enqueue failed.
+    normal_motion_sent_ = false;
+    if (!requested) {return {false, false, "STOP UNCONFIRMED: motion inhibited; retry Stop"};}
+  }
+  if (driver_ && driver_->mode() != pi_arm_can::DriverMode::FAULT &&
+    driver_->mode() != pi_arm_can::DriverMode::OFFLINE)
+  {
+    driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
+  }
+  return {true, false, "real position writes disarmed"};
+}
+
+MotionArmResult RealBackend::set_motion_armed(
+  const bool armed, const std::uint64_t lease_id, const double max_output_velocity) noexcept
+{
+  if (!armed) {
+    const auto result = disarm_motion(lease_id, true);
+    if (!result.success) {return result;}
+    if (driver_ && !config_.commissioning) {
+      const auto status = driver_->motion_stop_status();
+      if ((status == pi_arm_can::MotionStopStatus::PENDING && !driver_->wait_for_motor_stop()) ||
+        status == pi_arm_can::MotionStopStatus::FAILED)
+      {return {false, false, "STOP UNCONFIRMED: motion inhibited; retry Stop"};}
+    }
+    return {true, false, "position writes disarmed; sent motion stopped or no motion submitted"};
+  }
+
+  std::lock_guard<std::mutex> lock(motion_mutex_);
+  if (driver_ && (driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::PENDING ||
+    driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED))
+  {return {false, false, "motor stop pending/unconfirmed"};}
+  if (config_.read_only) {
+    return {false, false, "read-only backend cannot arm position writes"};
+  }
+  if (config_.commissioning) {
+    return {false, false, "commissioning mode cannot arm normal controller writes"};
+  }
+  if (!config_.allow_real_control || !calibration_.valid || !control_permitted_.load()) {
+    return {false, false, "real-control prerequisites are not satisfied"};
+  }
+  if (!driver_ || !driver_->running() ||
+    (driver_->mode() != pi_arm_can::DriverMode::MONITORING &&
+    driver_->mode() != pi_arm_can::DriverMode::CONTROL))
+  {
+    return {false, false, "CAN driver is not available for motion arming"};
+  }
+  const double speed_limit = max_output_velocity == 0.0 ? 0.08726646259971647 : max_output_velocity;
+  if (!std::isfinite(speed_limit) || speed_limit < 0.002908882086657216) {
+    return {false, false, "output speed limit must be finite and at least 1/6 deg/s"};
+  }
+  if (motion_write_gate_.armed()) {
+    return {false, true, "motion lease already armed"};
+  }
+  if (!motion_write_gate_.arm(lease_id))
+  {
+    return {
+      false, motion_write_gate_.armed(),
+      "invalid/conflicting motion lease or no finite idle command baseline"};
+  }
+  output_speed_limit_rad_s_ = speed_limit;
+  {
+    std::lock_guard<std::mutex> feedback_lock(feedback_mutex_);
+    recovery_start_ = last_joint_positions_rad_;
+  }
+  // Remain in MONITORING until write() observes a controller command that is
+  // newer than the idle/hold command captured above.
+  return {true, true, "real position writes armed; waiting for a fresh controller command"};
 }
 
 bool RealBackend::write(
   const std::vector<double> & positions_rad,
   const std::vector<double> & velocities_rad_s) noexcept
 {
+  if (config_.commissioning) {return false;}
   if (!driver_ || positions_rad.size() != kAxisCount ||
     velocities_rad_s.size() != kAxisCount ||
     config_.joint_lower_limits_rad.size() != kAxisCount ||
@@ -421,18 +610,40 @@ bool RealBackend::write(
       "write rejected: size/config mismatch (driver=%d pos=%zu vel=%zu actuators=%zu)",
       driver_ ? 1 : 0, positions_rad.size(), velocities_rad_s.size(),
       config_.actuators.size());
+    disarm_motion(0U);
     return false;
   }
-  if (driver_->mode() == pi_arm_can::DriverMode::MONITORING ||
-    driver_->mode() == pi_arm_can::DriverMode::EXCLUSIVE_MANAGEMENT)
-  {
+
+  if (!motion_write_gate_.armed()) {
+    motion_write_gate_.observe_idle(positions_rad, velocities_rad_s);
     return true;
   }
-  if (driver_->mode() != pi_arm_can::DriverMode::CONTROL) {
-    log_write_reject(
-      "write rejected: driver mode is not CONTROL (mode=%d)",
-      static_cast<int>(driver_->mode()));
+  if (!control_permitted_.load()) {
+    disarm_motion(0U);
+    return true;
+  }
+  if (!std::all_of(positions_rad.begin(), positions_rad.end(), [](double value) {
+      return std::isfinite(value);
+    }) ||
+    !std::all_of(velocities_rad_s.begin(), velocities_rad_s.end(), [](double value) {
+      return std::isfinite(value);
+    }))
+  {
+    log_write_reject("write rejected: armed command contains a non-finite value");
+    disarm_motion(0U);
     return false;
+  }
+  const auto lease_id = motion_write_gate_.active_lease_id();
+  pi_arm_transmission::Vector6 recovery_start{};
+  double output_speed_limit = 0.0;
+  {
+    std::lock_guard<std::mutex> lock(motion_mutex_);
+    recovery_start = recovery_start_;
+    output_speed_limit = output_speed_limit_rad_s_;
+  }
+  if (!motion_write_gate_.permit_write(positions_rad, velocities_rad_s)) {
+    // This is the captured idle/hold command, not a new controller command.
+    return true;
   }
 
   try {
@@ -441,20 +652,29 @@ bool RealBackend::write(
     for (std::size_t index = 0; index < kAxisCount; ++index) {
       if (!std::isfinite(positions_rad[index]) || !std::isfinite(velocities_rad_s[index])) {
         log_write_reject(
-          "write rejected: non-finite command at joint[%zu] pos=%.6g vel=%.6g",
+          "write rejected: non-finite command at joint[%zu] pos=%.17g vel=%.17g",
           index, positions_rad[index], velocities_rad_s[index]);
+        disarm_motion(0U);
         return false;
       }
-      if (positions_rad[index] < config_.joint_lower_limits_rad[index] ||
-        positions_rad[index] > config_.joint_upper_limits_rad[index])
+      const double lower = config_.joint_lower_limits_rad[index];
+      const double upper = config_.joint_upper_limits_rad[index];
+      const double tolerance = config_.joint_feedback_tolerances_rad[index];
+      // JTC may interpolate from measured feedback in the allowance region.
+      // Accept only that captured start envelope, and project transmitted
+      // targets onto the standard command range. Never send out-of-range q.
+      if (positions_rad[index] < std::min(lower, recovery_start[index]) - 1e-12 ||
+        positions_rad[index] > std::max(upper, recovery_start[index]) + 1e-12 ||
+        positions_rad[index] < lower - tolerance || positions_rad[index] > upper + tolerance)
       {
         log_write_reject(
-          "write rejected: position limit exceeded at joint[%zu] pos=%.6g lim=[%.6g,%.6g]",
+          "write rejected: position limit exceeded at joint[%zu] pos=%.17g lim=[%.17g,%.17g]",
           index, positions_rad[index],
           config_.joint_lower_limits_rad[index], config_.joint_upper_limits_rad[index]);
+        disarm_motion(0U);
         return false;
       }
-      joint_positions[index] = positions_rad[index];
+      joint_positions[index] = std::clamp(positions_rad[index], lower, upper);
       joint_velocities[index] = clamp_joint_velocity(
         velocities_rad_s[index], config_.joint_velocity_limits_rad_s[index], index);
     }
@@ -463,8 +683,9 @@ bool RealBackend::write(
     auto status = kinematics_.joint_to_output_position(joint_positions, output_positions);
     if (!status) {
       log_write_reject(
-        "write rejected: cable position mapping failed (%s axis=%zu value=%.6g)",
+        "write rejected: cable position mapping failed (%s axis=%zu value=%.17g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
+      disarm_motion(0U);
       return false;
     }
     status = kinematics_.check_output_position_limits(output_positions);
@@ -472,8 +693,9 @@ bool RealBackend::write(
       const std::size_t index = status.axis - 1U;
       const auto & limit = kinematics_.parameters().output_limits[index];
       log_write_reject(
-        "write rejected: output-shaft limit exceeded at motor[%zu] value=%.6g lim=[%.6g,%.6g]",
+        "write rejected: output-shaft limit exceeded at motor[%zu] value=%.17g lim=[%.17g,%.17g]",
         status.axis, status.value, limit.lower_position_rad, limit.upper_position_rad);
+      disarm_motion(0U);
       return false;
     }
 
@@ -482,14 +704,9 @@ bool RealBackend::write(
       joint_positions, joint_velocities, output_velocities);
     if (!status) {
       log_write_reject(
-        "write rejected: cable velocity mapping failed (%s axis=%zu value=%.6g)",
+        "write rejected: cable velocity mapping failed (%s axis=%zu value=%.17g)",
         pi_arm_transmission::to_string(status.error), status.axis, status.value);
-      return false;
-    }
-
-    pi_arm_transmission::Matrix6 jacobian{};
-    status = kinematics_.jacobian(joint_positions, jacobian);
-    if (!status) {
+      disarm_motion(0U);
       return false;
     }
 
@@ -497,39 +714,50 @@ bool RealBackend::write(
     commands.reserve(kAxisCount);
     for (std::size_t index = 0; index < kAxisCount; ++index) {
       const auto & actuator = config_.actuators[index];
-      double protocol_speed =
-        std::abs(output_velocity_to_protocol_dps(output_velocities[index], actuator));
-      if (protocol_speed < 1.0) {
-        double output_speed_envelope = 0.0;
-        for (std::size_t joint_index = 0; joint_index < kAxisCount; ++joint_index) {
-          output_speed_envelope +=
-            std::abs(jacobian[index][joint_index]) *
-            config_.joint_velocity_limits_rad_s[joint_index];
-        }
-        protocol_speed =
-          std::max(
-          1.0,
-          std::abs(output_velocity_to_protocol_dps(output_speed_envelope, actuator)));
-      }
+      const double protocol_cap = std::min(65535.0, std::floor(
+          std::abs(output_velocity_to_protocol_dps(output_speed_limit, actuator)) + 1e-10));
+      if (protocol_cap < 1.0) {disarm_motion(0U); return false;}
+      // A4 speed is a ceiling, not a feedforward velocity. JTC's sampled
+      // positions define the trajectory timing. Rounding feedforward down
+      // accumulates tracking lag; setting zero can remove the motor's limit.
+      const double protocol_speed = protocol_cap;
       commands.push_back(
         pi_arm_can::PositionCommand{
           actuator.motor_id,
-          output_position_to_protocol_deg(output_positions[index], actuator),
+          model_output_position_to_protocol_deg(
+            output_positions[index], calibration_.software_output_offsets_rad[index], actuator),
           protocol_speed});
     }
+    std::unique_lock<std::mutex> motion_lock(motion_mutex_);
+    if (!motion_write_gate_.armed() || motion_write_gate_.active_lease_id() != lease_id ||
+      !control_permitted_.load()) {return true;}
+    if (!driver_->set_mode(pi_arm_can::DriverMode::CONTROL)) {return true;}
     if (!driver_->enqueue_position_batch(commands)) {
+      motion_lock.unlock();
+      if (!motion_write_gate_.armed() ||
+        driver_->mode() == pi_arm_can::DriverMode::MONITORING)
+      {
+        // A concurrent cancel/stop revoked the lease after this cycle began.
+        // Treat the dropped batch as the intended fail-closed outcome, not as
+        // a ros2_control lifecycle communication error.
+        return true;
+      }
       const auto detail = driver_->last_error();
       log_write_reject(
         "write rejected: enqueue_position_batch failed (%s)",
         detail.empty() ? "no detail" : detail.c_str());
+      disarm_motion(0U);
       return false;
     }
+    normal_motion_sent_ = true;
     return true;
   } catch (const std::exception & error) {
     log_write_reject("write rejected: %s", error.what());
+    disarm_motion(0U);
     return false;
   } catch (...) {
     log_write_reject("write rejected: unexpected exception");
+    disarm_motion(0U);
     return false;
   }
 }
@@ -537,13 +765,22 @@ bool RealBackend::write(
 ManagementResult RealBackend::manage(
   const pi_arm_can::ManagementOperation operation, const int motor_id) noexcept
 {
+  if (axis_test_active_) {
+    return {false, 2003, "stop the active axis test before changing motor power"};
+  }
   if (!driver_) {
     return {false, 2, "CAN driver is not configured"};
   }
-  if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO &&
-    motor_id != 0)
-  {
-    return {false, 1, "set_zero is a whole-arm operation; motor_id must be 0"};
+  // Power and fault-management operations are never motion-authorizing. They
+  // revoke an existing lease before any management frame is queued.
+  const auto stopped = set_motion_armed(false, 0U);
+  if (!stopped.success && operation == pi_arm_can::ManagementOperation::MOTOR_RUN) {
+    return {false, 2002, stopped.message};
+  }
+  if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
+    return {
+      false, 6,
+      "ROM zero is disabled in the normal hardware service; use the local maintenance CLI"};
   }
   const auto ids = selected_motor_ids(config_, motor_id);
   if (ids.empty()) {
@@ -571,14 +808,7 @@ ManagementResult RealBackend::manage(
   if (operation == pi_arm_can::ManagementOperation::MOTOR_OFF) {
     driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
   }
-  if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
-    power_cycle_required_ = true;
-    position_initialized_ = false;
-    driver_->set_mode(pi_arm_can::DriverMode::MONITORING);
-    return {
-      true, 0,
-      "zero written to ROM for all motors; power-cycle and restart the hardware lifecycle"};
-  }
+
   return {true, 0, "management command transmitted"};
 }
 
@@ -602,6 +832,14 @@ MockBackend::MockBackend(BackendConfig config)
   sample_.motor_fresh.assign(kAxisCount, true);
   sample_.motor_error_codes.assign(kAxisCount, 0);
   sample_.motor_ages_sec.assign(kAxisCount, 0.0);
+  sample_.calibrated = true;
+  sample_.kinematics_valid = true;
+  sample_.control_permitted = false;
+  sample_.calibration_id = "MOCK";
+  sample_.raw_protocol_positions_deg.assign(kAxisCount, 0.0);
+  sample_.raw_output_positions_rad.assign(kAxisCount, 0.0);
+  sample_.software_output_offsets_rad.assign(kAxisCount, 0.0);
+  sample_.model_output_positions_rad.assign(kAxisCount, 0.0);
   stationary_samples_.assign(kAxisCount, 0U);
   aggregate_mock_motor_state_to_joints(sample_);
   sample_.driver_mode = "OFFLINE";
@@ -628,6 +866,7 @@ void MockBackend::activate()
   const bool all_enabled = std::all_of(
     sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
   sample_.driver_mode = all_enabled ? "CONTROL" : "MONITORING";
+  sample_.control_permitted = all_enabled;
 }
 
 void MockBackend::deactivate() noexcept
@@ -635,6 +874,7 @@ void MockBackend::deactivate() noexcept
   std::lock_guard<std::mutex> lock(mutex_);
   active_ = false;
   sample_.connected = false;
+  sample_.control_permitted = false;
   sample_.driver_mode = configured_ ? "MONITORING" : "OFFLINE";
   output_velocities_rad_s_ = {};
   std::fill(sample_.velocities_rad_s.begin(), sample_.velocities_rad_s.end(), 0.0);
@@ -650,6 +890,7 @@ void MockBackend::cleanup() noexcept
   active_ = false;
   configured_ = false;
   sample_.connected = false;
+  sample_.control_permitted = false;
   sample_.driver_mode = "OFFLINE";
   std::fill(sample_.motor_enabled.begin(), sample_.motor_enabled.end(), false);
   std::fill(sample_.motor_fresh.begin(), sample_.motor_fresh.end(), false);
@@ -748,7 +989,12 @@ bool MockBackend::write(
 
   sample_.positions_rad = to_vector(recovered_positions);
   sample_.velocities_rad_s = to_vector(recovered_velocities);
+  sample_.kinematics_valid = true;
+  sample_.model_output_positions_rad = to_vector(output_positions_rad_);
+  sample_.raw_output_positions_rad = sample_.model_output_positions_rad;
   for (std::size_t index = 0; index < kAxisCount; ++index) {
+    sample_.raw_protocol_positions_deg[index] =
+      output_position_to_protocol_deg(output_positions_rad_[index], config_.actuators[index]);
     sample_.in_motion[index] =
       std::abs(recovered_velocities[index]) > config_.moving_speed_threshold_rad_s;
     sample_.motor_in_motion[index] =
@@ -774,10 +1020,10 @@ ManagementResult MockBackend::manage(
   if (!configured_) {
     return {false, 2, "mock backend is not configured"};
   }
-  if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO &&
-    motor_id != 0)
-  {
-    return {false, 1, "set_zero is a whole-arm operation; motor_id must be 0"};
+  if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
+    return {
+      false, 6,
+      "ROM zero is disabled in the normal hardware service; use the local maintenance CLI"};
   }
   if (motor_id != 0 && !valid_motor_id(motor_id)) {
     return {false, 1, "motor_id is not configured (use 0 for all motors)"};
@@ -809,7 +1055,7 @@ ManagementResult MockBackend::manage(
         sample_.motor_error_codes[index] = 0;
         break;
       case pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO:
-        break;
+        return {false, 6, "ROM zero is unavailable through normal backend management"};
     }
   }
   aggregate_mock_motor_state_to_joints(sample_);
@@ -817,17 +1063,27 @@ ManagementResult MockBackend::manage(
     const bool all_enabled = std::all_of(
       sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
     sample_.driver_mode = all_enabled ? "CONTROL" : "MONITORING";
-  }
-  if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
-    output_positions_rad_ = {};
-    output_velocities_rad_s_ = {};
-    std::fill(sample_.positions_rad.begin(), sample_.positions_rad.end(), 0.0);
-    std::fill(sample_.velocities_rad_s.begin(), sample_.velocities_rad_s.end(), 0.0);
-    std::fill(sample_.in_motion.begin(), sample_.in_motion.end(), false);
-    sample_.driver_mode = "MONITORING";
-    return {true, 0, "mock whole-arm zero applied"};
+    sample_.control_permitted = all_enabled;
   }
   return {true, 0, "mock management operation applied"};
+}
+
+MotionArmResult MockBackend::set_motion_armed(
+  const bool armed, const std::uint64_t lease_id, const double max_output_velocity) noexcept
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!configured_) {
+    return {false, false, "mock backend is not configured"};
+  }
+  if (armed && lease_id == 0U) {
+    return {false, false, "invalid mock motion lease"};
+  }
+  if (armed && (!std::isfinite(max_output_velocity) || max_output_velocity < 0.0)) {
+    return {false, false, "invalid output speed limit"};
+  }
+  // Mock has no CAN write boundary; accept the manager handshake without
+  // changing its existing deterministic command behavior.
+  return {true, armed, armed ? "mock motion lease accepted" : "mock motion lease released"};
 }
 
 }  // namespace pi_arm_hardware

@@ -2,6 +2,8 @@
 
 #include "pi_arm_can/can_driver.hpp"
 #include "pi_arm_hardware/actuator_coordinates.hpp"
+#include "pi_arm_hardware/calibration.hpp"
+#include "pi_arm_hardware/motion_write_gate.hpp"
 #include "pi_arm_transmission/cable_kinematics.hpp"
 
 #include <array>
@@ -20,11 +22,17 @@ struct BackendConfig
 {
   std::string can_interface{"can0"};
   std::string cable_kinematics_file;
+  std::string calibration_file;
+  bool allow_real_control{false};
+  bool read_only{false};
+  bool commissioning{false};
   std::vector<ActuatorConfig> actuators;
   // Per-joint limits, filled by the hardware plugin from the URDF <limit> tags.
   // The single source of truth for these values is the robot description.
   std::vector<double> joint_lower_limits_rad;
   std::vector<double> joint_upper_limits_rad;
+  // Read-side allowance only; never added to command or trajectory limits.
+  pi_arm_transmission::Vector6 joint_feedback_tolerances_rad{};
   std::vector<double> joint_velocity_limits_rad_s;
   std::chrono::milliseconds poll_interval{20};
   std::size_t status1_poll_divider{5U};
@@ -51,10 +59,26 @@ struct HardwareSample
   std::vector<bool> motor_fresh;
   std::vector<std::int32_t> motor_error_codes;
   std::vector<double> motor_ages_sec;
+  bool calibrated{false};
+  bool kinematics_valid{false};
+  bool control_permitted{false};
+  bool motion_stop_pending{false};
+  bool motion_stop_failed{false};
+  std::string calibration_id;
+  std::vector<double> raw_protocol_positions_deg;
+  std::vector<double> raw_output_positions_rad;
+  std::vector<double> software_output_offsets_rad;
+  std::vector<double> model_output_positions_rad;
+  std::string kinematics_error_code{"NONE"};
+  std::int32_t kinematics_error_axis{0};
+  double kinematics_error_value{0.0};
+  std::string kinematics_error_message;
   bool connected{false};
   std::string driver_mode{"OFFLINE"};
   std::string management_operation{"NONE"};
   std::string error_message;
+  bool motor_test_permitted{false};
+  bool joint_test_permitted{false};
 };
 
 struct ManagementResult
@@ -64,10 +88,17 @@ struct ManagementResult
   std::string message;
 };
 
+struct MotionArmResult
+{
+  bool success{false};
+  bool armed{false};
+  std::string message;
+};
+
 // Thread-safety contract: read() and write() are called from the ros2_control
-// loop while manage() is called concurrently from a service thread. Every
-// implementation must make read()/write() safe against a concurrent manage()
-// without blocking the control loop for the duration of a management command.
+// loop while manage() and set_motion_armed() can be called concurrently from
+// the auxiliary service thread. Every implementation must keep these paths
+// safe without blocking the control loop for the duration of management I/O.
 // Lifecycle methods (configure/activate/deactivate/cleanup) are never called
 // concurrently with each other or with read()/write()/manage(); the plugin
 // guarantees this ordering.
@@ -85,6 +116,8 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept = 0;
   virtual ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept = 0;
+  virtual MotionArmResult set_motion_armed(
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept = 0;
 };
 
 class RealBackend final : public Backend
@@ -103,13 +136,48 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept override;
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
+  MotionArmResult set_motion_armed(
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept override;
+
+  // Only the dedicated, single-threaded commissioning node may call these.
+  ManagementResult start_axis_test(const std::string & space, int axis_id,
+    double delta_deg, double speed_deg_s);
+  ManagementResult stop_axis_test(const std::string & reason);
+  bool heartbeat_axis_test(std::uint64_t test_id);
+  void update_axis_test(const HardwareSample & sample);
+  bool axis_test_active() const {return axis_test_active_;}
+  std::uint64_t axis_test_id() const {return axis_test_id_;}
+  std::string axis_test_status() const {return axis_test_status_;}
 
 private:
+  MotionArmResult disarm_motion(std::uint64_t lease_id, bool retry_stop = false) noexcept;
+  // Serialize the final command submission with lease changes. ACK waiting
+  // happens after releasing this mutex, never in read()/write().
+  std::mutex motion_mutex_;
+  std::mutex feedback_mutex_;
+  pi_arm_transmission::Vector6 recovery_start_{};
+  double output_speed_limit_rad_s_{0.08726646259971647};
+  bool normal_motion_sent_{false};
+  bool axis_test_raw_ready(bool require_still) const;
+  bool axis_test_active_{false};
+  bool axis_test_stop_failed_{false};
+  std::uint64_t axis_test_id_{0};
+  std::string axis_test_status_{"idle"};
+  std::string axis_test_space_;
+  std::vector<pi_arm_can::PositionCommand> axis_test_commands_;
+  std::vector<double> axis_test_origin_protocol_;
+  std::vector<double> axis_test_target_protocol_;
+  std::vector<double> axis_test_session_origin_;
+  std::chrono::steady_clock::time_point axis_test_started_{};
+  std::chrono::steady_clock::time_point axis_test_heartbeat_{};
+  double axis_test_timeout_sec_{0.0};
   BackendConfig config_;
   pi_arm_transmission::CableKinematics kinematics_;
+  CalibrationResult calibration_;
   pi_arm_transmission::Vector6 last_joint_positions_rad_{};
   std::atomic_bool position_initialized_{false};
-  std::atomic_bool power_cycle_required_{false};
+  std::atomic_bool control_permitted_{false};
+  MotionWriteGate motion_write_gate_;
   std::unique_ptr<pi_arm_can::CanDriver> driver_;
 };
 
@@ -128,6 +196,8 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept override;
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
+  MotionArmResult set_motion_armed(
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept override;
 
 private:
   bool valid_motor_id(int motor_id) const noexcept;

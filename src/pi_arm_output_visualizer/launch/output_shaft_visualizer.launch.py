@@ -68,7 +68,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "output_shaft_topic",
-                default_value="/pi_arm/output_shaft_states",
+                default_value="/pi_arm/model_output_shaft_states",
                 description="JointState topic carrying six motor output-shaft angles in rad",
             ),
             DeclareLaunchArgument("use_gui", default_value="true"),

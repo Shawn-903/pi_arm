@@ -111,7 +111,7 @@ TEST(ManagementGate, RejectsUnsafeOrUnverifiedStates)
   EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
     MotorPowerOperation::DISABLE, hardware, RobotState::READY, false, false, 1).allowed);
   EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
-    MotorPowerOperation::DISABLE, hardware, RobotState::FAULT, false, true, 1).allowed);
+    MotorPowerOperation::ENABLE, hardware, RobotState::FAULT, false, true, 1).allowed);
 
   hardware.motor_moving[4] = true;
   EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
@@ -125,4 +125,20 @@ TEST(ManagementGate, RejectsUnsafeOrUnverifiedStates)
   hardware.motor_enabled.pop_back();
   EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
     MotorPowerOperation::DISABLE, hardware, RobotState::DISCONNECTED, false, true, 1).allowed);
+}
+
+TEST(ManagementGate, AllowsControlledDisableDespiteKinematicsOrMotorFault)
+{
+  auto hardware = healthy_motors();
+  hardware.kinematics_valid = false;
+  hardware.motor_errors[1] = true;
+  EXPECT_TRUE(pi_arm_manager::decide_motor_power_operation(
+    MotorPowerOperation::DISABLE, hardware, RobotState::FAULT, false, true, 0).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
+    MotorPowerOperation::DISABLE, hardware, RobotState::FAULT, true, true, 0).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
+    MotorPowerOperation::DISABLE, hardware, RobotState::FAULT, false, false, 0).allowed);
+  hardware.motor_fresh[0] = false;
+  EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
+    MotorPowerOperation::DISABLE, hardware, RobotState::FAULT, false, true, 0).allowed);
 }

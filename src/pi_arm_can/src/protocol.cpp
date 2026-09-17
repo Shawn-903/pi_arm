@@ -35,11 +35,14 @@ CanFrame make_position_command(
     throw std::invalid_argument("protocol position command values must be finite");
   }
 
-  const auto speed = std::llround(std::abs(max_protocol_speed_dps));
+  const auto speed = std::floor(std::abs(max_protocol_speed_dps));
   if (speed < 1 || speed > std::numeric_limits<std::uint16_t>::max()) {
-    throw std::out_of_range("protocol speed must round to [1, 65535] dps");
+    throw std::out_of_range("protocol speed must be representable in [1, 65535] dps without increasing its limit");
   }
 
+  if (protocol_angle_deg * 100.0 < std::numeric_limits<std::int32_t>::min() - 0.5 ||
+    protocol_angle_deg * 100.0 > std::numeric_limits<std::int32_t>::max() + 0.5)
+  {throw std::out_of_range("protocol angle exceeds the 0.01 degree int32 range");}
   const auto angle = std::llround(protocol_angle_deg * 100.0);
   if (angle < std::numeric_limits<std::int32_t>::min() ||
     angle > std::numeric_limits<std::int32_t>::max())

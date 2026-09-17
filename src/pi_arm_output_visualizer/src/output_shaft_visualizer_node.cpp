@@ -20,7 +20,7 @@ public:
   {
     const auto config_path = declare_parameter<std::string>("cable_kinematics_file", "");
     const auto input_topic = declare_parameter<std::string>(
-      "input_topic", "/pi_arm/output_shaft_states");
+      "input_topic", "/pi_arm/model_output_shaft_states");
     const auto output_topic = declare_parameter<std::string>("output_topic", "/joint_states");
 
     if (config_path.empty()) {
@@ -41,7 +41,7 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "Visualizing six output-shaft angles in radians from '%s' on '%s'; no CAN hardware is used",
+      "Visualizing six model-output shaft angles in radians from '%s' on '%s'; no CAN hardware is used",
       input_topic.c_str(), output_topic.c_str());
   }
 

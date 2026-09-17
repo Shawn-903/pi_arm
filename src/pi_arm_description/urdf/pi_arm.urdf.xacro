@@ -4,6 +4,8 @@
   <xacro:arg name="can_interface" default="can0" />
   <xacro:arg name="bitrate" default="1000000" />
   <xacro:arg name="cable_kinematics_file" default="" />
+  <xacro:arg name="calibration_file" default="" />
+  <xacro:arg name="allow_real_control" default="false" />
   <link name="base_link">
     <inertial>
       <origin xyz="1.42472010167261E-06 -3.11862123503204E-06 0.0143168199324528" rpy="0 0 0" />
@@ -84,7 +86,8 @@
     <parent link="link_01" />
     <child link="link_02" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.745329252" upper="1.745329252" effort="20.0" velocity="0.1745329" />
+    <!-- Operator-confirmed +/-100.7 deg; packing pose lies on this boundary. -->
+    <limit lower="-1.757546556759" upper="1.757546556759" effort="20.0" velocity="0.1745329" />
   </joint>
   <link name="link_03">
     <inertial>
@@ -114,7 +117,7 @@
     <child link="link_03" />
     <axis xyz="0 0 1" />
     <mimic joint="joint_04" multiplier="1.0" offset="0.0" />
-    <limit lower="-1.483529864" upper="1.483529864" effort="20.0" velocity="0.1745329" />
+    <limit lower="-1.494001839708" upper="1.494001839708" effort="20.0" velocity="0.1745329" />
   </joint>
   <link name="link_04">
     <inertial>
@@ -144,7 +147,8 @@
     <child link="link_04" />
     <axis xyz="0 0 1" />
 
-    <limit lower="-1.483529864" upper="1.483529864" effort="20.0" velocity="0.1745329" />
+    <!-- Operator-confirmed +/-85.6 deg; joint_03 mimics these limits. -->
+    <limit lower="-1.494001839708" upper="1.494001839708" effort="20.0" velocity="0.1745329" />
   </joint>
   <link name="link_05">
     <inertial>
@@ -306,6 +310,8 @@
       <param name="can_interface">$(arg can_interface)</param>
       <param name="bitrate">$(arg bitrate)</param>
       <param name="cable_kinematics_file">$(arg cable_kinematics_file)</param>
+      <param name="calibration_file">$(arg calibration_file)</param>
+      <param name="allow_real_control">$(arg allow_real_control)</param>
       <param name="moving_speed_threshold_rad_s">0.00017453292519943296</param>
       <param name="state_stale_timeout_sec">1.0</param>
     </hardware>
@@ -324,6 +330,8 @@
       <param name="motor_id">2</param>
       <param name="protocol_angle_ratio">36</param>
       <param name="motor_direction">1</param>
+      <!-- Feedback-only +/-3 deg allowance; command limits remain above. -->
+      <param name="feedback_position_tolerance_rad">0.05235987755982989</param>
       <command_interface name="position" />
       <command_interface name="velocity" />
       <state_interface name="position">
@@ -335,6 +343,7 @@
       <param name="motor_id">3</param>
       <param name="protocol_angle_ratio">36</param>
       <param name="motor_direction">-1</param>
+      <param name="feedback_position_tolerance_rad">0.05235987755982989</param>
       <command_interface name="position" />
       <command_interface name="velocity" />
       <state_interface name="position">

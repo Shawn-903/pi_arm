@@ -32,7 +32,7 @@ class VisualizerAssetsTest(unittest.TestCase):
             [joint.attrib["name"] for joint in joints],
             [f"motor_{index:02d}_output" for index in range(1, 7)],
         )
-        expected = [3.819, 1.746, 7.786, 4.106, 4.870, 6.027]
+        expected = [3.819, 1.758, 7.841, 4.127, 4.892, 6.047]
         for joint, upper in zip(joints, expected):
             self.assertEqual(joint.attrib["type"], "revolute")
             limit = joint.find("limit")
@@ -48,7 +48,7 @@ class VisualizerAssetsTest(unittest.TestCase):
         self.assertIn("generate_output_shaft_urdf.py", launch_text)
         self.assertIn("gui_description", launch_text)
         self.assertIn("/pi_arm/output_shaft_robot_description", launch_text)
-        self.assertIn("/pi_arm/output_shaft_states", launch_text)
+        self.assertIn("/pi_arm/model_output_shaft_states", launch_text)
         self.assertIn('DeclareLaunchArgument("use_gui"', launch_text)
         self.assertNotIn("controller_manager", launch_text)
         self.assertNotIn("pi_arm_can", launch_text)

@@ -25,8 +25,14 @@
 #include "pi_arm_interfaces/msg/robot_state.hpp"
 #include "pi_arm_interfaces/msg/task_state.hpp"
 #include "pi_arm_interfaces/srv/manage_motor.hpp"
+#include "pi_arm_interfaces/srv/set_motion_armed.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
 #include "pi_arm_manager/management_gate.hpp"
+#include "pi_arm_manager/direct_move_validation.hpp"
+#include "pi_arm_transmission/config_loader.hpp"
+#include "pi_arm_transmission/cable_kinematics.hpp"
+#include "hardware_interface/component_parser.hpp"
+#include "pi_arm_manager/motion_stop_reason.hpp"
 #include "pi_arm_manager/state_aggregator.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -38,17 +44,6 @@ namespace pi_arm_manager
 {
 namespace
 {
-
-// Filled at startup from the robot model (URDF position/velocity limits plus
-// robot_description_planning acceleration limits) so the robot description
-// stays the single source of truth.
-struct JointLimits
-{
-  double lower{0.0};
-  double upper{0.0};
-  double velocity{0.0};
-  double acceleration{0.0};
-};
 
 // MoveL / goal-reject TCP caps (SI). Keep numerically aligned with
 // pi_arm_moveit_config/config/pilz_cartesian_limits.yaml used by move_group Pilz.
@@ -109,6 +104,7 @@ public:
   : Node("pi_arm_manager"),
     task_claimed_(false),
     stop_requested_(false),
+    stop_reason_(MotionStopReason::NONE),
     next_task_id_(1),
     still_frames_(0),
     linear_velocity_limit_(kMaxTransVelMps),
@@ -144,8 +140,8 @@ public:
       "/pi_arm/hardware/disable_motor", rmw_qos_profile_services_default, service_group_);
     reset_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
       "/pi_arm/hardware/reset_motor", rmw_qos_profile_services_default, service_group_);
-    zero_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
-      "/pi_arm/hardware/set_zero", rmw_qos_profile_services_default, service_group_);
+    motion_arm_client_ = create_client<pi_arm_interfaces::srv::SetMotionArmed>(
+      "/pi_arm/hardware/set_motion_armed", rmw_qos_profile_services_default, service_group_);
     follow_client_ = rclcpp_action::create_client<Follow>(
       this, follow_action_name_, action_group_);
 
@@ -155,8 +151,6 @@ public:
       "/pi_arm/disable_motor", disable_client_, Operation::DISABLE);
     reset_service_ = make_management_service(
       "/pi_arm/reset_motor", reset_client_, Operation::RESET);
-    zero_service_ = make_management_service(
-      "/pi_arm/set_zero", zero_client_, Operation::SET_ZERO);
     stop_service_ = create_service<pi_arm_interfaces::srv::StopMotion>(
       "/pi_arm/stop_motion",
       std::bind(
@@ -206,7 +200,110 @@ public:
   }
 
 private:
-  enum class Operation {ENABLE, DISABLE, RESET, SET_ZERO};
+  enum class Operation {ENABLE, DISABLE, RESET};
+
+  static bool valid_output_speed(double speed)
+  {
+    return std::isfinite(speed) && (speed == 0.0 || speed >= 0.002908882086657216);
+  }
+
+  static double resolved_output_speed(double speed)
+  {
+    if (!valid_output_speed(speed)) {throw std::runtime_error("invalid output speed ceiling");}
+    return speed == 0.0 ? 0.08726646259971647 : speed;
+  }
+
+  std::vector<double> direct_targets(const DirectMove::Goal & request) const
+  {
+    if (!request.output_space) {return request.positions;}
+    const std::vector<std::string> names{
+      "joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"};
+    if (request.joint_names != names || request.positions.size() != 6U) {
+      throw std::runtime_error("output target requires six canonical axes");
+    }
+    pi_arm_transmission::Vector6 output{}, joint{};
+    std::copy(request.positions.begin(), request.positions.end(), output.begin());
+    if (!cable_->check_output_position_limits(output) ||
+      !cable_->output_to_joint_position(output, joint)) {
+      throw std::runtime_error("output target outside limits or inverse domain");
+    }
+    std::vector<double> result(joint.begin(), joint.end());
+    validate_direct_positions(joint_limits_, names, result, "output target inverse");
+    return result;
+  }
+
+  void prepare_planning_start()
+  {
+    std::vector<std::string> names;
+    std::vector<double> positions;
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      names = hardware_.joint_names;
+      positions = hardware_.positions;
+    }
+    validate_direct_positions(joint_limits_, names, positions, "planning start", true);
+    moveit::core::RobotState start(move_group_->getRobotModel());
+    start.setToDefaultValues();
+    for (size_t i = 0; i < names.size(); ++i) {
+      const auto & bound = joint_limits_.at(names[i]);
+      start.setVariablePosition(names[i], std::clamp(positions[i], bound.lower, bound.upper));
+    }
+    start.update();
+    move_group_->setStartState(start);
+  }
+
+  void prepare_trajectory(trajectory_msgs::msg::JointTrajectory & trajectory, double output_speed)
+  {
+    validate_timed_trajectory(trajectory);
+    std::vector<double> previous;
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      if (trajectory.joint_names != hardware_.joint_names) {
+        throw std::runtime_error("trajectory requires canonical complete joint order");
+      }
+      previous = hardware_.positions;
+    }
+    validate_direct_positions(joint_limits_, trajectory.joint_names, previous, "trajectory start", true);
+    pi_arm_transmission::Matrix6 gain{};
+    cable_->jacobian({}, gain);
+    double old_time = 0.0, new_time = 0.0;
+    for (auto & point : trajectory.points) {
+      validate_direct_positions(joint_limits_, trajectory.joint_names, point.positions, "trajectory target");
+      pi_arm_transmission::Vector6 target{}, output{};
+      std::copy(point.positions.begin(), point.positions.end(), target.begin());
+      if (!cable_->joint_to_output_position(target, output) ||
+        !cable_->check_output_position_limits(output)) {
+        throw std::runtime_error("trajectory output limit exceeded");
+      }
+      const double time = rclcpp::Duration(point.time_from_start).seconds();
+      double duration = std::max(0.001, time - old_time);
+      for (size_t i = 0; i < 6; ++i) {
+        double distance_bound = 0.0;
+        for (size_t j = 0; j < 6; ++j) {
+          distance_bound += std::abs(gain[i][j]) * std::abs(point.positions[j] - previous[j]);
+        }
+        const double encoded_speed = std::min(65535.0, std::floor(
+            output_speed * 180.0 / M_PI * protocol_ratios_[i] + 1e-10));
+        if (encoded_speed < 1.0) {throw std::runtime_error("output speed below protocol resolution");}
+        const double effective_speed = encoded_speed / protocol_ratios_[i] * M_PI / 180.0;
+        duration = std::max(duration, distance_bound / effective_speed);
+        duration = std::max(duration, std::abs(point.positions[i] - previous[i]) /
+          joint_limits_.at(trajectory.joint_names[i]).velocity);
+      }
+      // Position-only waypoints select linear JTC interpolation: no spline
+      // overshoot into the feedback allowance. |J(0)| bounds cable speed on
+      // each linear segment, including the chord axes.
+      point.velocities.clear();
+      point.accelerations.clear();
+      point.effort.clear();
+      new_time += duration;
+      if (!std::isfinite(new_time)) {throw std::runtime_error("invalid trajectory duration");}
+      point.time_from_start = rclcpp::Duration::from_seconds(new_time);
+      old_time = time;
+      previous = point.positions;
+    }
+    trajectory.header.stamp = rclcpp::Time(0, 0, get_clock()->get_clock_type());
+  }
 
   // Reads position/velocity bounds from the robot model (URDF) and acceleration
   // bounds from the robot_description_planning joint limits that the launch
@@ -214,6 +311,20 @@ private:
   // are created; joint_limits_ is read-only afterwards.
   void load_joint_limits()
   {
+    const auto controls = hardware_interface::parse_control_resources_from_urdf(
+      get_parameter("robot_description").as_string());
+    if (controls.size() != 1U) {throw std::runtime_error("expected one hardware configuration");}
+    const auto & control = controls.front();
+    if (control.joints.size() != 6U) {throw std::runtime_error("expected six actuator mappings");}
+    for (size_t i = 0; i < 6; ++i) {
+      protocol_ratios_[i] = std::stod(control.joints[i].parameters.at("protocol_angle_ratio"));
+      if (!std::isfinite(protocol_ratios_[i]) || protocol_ratios_[i] <= 0.0) {
+        throw std::runtime_error("invalid protocol angle ratio");
+      }
+    }
+    cable_ = std::make_unique<pi_arm_transmission::CableKinematics>(
+      pi_arm_transmission::load_cable_kinematics_config(
+        control.hardware_parameters.at("cable_kinematics_file")));
     const auto robot_model = move_group_->getRobotModel();
     joint_limits_.clear();
     max_joint_velocity_limit_ = 0.0;
@@ -240,6 +351,14 @@ private:
       limits.upper = bounds.max_position_;
       limits.velocity = bounds.max_velocity_;
       limits.acceleration = bounds.max_acceleration_;
+      for (const auto & joint : control.joints) {
+        if (joint.name == name && joint.parameters.count("feedback_position_tolerance_rad")) {
+          limits.feedback_tolerance = std::stod(joint.parameters.at("feedback_position_tolerance_rad"));
+          if (!std::isfinite(limits.feedback_tolerance) || limits.feedback_tolerance < 0.0) {
+            throw std::runtime_error("invalid feedback tolerance");
+          }
+        }
+      }
       joint_limits_.emplace(name, limits);
       max_joint_velocity_limit_ = std::max(max_joint_velocity_limit_, limits.velocity);
       max_joint_acceleration_limit_ = std::max(max_joint_acceleration_limit_, limits.acceleration);
@@ -298,7 +417,8 @@ private:
           }
         }
         const auto state = aggregate_state(hardware_snapshot, task_snapshot);
-        const bool still = still_frames_.load() >= 3;
+        const bool still = (operation == Operation::DISABLE ?
+          raw_still_frames_.load() : still_frames_.load()) >= 3;
         const bool task_claimed = task_claimed_.load();
         bool allowed = false;
         int rejection_code = 2001;
@@ -324,11 +444,6 @@ private:
           switch (operation) {
             case Operation::ENABLE:
             case Operation::DISABLE:
-              break;
-            case Operation::SET_ZERO:
-              allowed = (state == pi_arm_interfaces::msg::RobotState::READY ||
-                state == pi_arm_interfaces::msg::RobotState::DISABLED) &&
-                !task_claimed && still;
               break;
             case Operation::RESET:
               allowed = state != pi_arm_interfaces::msg::RobotState::DISCONNECTED;
@@ -379,6 +494,49 @@ private:
       rmw_qos_profile_services_default, service_group_);
   }
 
+  std::uint64_t active_task_id()
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return task_.task_id;
+  }
+
+  bool set_motion_armed(
+    const bool armed, const std::uint64_t lease_id, const std::string & stage,
+    double max_output_velocity = 0.0)
+  {
+    if (!motion_arm_client_->wait_for_service(
+        std::chrono::duration<double>(operation_timeout_)))
+    {
+      RCLCPP_ERROR(
+        get_logger(), "motion gate service unavailable at %s", stage.c_str());
+      return false;
+    }
+    auto request = std::make_shared<pi_arm_interfaces::srv::SetMotionArmed::Request>();
+    request->armed = armed;
+    request->max_output_velocity = max_output_velocity;
+    request->lease_id = lease_id;
+    auto future = motion_arm_client_->async_send_request(request);
+    if (future.wait_for(std::chrono::duration<double>(operation_timeout_)) !=
+      std::future_status::ready)
+    {
+      RCLCPP_ERROR(get_logger(), "motion gate timeout at %s", stage.c_str());
+      return false;
+    }
+    const auto response = future.get();
+    if (!response->success || response->armed != armed) {
+      RCLCPP_ERROR(
+        get_logger(), "motion gate rejected at %s: success=%d armed=%d message=%s",
+        stage.c_str(), response->success ? 1 : 0, response->armed ? 1 : 0,
+        response->message.c_str());
+      return false;
+    }
+    RCLCPP_INFO(
+      get_logger(), "motion gate armed=%d lease=%llu at %s: %s",
+      armed ? 1 : 0, static_cast<unsigned long long>(lease_id), stage.c_str(),
+      response->message.c_str());
+    return true;
+  }
+
   void hardware_callback(const pi_arm_interfaces::msg::HardwareState::SharedPtr message)
   {
     const bool complete_motion_state =
@@ -393,22 +551,30 @@ private:
       message->velocities.begin(), message->velocities.end(),
       [this](double v) {return std::isfinite(v) && std::abs(v) <= still_velocity_;});
     still_frames_.store(no_motion ? std::min(3, still_frames_.load() + 1) : 0);
-    bool stop_for_hardware = false;
+    // Joint feedback can be invalid when cable inversion fails. Power-off
+    // relies on the independent, fresh motor motion flags in that case.
+    const bool raw_still = message->connected && complete_raw_motor_state(*message) &&
+      std::all_of(message->motor_fresh.begin(), message->motor_fresh.end(),
+      [](bool fresh) {return fresh;}) &&
+      std::none_of(message->motor_moving.begin(), message->motor_moving.end(),
+      [](bool moving) {return moving;});
+    raw_still_frames_.store(raw_still ? std::min(3, raw_still_frames_.load() + 1) : 0);
+    MotionStopReason hardware_stop_reason = MotionStopReason::NONE;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
       hardware_ = *message;
       last_hardware_time_ = now();
       const auto state = aggregate_state(hardware_, task_);
-      stop_for_hardware = task_claimed_.load() &&
-        (state == pi_arm_interfaces::msg::RobotState::DISCONNECTED ||
-        state == pi_arm_interfaces::msg::RobotState::FAULT ||
-        state == pi_arm_interfaces::msg::RobotState::DISABLED);
+      if (task_claimed_.load()) {
+        hardware_stop_reason = motion_stop_reason_for_robot_state(state);
+      }
     }
-    if (stop_for_hardware) {
+    if (hardware_stop_reason != MotionStopReason::NONE) {
       RCLCPP_WARN(
         get_logger(),
-        "stopping active task due to hardware state change (disconnected/fault/disabled)");
-      request_stop();
+        "stopping active task due to hardware state change: %s",
+        motion_stop_reason_name(hardware_stop_reason));
+      request_stop(hardware_stop_reason);
     }
   }
 
@@ -488,6 +654,7 @@ private:
   void begin_task(const std::string & command)
   {
     stop_requested_.store(false);
+    stop_reason_.store(MotionStopReason::NONE);
     still_frames_.store(0);
     std::lock_guard<std::mutex> lock(state_mutex_);
     task_.task_id = next_task_id_.fetch_add(1);
@@ -606,10 +773,12 @@ private:
       }
     }
     const double start_velocity_limit = min_velocity_limit(names);
-    if (start_velocity_limit <= 0.0 ||
-      !valid_joint_goal(names, previous_positions, start_velocity_limit))
-    {
-      return false;
+    if (start_velocity_limit <= 0.0) {return false;}
+    for (size_t i = 0; i < names.size(); ++i) {
+      const auto & bound = joint_limits_.at(names[i]);
+      if (!std::isfinite(previous_positions[i]) ||
+        previous_positions[i] < bound.lower - bound.feedback_tolerance ||
+        previous_positions[i] > bound.upper + bound.feedback_tolerance) {return false;}
     }
     std::vector<double> velocity_limits(names.size(), 0.0);
     std::vector<double> acceleration_limits(names.size(), 0.0);
@@ -669,7 +838,8 @@ private:
   rclcpp_action::GoalResponse goal_movej(
     const rclcpp_action::GoalUUID &, std::shared_ptr<const MoveJ::Goal> goal)
   {
-    if (!valid_joint_goal(goal->joint_names, goal->positions, goal->max_velocity) ||
+    if (!valid_output_speed(goal->max_output_velocity) ||
+      !valid_joint_goal(goal->joint_names, goal->positions, goal->max_velocity) ||
       !std::isfinite(goal->max_acceleration) || goal->max_acceleration <= 0.0 ||
       goal->max_acceleration > min_acceleration_limit(goal->joint_names) + 1e-6)
     {
@@ -687,7 +857,7 @@ private:
   rclcpp_action::GoalResponse goal_movejs(
     const rclcpp_action::GoalUUID &, std::shared_ptr<const MoveJs::Goal> goal)
   {
-    if (!valid_trajectory(goal->trajectory)) {
+    if (!valid_output_speed(goal->max_output_velocity) || !valid_trajectory(goal->trajectory)) {
       RCLCPP_WARN(
         get_logger(),
         "movejs REJECTED: invalid trajectory (joints=%zu points=%zu)",
@@ -707,7 +877,9 @@ private:
       orientation.x * orientation.x + orientation.y * orientation.y +
       orientation.z * orientation.z + orientation.w * orientation.w;
     const char * reason = nullptr;
-    if (!std::isfinite(goal->max_linear_velocity) || goal->max_linear_velocity <= 0.0 ||
+    if (!valid_output_speed(goal->max_output_velocity)) {
+      reason = "invalid output speed limit";
+    } else if (!std::isfinite(goal->max_linear_velocity) || goal->max_linear_velocity <= 0.0 ||
       goal->max_linear_velocity > linear_velocity_limit_ + 1e-6)
     {
       reason = "invalid or out-of-range max_linear_velocity";
@@ -752,7 +924,12 @@ private:
   rclcpp_action::GoalResponse goal_direct(
     const rclcpp_action::GoalUUID &, std::shared_ptr<const DirectMove::Goal> goal)
   {
-    if (!valid_joint_goal(goal->joint_names, goal->positions, goal->max_velocity)) {
+    std::vector<double> targets;
+    try {targets = direct_targets(*goal);} catch (const std::exception &) {
+      return rclcpp_action::GoalResponse::REJECT;
+    }
+    if (!valid_output_speed(goal->max_output_velocity) ||
+      !valid_joint_goal(goal->joint_names, targets, goal->max_velocity)) {
       RCLCPP_WARN(
         get_logger(),
         "direct_move REJECTED: invalid goal (joints=%zu max_v=%.6f)",
@@ -767,7 +944,7 @@ private:
   rclcpp_action::CancelResponse cancel_common(const std::shared_ptr<GoalHandleT>)
   {
     RCLCPP_WARN(get_logger(), "motion cancel requested");
-    request_stop();
+    request_stop(MotionStopReason::ACTION_CANCEL);
     return rclcpp_action::CancelResponse::ACCEPT;
   }
 
@@ -861,8 +1038,14 @@ private:
     if (!move_group_->setJointValueTarget(targets)) {
       throw std::runtime_error("movej target is invalid for planning group pi_arm");
     }
-    const bool backend_ok = static_cast<bool>(move_group_->move());
-    complete_action<MoveJ>(handle, backend_ok, "movej");
+    prepare_planning_start();
+    moveit::planning_interface::MoveGroupInterface::Plan plan;
+    if (move_group_->plan(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
+      throw std::runtime_error("movej planning failed");
+    }
+    Follow::Goal follow;
+    follow.trajectory = plan.trajectory.joint_trajectory;
+    complete_follow_action<MoveJ>(handle, follow, "movej");
   }
 
   void execute_movel(const std::shared_ptr<GoalHandleMoveL> handle)
@@ -916,6 +1099,7 @@ private:
       get_logger(), "movel planning pipeline=%s planner=%s", kPilzPipeline, kPilzLinPlanner);
 
     moveit::planning_interface::MoveGroupInterface::Plan plan;
+    prepare_planning_start();
     const auto plan_code = move_group_->plan(plan);
     if (plan_code != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(
@@ -979,6 +1163,7 @@ private:
   {
     publish_feedback<DirectMove>(handle, 0.0F, "running");
     const auto request = handle->get_goal();
+    const auto targets = direct_targets(*request);
     Follow::Goal goal;
     trajectory_msgs::msg::JointTrajectoryPoint point;
     double duration = 0.1;
@@ -991,6 +1176,12 @@ private:
       }
       goal.trajectory.joint_names = hardware_.joint_names;
       point.positions = hardware_.positions;
+      validate_direct_positions(joint_limits_, goal.trajectory.joint_names, point.positions, "start/hold", true);
+      const auto measured_start = point.positions;
+      for (size_t i = 0; i < point.positions.size(); ++i) {
+        const auto & bounds = joint_limits_.at(goal.trajectory.joint_names[i]);
+        point.positions[i] = std::clamp(point.positions[i], bounds.lower, bounds.upper);
+      }
       for (size_t i = 0; i < request->joint_names.size(); ++i) {
         const auto found = std::find(
           hardware_.joint_names.begin(), hardware_.joint_names.end(), request->joint_names[i]);
@@ -1000,11 +1191,16 @@ private:
         const auto index = static_cast<size_t>(
           std::distance(hardware_.joint_names.begin(), found));
         duration = std::max(
-          duration, std::abs(request->positions[i] - point.positions[index]) /
+          duration, std::abs(targets[i] - point.positions[index]) /
           request->max_velocity);
-        point.positions[index] = request->positions[i];
+        point.positions[index] = targets[i];
+      }
+      for (size_t i = 0; i < point.positions.size(); ++i) {
+        duration = std::max(duration, std::abs(point.positions[i] - measured_start[i]) /
+          request->max_velocity);
       }
     }
+    validate_direct_positions(joint_limits_, goal.trajectory.joint_names, point.positions, "target/hold");
     point.time_from_start = rclcpp::Duration::from_seconds(duration);
     goal.trajectory.points.push_back(point);
     complete_follow_action<DirectMove>(handle, goal, "direct_move");
@@ -1068,9 +1264,31 @@ private:
 
   template<typename ActionT, typename GoalHandleT>
   void complete_follow_action(
-    const std::shared_ptr<GoalHandleT> handle, const Follow::Goal & goal,
+    const std::shared_ptr<GoalHandleT> handle, Follow::Goal goal,
     const std::string & command)
   {
+    const double output_speed = resolved_output_speed(handle->get_goal()->max_output_velocity);
+    prepare_trajectory(goal.trajectory, output_speed);
+    const auto lease_id = active_task_id();
+    if (!set_motion_armed(true, lease_id, command + "/accepted", output_speed)) {
+      throw std::runtime_error("failed to arm motion");
+    }
+    // Release the lease even if a future or result handler throws.
+    const auto release = [this, lease_id](int *) {set_motion_armed(false, lease_id, "trajectory/scope_exit");};
+    int lease_token = 0;
+    std::unique_ptr<int, decltype(release)> lease_guard(&lease_token, release);
+    const double result_timeout = !goal.trajectory.points.empty() ?
+      direct_result_timeout(
+      rclcpp::Duration(goal.trajectory.points.back().time_from_start).seconds(),
+      motion_timeout_, operation_timeout_) : motion_timeout_;
+    bool direct_disarmed = false;
+    bool stop_confirmed = true;
+    const auto disarm_direct = [this, lease_id, &direct_disarmed, &stop_confirmed](const std::string & stage) {
+        if (!direct_disarmed) {
+          stop_confirmed = set_motion_armed(false, lease_id, stage);
+          direct_disarmed = true;
+        }
+      };
     RCLCPP_INFO(
       get_logger(),
       "%s follow: waiting for action server '%s' (timeout=%.1fs)",
@@ -1079,6 +1297,7 @@ private:
       RCLCPP_ERROR(
         get_logger(), "%s follow: action server unavailable: %s",
         command.c_str(), follow_action_name_.c_str());
+      disarm_direct("direct_move/follow_server_unavailable");
       complete_action<ActionT>(handle, false, command, "trajectory controller unavailable");
       return;
     }
@@ -1089,18 +1308,20 @@ private:
     if (wait_future_logged(send_future, operation_timeout_, command + "/send_goal") !=
       std::future_status::ready)
     {
+      disarm_direct("direct_move/follow_goal_timeout");
       complete_action<ActionT>(handle, false, command, "trajectory goal timeout");
       return;
     }
     auto follow_handle = send_future.get();
     if (!follow_handle) {
       RCLCPP_ERROR(get_logger(), "%s follow: goal REJECTED by controller", command.c_str());
+      disarm_direct("direct_move/follow_goal_rejected");
       complete_action<ActionT>(handle, false, command, "trajectory goal rejected");
       return;
     }
     RCLCPP_INFO(
       get_logger(), "%s follow: goal ACCEPTED, waiting for result (timeout=%.1fs)",
-      command.c_str(), motion_timeout_);
+      command.c_str(), result_timeout);
     publish_feedback<ActionT>(handle, 0.5F, "follow_executing");
     {
       std::lock_guard<std::mutex> lock(follow_mutex_);
@@ -1108,7 +1329,7 @@ private:
     }
     auto result_future = follow_client_->async_get_result(follow_handle);
     const auto status = wait_future_logged(
-      result_future, motion_timeout_, command + "/get_result");
+      result_future, result_timeout, command + "/get_result");
     bool backend_ok = false;
     std::string detail = command;
     if (status == std::future_status::ready) {
@@ -1133,6 +1354,10 @@ private:
       std::lock_guard<std::mutex> lock(follow_mutex_);
       active_follow_goal_.reset();
     }
+    // Stop new real position frames before settling/result processing. The
+    // hardware service also purges queued position-control batches.
+    disarm_direct("direct_move/follow_result");
+    if (!stop_confirmed) {backend_ok = false; detail = "motor stop unconfirmed";}
     complete_action<ActionT>(handle, backend_ok, command, detail);
   }
 
@@ -1148,11 +1373,20 @@ private:
       stop_requested_.load() ? 1 : 0, handle->is_canceling() ? 1 : 0, still_frames_.load());
     auto result = std::make_shared<typename ActionT::Result>();
     if (handle->is_canceling() || stop_requested_.load()) {
-      result->success = true;
-      result->code = 0;
-      result->message = "motion stopped";
-      finish_task(pi_arm_interfaces::msg::TaskState::CANCELED, 0, result->message);
-      if (handle->is_canceling()) {
+      auto reason = stop_reason_.load();
+      if (reason == MotionStopReason::NONE) {
+        reason = handle->is_canceling() ? MotionStopReason::ACTION_CANCEL :
+          MotionStopReason::STOP_SERVICE;
+      }
+      const auto outcome = motion_stop_outcome(reason);
+      result->success = outcome.success;
+      result->code = outcome.code;
+      result->message = outcome.message;
+      finish_task(outcome.task_status, outcome.code, result->message);
+      RCLCPP_WARN(
+        get_logger(), "%s terminated by %s: code=%d message=%s",
+        command.c_str(), motion_stop_reason_name(reason), result->code, result->message.c_str());
+      if (reason == MotionStopReason::ACTION_CANCEL && handle->is_canceling()) {
         handle->canceled(result);
       } else {
         handle->abort(result);
@@ -1198,9 +1432,29 @@ private:
     handle->succeed(result);
   }
 
-  void request_stop()
+  void record_stop_reason(const MotionStopReason reason)
   {
-    stop_requested_.store(true);
+    auto current = stop_reason_.load();
+    while (motion_stop_priority(reason) > motion_stop_priority(current) &&
+      !stop_reason_.compare_exchange_weak(current, reason))
+    {
+      // compare_exchange updates current; retry only while the new reason has
+      // greater diagnostic priority than the reason recorded by another thread.
+    }
+  }
+
+  void request_stop(const MotionStopReason reason)
+  {
+    record_stop_reason(reason);
+    const bool already_stopping = stop_requested_.exchange(true);
+    // Force-release any lease before controller cancellation/hold handling.
+    // stop_motion remains a software stop, not an emergency stop.
+    if (already_stopping) {
+      return;
+    }
+    if (reason != MotionStopReason::STOP_SERVICE) {
+      set_motion_armed(false, 0U, "stop_or_cancel");
+    }
     if (move_group_) {
       move_group_->stop();
     }
@@ -1244,18 +1498,19 @@ private:
     const std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Request>,
     std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Response> response)
   {
+    const bool stopped = set_motion_armed(false, 0U, "stop_motion/service");
     if (!task_claimed_.load()) {
       RCLCPP_INFO(get_logger(), "stop_motion: no active motion");
-      response->success = true;
-      response->code = 0;
-      response->message = "no active motion";
+      response->success = stopped;
+      response->code = stopped ? 0 : 2002;
+      response->message = stopped ? "no active motion; stop confirmed" : "STOP UNCONFIRMED; retry Stop";
       return;
     }
     RCLCPP_WARN(get_logger(), "stop_motion: requesting stop of active task");
-    request_stop();
-    response->success = true;
-    response->code = 0;
-    response->message = "stop requested";
+    request_stop(MotionStopReason::STOP_SERVICE);
+    response->success = stopped;
+    response->code = stopped ? 0 : 2002;
+    response->message = stopped ? "stop requested; motor stop confirmed" : "STOP UNCONFIRMED; retry Stop";
   }
 
   double hardware_timeout_;
@@ -1263,6 +1518,8 @@ private:
   double motion_timeout_;
   double still_velocity_;
   std::map<std::string, JointLimits> joint_limits_;
+  std::unique_ptr<pi_arm_transmission::CableKinematics> cable_;
+  pi_arm_transmission::Vector6 protocol_ratios_{};
   double max_joint_velocity_limit_{0.0};
   double max_joint_acceleration_limit_{0.0};
   double linear_velocity_limit_;
@@ -1280,8 +1537,10 @@ private:
   rclcpp::Time last_hardware_time_{0, 0, RCL_ROS_TIME};
   std::atomic_bool task_claimed_;
   std::atomic_bool stop_requested_;
+  std::atomic<MotionStopReason> stop_reason_;
   std::atomic_uint64_t next_task_id_;
   std::atomic_int still_frames_;
+  std::atomic_int raw_still_frames_{0};
 
   std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
   rclcpp_action::Client<Follow>::SharedPtr follow_client_;
@@ -1292,11 +1551,12 @@ private:
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_client_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_client_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reset_client_;
-  rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr zero_client_;
+  rclcpp::Client<pi_arm_interfaces::srv::SetMotionArmed>::SharedPtr motion_arm_client_;
+
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_service_;
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_service_;
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reset_service_;
-  rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr zero_service_;
+
   rclcpp::Service<pi_arm_interfaces::srv::StopMotion>::SharedPtr stop_service_;
   rclcpp::CallbackGroup::SharedPtr service_group_;
   rclcpp::CallbackGroup::SharedPtr action_group_;

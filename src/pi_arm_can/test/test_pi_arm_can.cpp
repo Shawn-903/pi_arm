@@ -32,6 +32,15 @@ TEST(Protocol, DecodesSigned56BitLimits)
     -(std::int64_t{1} << 55));
 }
 
+TEST(Protocol, NeverRaisesRequestedSpeedLimit)
+{
+  const auto frame = pi_arm_can::make_position_command(4U, 0.6, 1.8);
+  EXPECT_EQ(pi_arm_can::read_le<std::uint16_t>(&frame.data[2]), 1U);
+  EXPECT_THROW(pi_arm_can::make_position_command(4U, 0.6, 0.3), std::out_of_range);
+  EXPECT_THROW(pi_arm_can::make_position_command(1U, 1e300, 1.0), std::out_of_range);
+  EXPECT_THROW(pi_arm_can::make_position_command(1U, 0.0, 1e300), std::out_of_range);
+}
+
 TEST(Protocol, RejectsPositionCommandOutsideProtocolRanges)
 {
   EXPECT_THROW(
@@ -104,6 +113,28 @@ TEST(DriverCache, RecordsSetZeroAcknowledgementWithoutChangingLiveAngle)
   state = driver.motor_state(1U);
   EXPECT_TRUE(state.zero_ack_valid);
   EXPECT_DOUBLE_EQ(state.protocol_angle_deg, 123.45);
+}
+
+TEST(DriverConfiguration, RejectsUnsafeInterfaceNames)
+{
+  pi_arm_can::DriverConfig config;
+  config.interface_name = "../can0";
+  config.motor_ids = {1U};
+  EXPECT_THROW(pi_arm_can::CanDriver driver(config), std::invalid_argument);
+}
+
+TEST(DriverSafety, ReadOnlyModeRejectsControlAndManagement)
+{
+  pi_arm_can::DriverConfig config;
+  config.interface_name = "vcan0";
+  config.motor_ids = {1U};
+  config.read_only = true;
+  pi_arm_can::CanDriver driver(config);
+
+  EXPECT_FALSE(driver.set_mode(pi_arm_can::DriverMode::CONTROL));
+  EXPECT_FALSE(
+    driver.execute_management(
+      pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO, {1U}));
 }
 
 }  // namespace

@@ -5,6 +5,7 @@
 #include <hardware_interface/system_interface.hpp>
 #include <pi_arm_interfaces/msg/hardware_state.hpp>
 #include <pi_arm_interfaces/srv/manage_motor.hpp>
+#include <pi_arm_interfaces/srv/set_motion_armed.hpp>
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
@@ -44,6 +45,7 @@ public:
 
 private:
   using ManageMotor = pi_arm_interfaces::srv::ManageMotor;
+  using SetMotionArmed = pi_arm_interfaces::srv::SetMotionArmed;
 
   bool parse_configuration();
   void start_auxiliary_node();
@@ -72,6 +74,7 @@ private:
   rclcpp::Publisher<pi_arm_interfaces::msg::HardwareState>::SharedPtr state_publisher_;
   rclcpp::TimerBase::SharedPtr state_timer_;
   std::vector<rclcpp::Service<ManageMotor>::SharedPtr> management_services_;
+  rclcpp::Service<SetMotionArmed>::SharedPtr motion_arm_service_;
 };
 
 }  // namespace pi_arm_hardware

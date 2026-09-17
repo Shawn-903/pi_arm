@@ -190,3 +190,21 @@ T=150=0.02 s=20 ms*T*=501=0.02 s=20 ms
 - 硬件是否支持相应命令刷新率。
 
 实时控制中应尽量避免在周期函数里做阻塞等待、大量动态内存分配、文件读写和慢速日志输出。
+
+### **4.5 Pi Arm 真实位置写入租约**
+
+Controller Manager 即使没有新轨迹，也会周期调用硬件 `write()`；Joint Trajectory Controller 还可能保留一份 idle/hold command。因此“六台电机已 enable”不能等价于“允许发送位置帧”。当前真实 backend 使用三层条件：
+
+1. `control_permitted`：审批标定、运动学、六电机新鲜反馈、无故障及 `allow_real_control` 均有效；
+2. manager 已检查并接受一个 `DirectMove`，取得短生命周期运动租约；
+3. 武装后 command interface 出现不同于此前 idle/hold 基线的新命令。
+
+只有三层同时成立，`RealBackend::write()` 才把驱动切换到 `CONTROL` 并调用 `CanDriver::enqueue_position_batch()`。单独调用 enable 不创建租约。完成、取消、软件停止、disable/enable/reset、反馈或标定失效会解除租约，使驱动回到 `MONITORING`，并丢弃尚未发送的位置批次。监控轮询仍只使用 `0x92`、`0x9A` 和 `0x9C`。
+
+这一租约解决的是“空闲控制器命令被误发”为 `0xA4` 的软件门控问题，不是鉴权机制，也不构成急停。当前只有 DirectMove 接入租约；其他真实运动 Action 在完成同等生命周期集成前保持失败关闭。
+
+停止原因不能只压缩成一个布尔量。manager 分别保留 Action cancel、`stop_motion`、硬件失能、反馈失联和硬件故障：客户端 cancel 结束为 `CANCELED`；`stop_motion` 中止原运动时 Action 为 `ABORTED`、结果 `success=false/code=3003`；反馈失联、故障和失能分别为 `ABORTED`、`success=false/code=3101/3102/3103`，对应任务状态为 `FAILED`。这些结果语义独立于写入 gate；无论哪种停止原因，gate 都必须先解除并清除待发送位置批次。
+
+`RealBackend::deactivate()`/`cleanup()` 只撤销写入许可并停止软件驱动，不隐式发送电机关闭命令 `0x80`。这避免在析构路径中偷偷加入未经审批的总线写操作，但也意味着进程退出不等于电机失能，必须依靠显式 disable 和独立硬件断能措施。
+
+Jazzy 二进制版 MoveIt 2.12.4 的 `move_group` 还存在上游已报告的 SIGINT/SIGTERM 析构崩溃（moveit2#3680/#3721）。必须把“写入 gate 已先解除”和“整个 launch clean exit”作为两项独立结果记录：前者通过不能掩盖后者的 `-11`。本项目不通过忽略进程退出码、强杀进程或在析构中偷偷发送 CAN 管理命令来规避该问题；升级到含上游修复的包后需要重新做关闭路径验收。

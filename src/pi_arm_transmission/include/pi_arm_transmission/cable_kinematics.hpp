@@ -41,6 +41,12 @@ public:
   KinematicsStatus check_output_position_limits(
     const Vector6 & output_position_rad) const noexcept;
 
+  // Feedback allowance propagated through the cable coupling. Command callers
+  // must use the strict check above. Joint bounds must still be checked after IK.
+  KinematicsStatus check_output_feedback_limits(
+    const Vector6 & output_position_rad,
+    const Vector6 & joint_tolerances_rad) const noexcept;
+
   KinematicsStatus joint_to_output_velocity(
     const Vector6 & joint_position_rad,
     const Vector6 & joint_velocity_rad_s,

@@ -12,6 +12,14 @@ from vcan_motor_emulator import Motor, response  # noqa: E402
 
 
 class VcanMotorEmulatorTest(unittest.TestCase):
+    def test_stop_preserves_enable_and_angle(self):
+        motor = Motor(angle_raw=1234, speed_dps=3, enabled=True)
+        acknowledgement = response(motor, bytes([0x81]) + bytes(7))
+        self.assertEqual(acknowledgement, bytes([0x81]) + bytes(7))
+        self.assertTrue(motor.enabled)
+        self.assertEqual(motor.angle_raw, 1234)
+        self.assertEqual(motor.speed_dps, 0)
+
     def test_position_command_round_trips_through_multi_turn_angle(self) -> None:
         motor = Motor()
         target_raw = -12345

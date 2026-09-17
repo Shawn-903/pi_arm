@@ -3,6 +3,19 @@ cable_kinematics:
   angle_unit: rad
   length_unit: mm
 
+  # Cable equation -> physical reducer output-shaft direction, +1 or -1.
+  # Multiplies the ENTIRE equation (self motion AND J2 compensation).
+  # This is NOT motor_direction (protocol encoder -> output shaft, in URDF).
+  # Motor IDs 1..6 map to joint_01, joint_02, joint_04, joint_05, joint_06, joint_09.
+  # After editing, rebind the packing calibration to this model and restart.
+  output_directions:
+    motor_01: 1
+    motor_02: 1
+    motor_03: -1
+    motor_04: -1
+    motor_05: 1
+    motor_06: -1
+
   validation:
     asin_domain_tolerance: 1.0e-12
     cosine_singularity_threshold: 1.0e-6
@@ -14,15 +27,17 @@ cable_kinematics:
   # Reducer output-shaft positions, relative to the whole-arm zero operation.
   # These are theoretical envelopes derived from the URDF joint limits and the
   # cable model; live hardware still requires low-speed acceptance testing.
+  # Joint 2: +/-100.7 deg; joint 4: +/-85.6 deg. Envelopes are rounded
+  # outward to 0.001 rad; this is numerical enclosure, not mechanical clearance.
   output_limits:
     coordinate: reducer_output_shaft
     unit: rad
     motor_01: {lower_position_rad: -3.819, upper_position_rad: 3.819}
-    motor_02: {lower_position_rad: -1.746, upper_position_rad: 1.746}
-    motor_03: {lower_position_rad: -7.786, upper_position_rad: 7.786}
-    motor_04: {lower_position_rad: -4.106, upper_position_rad: 4.106}
-    motor_05: {lower_position_rad: -4.870, upper_position_rad: 4.870}
-    motor_06: {lower_position_rad: -6.027, upper_position_rad: 6.027}
+    motor_02: {lower_position_rad: -1.758, upper_position_rad: 1.758}
+    motor_03: {lower_position_rad: -7.841, upper_position_rad: 7.841}
+    motor_04: {lower_position_rad: -4.127, upper_position_rad: 4.127}
+    motor_05: {lower_position_rad: -4.892, upper_position_rad: 4.892}
+    motor_06: {lower_position_rad: -6.047, upper_position_rad: 6.047}
 
   axes:
     joint_01:
