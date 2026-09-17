@@ -251,6 +251,7 @@ void fill_hardware_state_message(
   }
   if constexpr (has_motion_stop_pending<MessageT>::value) {
     message.motion_stop_pending = sample.motion_stop_pending;
+    message.teaching_active = sample.teaching_active;
     message.motion_stop_failed = sample.motion_stop_failed;
   }
   if constexpr (has_calibration_id<MessageT>::value) {
@@ -604,6 +605,13 @@ void PiArmSystem::start_auxiliary_node()
     "/pi_arm/hardware/reset_motor", pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS);
   create_management_service(
     "/pi_arm/hardware/reboot_motor", pi_arm_can::ManagementOperation::MOTOR_REBOOT);
+  teaching_service_ = node_->create_service<pi_arm_interfaces::srv::SetTeaching>(
+    "/pi_arm/hardware/set_teaching",
+    [this](const std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Request> request,
+      std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Response> response) {
+      const auto result = backend_->set_teaching(request->enabled);
+      response->success = result.success; response->code = result.code; response->message = result.message;
+    });
   motion_arm_service_ = node_->create_service<SetMotionArmed>(
     "/pi_arm/hardware/set_motion_armed",
     [this](
@@ -611,7 +619,7 @@ void PiArmSystem::start_auxiliary_node()
       std::shared_ptr<SetMotionArmed::Response> response)
     {
       const auto result = backend_->set_motion_armed(
-        request->armed, request->lease_id, request->max_output_velocity);
+        request->armed, request->lease_id, request->max_output_velocity, request->hold_position);
       response->success = result.success;
       response->armed = result.armed;
       response->message = result.message;
@@ -644,6 +652,7 @@ void PiArmSystem::stop_auxiliary_node() noexcept
     executor_thread_.join();
   }
   management_services_.clear();
+  teaching_service_.reset();
   motion_arm_service_.reset();
   state_timer_.reset();
   state_publisher_.reset();

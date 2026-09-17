@@ -491,12 +491,14 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       sample.kinematics_error_message = "reboot position reference requires verification; motion inhibited";
       sample.error_message = sample.kinematics_error_message;
     }
-    sample.control_permitted =
+    sample.teaching_active = teaching_active_.load();
+    sample.control_permitted = !sample.teaching_active &&
       config_.allow_real_control && calibration_.valid && sample.kinematics_valid &&
       all_enabled && all_fresh && !any_motor_error && !stopping && !stop_failed;
 
     control_permitted_.store(sample.control_permitted);
-    if (!sample.control_permitted && !axis_test_active_) {
+    if (!sample.control_permitted && !axis_test_active_ &&
+      !(sample.teaching_active && !motion_write_gate_.armed())) {
       // Feedback, calibration and kinematics validity are independent of an
       // accepted motion lease. Losing any prerequisite revokes the lease and
       // returns the CAN driver to read-only polling.
@@ -546,8 +548,42 @@ MotionArmResult RealBackend::disarm_motion(
 }
 
 MotionArmResult RealBackend::set_motion_armed(
-  const bool armed, const std::uint64_t lease_id, const double max_output_velocity) noexcept
+  const bool armed, const std::uint64_t lease_id, const double max_output_velocity, const bool hold_position) noexcept
 {
+  if (hold_position) {
+    std::lock_guard<std::mutex> lock(motion_mutex_);
+    if (armed || lease_id == 0U || !motion_write_gate_.armed() ||
+      motion_write_gate_.active_lease_id() != lease_id || !control_permitted_.load() ||
+      !driver_ || teaching_active_.load() || driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::PENDING ||
+      driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED) {
+      return {false, motion_write_gate_.armed(), "invalid hold release or hardware not ready"};
+    }
+    // Purge queued controller writes, retaining the last transmitted A4 target.
+    // Keep normal_motion_sent_ set so faults and explicit Stop still stop the motor.
+    if (!driver_->set_mode(pi_arm_can::DriverMode::MONITORING)) {
+      return {false, true, "cannot close controller writes for holding"};
+    }
+    if (!normal_motion_sent_) {
+      // An already-reached goal may never produce a fresh JTC command. It
+      // still needs an explicit position loop (RUN alone is not a hold).
+      const auto snapshot = driver_->snapshot();
+      std::vector<pi_arm_can::PositionCommand> commands;
+      const auto now = std::chrono::steady_clock::now();
+      for (const auto & actuator : config_.actuators) {
+        const auto & state = snapshot.at(actuator.motor_id);
+        if (!state.angle_valid || age_seconds(state.angle_update, now) > config_.state_stale_timeout_sec ||
+          state.protocol_speed_dps != 0.0 || state.stationary_samples < 3U) {
+          return {false, true, "fresh stationary angles required for already-reached goal hold"};
+        }
+        commands.push_back({actuator.motor_id, state.protocol_angle_deg,
+          std::max(1.0, std::floor(std::abs(output_velocity_to_protocol_dps(0.017453292519943295, actuator))))});
+      }
+      if (!driver_->hold_positions(commands)) {return {false, true, "current-position hold not confirmed"};}
+      normal_motion_sent_ = true;
+    }
+    motion_write_gate_.disarm(lease_id);
+    return {true, false, "trajectory lease released; motor position loop retained"};
+  }
   if (!armed) {
     const auto result = disarm_motion(lease_id, true);
     if (!result.success) {return result;}
@@ -570,7 +606,7 @@ MotionArmResult RealBackend::set_motion_armed(
   if (config_.commissioning) {
     return {false, false, "commissioning mode cannot arm normal controller writes"};
   }
-  if (!config_.allow_real_control || !calibration_.valid || !control_permitted_.load() ||
+  if (teaching_active_.load() || !config_.allow_real_control || !calibration_.valid || !control_permitted_.load() ||
     reboot_reference_uncertain_.load()) {
     return {false, false, "real-control prerequisites are not satisfied"};
   }
@@ -773,6 +809,9 @@ bool RealBackend::write(
 ManagementResult RealBackend::manage(
   const pi_arm_can::ManagementOperation operation, const int motor_id) noexcept
 {
+  if (teaching_active_.load() && operation == pi_arm_can::ManagementOperation::MOTOR_RUN) {
+    return {false, 2001, "exit drag teaching to hold the current position before enabling"};
+  }
   if (axis_test_active_) {
     return {false, 2003, "stop the active axis test before changing motor power"};
   }
@@ -856,6 +895,53 @@ ManagementResult RealBackend::manage(
   }
 
   return {true, 0, "management command transmitted"};
+}
+
+ManagementResult RealBackend::set_teaching(const bool enabled) noexcept
+{
+  if (config_.read_only || config_.commissioning || !config_.allow_real_control || !driver_) {
+    return {false, 2001, "drag teaching requires normal writable hardware"};
+  }
+  if (enabled) {
+    // Latch before releasing torque; even a partial failure must forbid motion.
+    teaching_active_.store(true);
+    control_permitted_.store(false);
+    // 0x80 clears motor multi-turn reference according to the vendor manual.
+    // 0x81 releases the position loop while retaining the running state/reference.
+    const auto result = set_motion_armed(false, 0U);
+    return result.success ? ManagementResult{true, 0, "drag teaching active; position loop stopped, support arm manually"} :
+      ManagementResult{false, 2002, result.message};
+  }
+  if (!teaching_active_.load()) {return {false, 2001, "drag teaching is not active"};}
+  HardwareSample current;
+  if (!read(current) || !current.calibrated || !current.kinematics_valid ||
+    current.motion_stop_pending || current.motion_stop_failed || reboot_reference_uncertain_.load()) {
+    return {false, 2001, "fresh valid calibration/kinematics required to hold current pose"};
+  }
+  const auto snapshot = driver_->snapshot();
+  const auto now = std::chrono::steady_clock::now();
+  std::vector<pi_arm_can::PositionCommand> commands;
+  for (const auto & actuator : config_.actuators) {
+    const auto & state = snapshot.at(actuator.motor_id);
+    if (!state.angle_valid || !state.status1_valid || !state.status2_valid ||
+      age_seconds(state.angle_update, now) > config_.state_stale_timeout_sec ||
+      age_seconds(state.status1_update, now) > config_.state_stale_timeout_sec ||
+      age_seconds(state.status2_update, now) > config_.state_stale_timeout_sec ||
+      state.error_state != 0 || (state.motor_state != 0x00 && state.motor_state != 0x30) ||
+      state.protocol_speed_dps != 0.0 || state.stationary_samples < 3U) {
+      return {false, 2001, "holding requires fresh enabled, error-free stationary motors; power-off requires reference verification"};
+    }
+    commands.push_back({actuator.motor_id, state.protocol_angle_deg,
+      std::max(1.0, std::floor(std::abs(output_velocity_to_protocol_dps(0.017453292519943295, actuator))))});
+  }
+  // Services are serialized by the auxiliary executor. The control loop is
+  // disarmed; no old controller target can overwrite these captured targets.
+  if (!driver_->hold_positions(commands)) {
+    return {false, 2002, "failed to confirm current-position hold; teaching remains active"};
+  }
+  {std::lock_guard<std::mutex> lock(motion_mutex_); normal_motion_sent_ = true;}
+  teaching_active_.store(false);
+  return {true, 0, "drag teaching ended; motors holding captured current positions"};
 }
 
 MockBackend::MockBackend(BackendConfig config)
@@ -969,6 +1055,7 @@ bool MockBackend::write(
     return false;
   }
 
+  if (hold_mock_current_) {return true;}
   pi_arm_transmission::Vector6 joint_positions{};
   pi_arm_transmission::Vector6 joint_velocities{};
   for (std::size_t index = 0; index < kAxisCount; ++index) {
@@ -1077,6 +1164,9 @@ ManagementResult MockBackend::manage(
   if (motor_id != 0 && !valid_motor_id(motor_id)) {
     return {false, 1, "motor_id is not configured (use 0 for all motors)"};
   }
+  if (sample_.teaching_active && operation == pi_arm_can::ManagementOperation::MOTOR_RUN) {
+    return {false, 2001, "exit drag teaching before enabling"};
+  }
   if (operation != pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS) {
     for (const auto samples : stationary_samples_) {
       if (samples < 3U) {
@@ -1116,24 +1206,46 @@ ManagementResult MockBackend::manage(
     const bool all_enabled = std::all_of(
       sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
     sample_.driver_mode = all_enabled ? "CONTROL" : "MONITORING";
-    sample_.control_permitted = all_enabled;
+    sample_.control_permitted = all_enabled && !sample_.teaching_active;
   }
   return {true, 0, "mock management operation applied"};
 }
 
+ManagementResult MockBackend::set_teaching(const bool enabled) noexcept
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!configured_ || !active_ || config_.read_only || config_.commissioning ||
+    std::any_of(stationary_samples_.begin(), stationary_samples_.end(), [](auto n) {return n < 3U;})) {
+    return {false, 2001, "mock teaching requires stationary active hardware"};
+  }
+  if (!enabled && (!sample_.teaching_active || !std::all_of(sample_.motor_enabled.begin(),
+    sample_.motor_enabled.end(), [](bool value) {return value;}))) {
+    return {false, 2001, "holding requires enabled motors in drag teaching"};
+  }
+  hold_mock_current_ = true;
+  sample_.teaching_active = enabled;
+  sample_.control_permitted = !enabled && std::all_of(sample_.motor_enabled.begin(), sample_.motor_enabled.end(),
+    [](bool value) {return value;});
+  aggregate_mock_motor_state_to_joints(sample_);
+  return {true, 0, enabled ? "mock drag teaching active" : "mock holding current pose"};
+}
+
 MotionArmResult MockBackend::set_motion_armed(
-  const bool armed, const std::uint64_t lease_id, const double max_output_velocity) noexcept
+  const bool armed, const std::uint64_t lease_id, const double max_output_velocity, const bool hold_position) noexcept
 {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!configured_) {
     return {false, false, "mock backend is not configured"};
   }
+  (void)hold_position;
+  if (armed && sample_.teaching_active) {return {false, false, "drag teaching active"};}
   if (armed && lease_id == 0U) {
     return {false, false, "invalid mock motion lease"};
   }
   if (armed && (!std::isfinite(max_output_velocity) || max_output_velocity < 0.0)) {
     return {false, false, "invalid output speed limit"};
   }
+  if (armed) {hold_mock_current_ = false;}
   // Mock has no CAN write boundary; accept the manager handshake without
   // changing its existing deterministic command behavior.
   return {true, armed, armed ? "mock motion lease accepted" : "mock motion lease released"};

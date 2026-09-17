@@ -58,6 +58,12 @@ int main(int argc, char **argv) {
       else {q[0]+=.01;v[0]=.1;}
       ok=r.success && b.write(q,v);detail=r.message;
     }
+    if(op=="idle") {b.write(s.positions_rad, std::vector<double>(6,0));}
+    if(op=="hold" || op=="hold_wrong") {
+      auto r=b.set_motion_armed(false, op=="hold" ? lease : lease+100, 0.0, true);ok=r.success;detail=r.message;
+    }
+    if(op=="teach_on" || op=="teach_off") {auto r=b.set_teaching(op=="teach_on");ok=r.success;detail=r.message;}
+    if(op=="enable") {auto r=b.manage(pi_arm_can::ManagementOperation::MOTOR_RUN,0);ok=r.success;detail=r.message;}
     if(op=="disarm") {auto r=b.set_motion_armed(false,0); b.write(std::vector<double>(6,0),std::vector<double>(6,0));ok=r.success;detail=r.message;}
     if(command=="write_target") {
       int axis; double degrees; input >> axis >> degrees;
@@ -80,7 +86,7 @@ int main(int argc, char **argv) {
     if(op=="stop") {auto r=b.stop_axis_test("operator stop");ok=r.success;detail=r.message;}
     std::cout << "op=" << command << " ok=" << ok << " read_us=" << read_us << " q2_deg=" << s.positions_rad[1]*180/3.141592653589793 << " q5_deg=" << s.positions_rad[3]*180/3.141592653589793
       << " q3_deg=" << s.positions_rad[2]*180/3.141592653589793
-      << " kin=" << s.kinematics_valid << " control=" << s.control_permitted
+      << " teaching=" << s.teaching_active << " kin=" << s.kinematics_valid << " control=" << s.control_permitted
       << " joint_permit=" << s.joint_test_permitted << " active=" << b.axis_test_active()
       << " stop_pending=" << s.motion_stop_pending << " stop_failed=" << s.motion_stop_failed
       << " error=" << s.kinematics_error_code << " detail=" << detail + " | " + b.axis_test_status() << std::endl;

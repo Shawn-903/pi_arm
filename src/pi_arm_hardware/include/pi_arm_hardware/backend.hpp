@@ -61,6 +61,7 @@ struct HardwareSample
   std::vector<double> motor_ages_sec;
   bool calibrated{false};
   bool kinematics_valid{false};
+  bool teaching_active{false};
   bool control_permitted{false};
   bool motion_stop_pending{false};
   bool motion_stop_failed{false};
@@ -116,8 +117,9 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept = 0;
   virtual ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept = 0;
+  virtual ManagementResult set_teaching(bool enabled) noexcept = 0;
   virtual MotionArmResult set_motion_armed(
-    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept = 0;
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0, bool hold_position = false) noexcept = 0;
 };
 
 class RealBackend final : public Backend
@@ -136,8 +138,9 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept override;
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
+  ManagementResult set_teaching(bool enabled) noexcept override;
   MotionArmResult set_motion_armed(
-    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept override;
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0, bool hold_position = false) noexcept override;
 
   // Only the dedicated, single-threaded commissioning node may call these.
   ManagementResult start_axis_test(const std::string & space, int axis_id,
@@ -178,6 +181,7 @@ private:
   pi_arm_transmission::Vector6 last_joint_positions_rad_{};
   std::atomic_bool position_initialized_{false};
   std::atomic_bool control_permitted_{false};
+  std::atomic_bool teaching_active_{false};
   MotionWriteGate motion_write_gate_;
   std::unique_ptr<pi_arm_can::CanDriver> driver_;
 };
@@ -197,10 +201,12 @@ public:
     const std::vector<double> & velocities_rad_s) noexcept override;
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
+  ManagementResult set_teaching(bool enabled) noexcept override;
   MotionArmResult set_motion_armed(
-    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept override;
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0, bool hold_position = false) noexcept override;
 
 private:
+  bool hold_mock_current_{false};
   bool valid_motor_id(int motor_id) const noexcept;
 
   BackendConfig config_;

@@ -197,6 +197,7 @@
       tracking: "跟随中",
       settling: "终点收敛中",
       verifying_after_stop: "停止后核验",
+      verifying_hold: "位置保持核验",
       reached: "到位已核验",
       not_reached: "未到位",
       canceled: "已取消",

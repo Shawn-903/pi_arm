@@ -15,7 +15,7 @@ from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import PoseStamped
 from pi_arm_interfaces.action import DirectMove, MoveJ, MoveJs, MoveL
 from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState
-from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion
+from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion, SetTeaching
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -40,6 +40,7 @@ from .protocol import (
     required_float,
     required_vector,
     response,
+    point_precision,
 )
 
 DEG_TO_RAD = math.pi / 180.0
@@ -104,6 +105,7 @@ class RosBridge(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.service_clients = {} if self.read_only or self.commissioning else {
+            "set_teaching": self.create_client(SetTeaching, "/pi_arm/set_teaching"),
             "enable_motor": self.create_client(ManageMotor, "/pi_arm/enable_motor"),
             "disable_motor": self.create_client(ManageMotor, "/pi_arm/disable_motor"),
             "reset_motor": self.create_client(ManageMotor, "/pi_arm/reset_motor"),
@@ -326,6 +328,11 @@ class CommandGateway:
             return await asyncio.to_thread(dispatch_points, self.bridge, command, params)
         if self.bridge.read_only:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "只读排查模式：仅查看反馈，不提供控制服务")
+        if command == "set_teaching":
+            if self.bridge.commissioning or set(params) != {"enabled"} or type(params["enabled"]) is not bool:
+                raise ProtocolError(CODE_INVALID_PARAMS, "拖拽示教需要正常控制模式和 enabled 布尔参数")
+            result = await self.bridge.call_service(command, SetTeaching.Request(enabled=params["enabled"]))
+            return {"cmd": command, "message": result.message}
         if command == "preview_motion":
             return await self._preview(params)
         if command == "move_preset":
@@ -767,6 +774,8 @@ class WebSocketGateway:
         }
         body["protocol_angle_ratios"] = list(hardware.protocol_angle_ratios) if hardware else []
         body["motor_directions"] = list(hardware.motor_directions) if hardware else []
+        body["teaching_active"] = bool(hardware and hardware.teaching_active)
+        body["teaching_available"] = not self.bridge.read_only and not self.bridge.commissioning
         body["motion_stop_pending"] = bool(hardware and hardware.motion_stop_pending)
         body["motion_stop_failed"] = bool(hardware and hardware.motion_stop_failed)
         body["state_available"] = state is not None
@@ -790,7 +799,7 @@ class WebSocketGateway:
             # Use the exact same feedback snapshot as joint/base-frame display and capture.
             body['pose'] = dict(zip(('x','y','z','rx','ry','rz'), tip['position_mm'] + tip['rpy_deg'])) if tip else {}
         return json.dumps(
-            json_safe({"type": "state", "msg_id": next(self.counter), **body}),
+            point_precision(json_safe({"type": "state", "msg_id": next(self.counter), **body})),
             allow_nan=False,
             ensure_ascii=False,
             separators=(",", ":"),

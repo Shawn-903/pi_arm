@@ -103,6 +103,7 @@ function refreshControlGate() {
   const permitted =
     !lastState?.commissioning &&
     !lastState?.read_only &&
+    !lastState?.teaching_active &&
     acceptedTaskId === null &&
     fresh &&
     lastState.control_permitted === true &&
@@ -111,7 +112,7 @@ function refreshControlGate() {
     ![...pending.values()].some(
       (item) =>
         motionCommands.has(item.cmd) ||
-        ["preview_motion", "reset_motor", "reboot_motor"].includes(item.cmd),
+        ["preview_motion", "reset_motor", "reboot_motor", "set_teaching"].includes(item.cmd),
     );
   document
     .querySelectorAll(
@@ -153,7 +154,7 @@ function refreshControlGate() {
     ![...pending.values()].some(
       (item) =>
         motionCommands.has(item.cmd) ||
-        ["preview_motion", "reset_motor", "reboot_motor"].includes(item.cmd),
+        ["preview_motion", "reset_motor", "reboot_motor", "set_teaching"].includes(item.cmd),
     ) &&
     !recoveryPending;
   document
@@ -167,6 +168,21 @@ function refreshControlGate() {
     document.querySelectorAll('[data-cmd="enable_motor"]').forEach((button) => {
       button.disabled = true;
     });
+  const teachingPending = [...pending.values()].some((item) => item.cmd === "set_teaching");
+  const teaching = lastState?.teaching_active === true;
+  const teachingButton = document.getElementById("dragTeachingBtn");
+  teachingButton.disabled = !recoveryReady || !lastState?.teaching_available || teachingPending ||
+    lastState?.motion_stop_pending || lastState?.motion_stop_failed;
+  teachingButton.textContent = teachingPending ? "正在切换，请等待反馈…" :
+    teaching ? "结束示教并保持当前位置" : "进入拖拽示教";
+  teachingButton.setAttribute("aria-pressed", String(teaching));
+  document.getElementById("dragTeachingStatus").textContent = !fresh ? "状态未知，请连接并等待反馈" :
+    teaching && (lastState.motion_stop_pending || lastState.motion_stop_failed) ? "示教停止尚未确认 · 请支撑机械臂并检查停止状态" :
+    teaching ? "拖拽示教中 · 位置闭环已停止，电机仍可显示使能 · 请支撑机械臂" :
+    "拖拽示教未开启 · 正常运动到位后保持位置";
+  if (teaching || teachingPending) {
+    document.querySelectorAll('[data-cmd="enable_motor"]').forEach((b) => { b.disabled = true; });
+  }
   document.getElementById("recoveryMotorId").disabled = recoveryPending;
   document.getElementById("recoveryGate").textContent = recoveryPending
     ? "正在恢复，请等待结果；不会自动重试重启"
@@ -304,6 +320,7 @@ function sendCommand(cmd, params = {}) {
     [
       "stop_motion",
       "motor_stop",
+      "set_teaching",
       "disable_motor",
       "reset_motor",
       "reboot_motor",
@@ -323,13 +340,14 @@ function sendCommand(cmd, params = {}) {
     motionCommands.has(cmd) &&
     (!lastState ||
       Date.now() - lastStateAt >= 1500 ||
+      lastState.teaching_active ||
       !lastState.control_permitted ||
       lastState.robot_state !== "READY" ||
       acceptedTaskId !== null ||
       [...pending.values()].some(
         (item) =>
           motionCommands.has(item.cmd) ||
-          ["preview_motion", "reset_motor", "reboot_motor"].includes(item.cmd),
+          ["preview_motion", "reset_motor", "reboot_motor", "set_teaching"].includes(item.cmd),
       ))
   ) {
     log("运动被拒绝：状态未就绪或有运动请求等待响应");
@@ -952,6 +970,12 @@ function bindTabs() {
 }
 
 function bindCommands() {
+  document.getElementById("dragTeachingBtn").addEventListener("click", () => {
+    const enabled = lastState?.teaching_active !== true;
+    if (enabled && !window.confirm("进入拖拽示教将释放全部电机力矩。请先用手支撑机械臂，确认后再拖动。")) return;
+    window.PiArmInteractive?.cancelActions("切换实机拖拽示教，松手执行已关闭");
+    sendCommand("set_teaching", { enabled });
+  });
   document.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
@@ -1029,8 +1053,8 @@ function copyCurrentTargets() {
   }
   angles.forEach((angle, index) => {
     // Preserve feedback precision, particularly near a joint limit.
-    document.getElementById(`target${index + 1}`).value = String(angle);
-    document.getElementById(`multiJoint${index + 1}`).value = String(angle);
+    document.getElementById(`target${index + 1}`).value = angle.toFixed(3);
+    document.getElementById(`multiJoint${index + 1}`).value = angle.toFixed(3);
   });
 }
 
@@ -1092,9 +1116,7 @@ function init() {
     if (!values || values.length !== 6 || !values.every(Number.isFinite))
       return;
     values.forEach((value, i) => {
-      document.getElementById(`outputTarget${i + 1}`).value = String(
-        (value * 180) / Math.PI,
-      );
+      document.getElementById(`outputTarget${i + 1}`).value = ((value * 180) / Math.PI).toFixed(3);
     });
   });
   document.getElementById("moveOutputTargets").addEventListener("click", () => {
@@ -1161,13 +1183,13 @@ window.PiArmControl = {
     );
     if (kind === "joint") {
       values.forEach((v, i) => {
-        document.getElementById(`multiJoint${i + 1}`).value = String(v);
+        document.getElementById(`multiJoint${i + 1}`).value = v.toFixed(3);
       });
       // A later first valid feedback sample must not silently replace the loaded goal.
       targetsInitialized = true;
     } else
       ["X", "Y", "Z", "Rx", "Ry", "Rz"].forEach((axis, i) => {
-        document.getElementById(`target${axis}`).value = String(values[i]);
+        document.getElementById(`target${axis}`).value = values[i].toFixed(3);
       });
   },
   library(cmd, params = {}) {
@@ -1217,7 +1239,7 @@ window.PiArmControl = {
         [...pending.values()].some(
           (p) =>
             motionCommands.has(p.cmd) ||
-            ["preview_motion", "reset_motor", "reboot_motor"].includes(p.cmd),
+            ["preview_motion", "reset_motor", "reboot_motor", "set_teaching"].includes(p.cmd),
         )
       ) {
         reject(new Error("预览不可用：请连接新版正常控制服务，等待机械臂静止"));

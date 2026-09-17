@@ -13,6 +13,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotState.msg"
   "srv/ManageMotor.srv"
   "srv/SetMotionArmed.srv"
+  "srv/SetTeaching.srv"
   "srv/StopMotion.srv"
   "srv/AxisTest.srv"
   "srv/PreviewMotion.srv"

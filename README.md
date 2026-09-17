@@ -14,6 +14,7 @@
 新增滑块、模型关节拖动、输出轴反解 / 笛卡尔 IK、路径及回放，软件验收与实机切换见 [交互验收](docs/frontend/INTERACTIVE_REVIEW.md)。
 网页增加选定电机的清错与重启，FAULT 下可使用原始静止反馈恢复，见 [电机故障恢复](docs/frontend/MOTOR_RECOVERY.md)。
 当前新增持久化点位库、独立关节/笛卡尔表单及 base 下各关节位姿，见 [点位示教说明](docs/frontend/TEACHING_REVIEW.md)。
+正常运动到位后保持位置，手动拖动请显式进入拖拽示教；点位传输保留三位小数，见 [保持与拖拽示教](docs/frontend/POSITION_HOLD_AND_DRAG_TEACHING.md)。
 
 ## 已完成
 

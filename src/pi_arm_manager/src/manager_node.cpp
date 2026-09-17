@@ -29,6 +29,7 @@
 #include "pi_arm_interfaces/srv/manage_motor.hpp"
 #include "pi_arm_interfaces/srv/preview_motion.hpp"
 #include "pi_arm_interfaces/srv/set_motion_armed.hpp"
+#include "pi_arm_interfaces/srv/set_teaching.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
 #include "pi_arm_manager/management_gate.hpp"
 #include "pi_arm_manager/arrival_check.hpp"
@@ -156,6 +157,34 @@ public:
       "/pi_arm/hardware/set_motion_armed", rmw_qos_profile_services_default, service_group_);
     reboot_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
       "/pi_arm/hardware/reboot_motor", rmw_qos_profile_services_default, service_group_);
+    teaching_client_ = create_client<pi_arm_interfaces::srv::SetTeaching>(
+      "/pi_arm/hardware/set_teaching", rmw_qos_profile_services_default, service_group_);
+    teaching_service_ = create_service<pi_arm_interfaces::srv::SetTeaching>(
+      "/pi_arm/set_teaching",
+      [this](const std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Request> request,
+        std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Response> response) {
+        std::lock_guard<std::mutex> command_lock(command_mutex_);
+        pi_arm_interfaces::msg::HardwareState h;
+        pi_arm_interfaces::msg::TaskState t;
+        {std::lock_guard<std::mutex> lock(state_mutex_); h = hardware_; t = task_;
+          if ((now() - last_hardware_time_).seconds() > hardware_timeout_) {h.connected = false;}}
+        const auto decision = decide_motor_recovery(h, aggregate_state(h, t),
+          task_claimed_.load() || preview_active_.load() || h.axis_test_active,
+          raw_still_frames_.load() >= 3, 0);
+        if (!decision.allowed || h.commissioning || h.motion_stop_pending || h.motion_stop_failed) {
+          response->success = false; response->code = 2001;
+          response->message = "drag teaching requires idle, fresh stationary feedback and confirmed stop";
+          return;
+        }
+        if (!teaching_client_->wait_for_service(std::chrono::duration<double>(operation_timeout_))) {
+          response->success = false; response->code = 2002; response->message = "teaching service unavailable"; return;
+        }
+        auto future = teaching_client_->async_send_request(request);
+        if (future.wait_for(std::chrono::duration<double>(operation_timeout_)) != std::future_status::ready) {
+          response->success = false; response->code = 2002; response->message = "teaching service timeout; inspect feedback"; return;
+        }
+        *response = *future.get();
+      });
     follow_client_ = rclcpp_action::create_client<Follow>(
       this, follow_action_name_, action_group_);
 
@@ -727,7 +756,7 @@ private:
 
   bool set_motion_armed(
     const bool armed, const std::uint64_t lease_id, const std::string & stage,
-    double max_output_velocity = 0.0)
+    double max_output_velocity = 0.0, bool hold_position = false)
   {
     if (!motion_arm_client_->wait_for_service(
         std::chrono::duration<double>(operation_timeout_)))
@@ -738,6 +767,7 @@ private:
     }
     auto request = std::make_shared<pi_arm_interfaces::srv::SetMotionArmed::Request>();
     request->armed = armed;
+    request->hold_position = hold_position;
     request->max_output_velocity = max_output_velocity;
     request->lease_id = lease_id;
     auto future = motion_arm_client_->async_send_request(request);
@@ -1581,7 +1611,10 @@ private:
       throw std::runtime_error("failed to arm motion");
     }
     // Release the lease even if a future or result handler throws.
-    const auto release = [this, lease_id](int *) {set_motion_armed(false, lease_id, "trajectory/scope_exit");};
+    bool completed = false;
+    const auto release = [this, lease_id, &completed](int *) {
+      if (!completed) {set_motion_armed(false, lease_id, "trajectory/scope_exit");}
+    };
     int lease_token = 0;
     std::unique_ptr<int, decltype(release)> lease_guard(&lease_token, release);
     const double result_timeout = !goal.trajectory.points.empty() ?
@@ -1674,15 +1707,17 @@ private:
       backend_ok = false;
       detail = arrival_error("before stop");
     }
-    // Fault/cancel/timeout still revoke the lease immediately. Normal completion
-    // stops only after the pre-stop arrival check, then verifies the stopped pose.
-    disarm_direct("direct_move/follow_result");
+    // Successful arrival retains A4 position control. Fault/cancel/timeout
+    // still stop immediately; complete_action verifies the held pose again.
+    if (!backend_ok || stop_requested_.load() || handle->is_canceling()) {
+      disarm_direct("direct_move/follow_result");
+    }
     if (!stop_confirmed) {backend_ok = false; detail = "motor stop unconfirmed";}
-    complete_action<ActionT>(handle, backend_ok, command, detail);
+    completed = complete_action<ActionT>(handle, backend_ok, command, detail);
   }
 
   template<typename ActionT, typename GoalHandleT>
-  void complete_action(
+  bool complete_action(
     const std::shared_ptr<GoalHandleT> handle, bool backend_ok,
     const std::string & command, const std::string & detail = "")
   {
@@ -1711,7 +1746,7 @@ private:
       } else {
         handle->abort(result);
       }
-      return;
+      return false;
     }
     if (!backend_ok) {
       result->success = false;
@@ -1722,26 +1757,34 @@ private:
         command.c_str(), result->code, result->message.c_str());
       finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
       handle->abort(result);
-      return;
+      return false;
     }
-    publish_feedback<ActionT>(handle, 0.9F, "verifying_arrival_after_stop");
-    if (!wait_arrival("verifying_after_stop")) {
+    publish_feedback<ActionT>(handle, 0.9F, "verifying_position_hold");
+    if (!wait_arrival("verifying_hold")) {
       RCLCPP_ERROR(
         get_logger(),
         "%s wait_still FAILED still_frames=%d stop=%d",
         command.c_str(), still_frames_.load(), stop_requested_.load() ? 1 : 0);
       if (stop_requested_.load() || handle->is_canceling()) {
         complete_action<ActionT>(handle, true, command, "motion stopped");
-        return;
+        return false;
       }
       result->success = false;
       result->code = 3003;
-      result->message = arrival_error("after stop");
+      result->message = arrival_error("while holding");
       finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
       handle->abort(result);
-      return;
+      return false;
     }
-    RCLCPP_INFO(get_logger(), "%s succeeded", command.c_str());
+    if (!set_motion_armed(false, active_task_id(), "trajectory/hold", 0.0, true)) {
+      result->success = false;
+      result->code = 3003;
+      result->message = "failed to retain position hold";
+      finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
+      handle->abort(result);
+      return false;
+    }
+    RCLCPP_INFO(get_logger(), "%s succeeded; holding position", command.c_str());
     result->success = true;
     result->code = 0;
     result->message = "ok";
@@ -1752,6 +1795,7 @@ private:
     publish_feedback<ActionT>(handle, 1.0F, "completed");
     finish_task(pi_arm_interfaces::msg::TaskState::SUCCEEDED, 0, "ok");
     handle->succeed(result);
+    return true;
   }
 
   void record_stop_reason(const MotionStopReason reason)
@@ -1878,6 +1922,8 @@ private:
   rclcpp::Publisher<pi_arm_interfaces::msg::RobotState>::SharedPtr state_pub_;
   rclcpp::TimerBase::SharedPtr state_timer_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_client_;
+  rclcpp::Client<pi_arm_interfaces::srv::SetTeaching>::SharedPtr teaching_client_;
+  rclcpp::Service<pi_arm_interfaces::srv::SetTeaching>::SharedPtr teaching_service_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_client_;
   rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reset_client_;
   rclcpp::Client<pi_arm_interfaces::srv::SetMotionArmed>::SharedPtr motion_arm_client_;

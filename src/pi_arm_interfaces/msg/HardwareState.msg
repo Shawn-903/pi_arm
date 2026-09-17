@@ -25,6 +25,7 @@ float64[] motor_ages_sec
 # Pack-reference calibration and actuator-coordinate diagnostics.
 bool calibrated
 bool kinematics_valid
+bool teaching_active
 bool control_permitted
 bool motion_stop_pending
 bool motion_stop_failed

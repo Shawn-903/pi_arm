@@ -49,6 +49,9 @@ inline MotorPowerDecision decide_motor_power_operation(
   const bool still,
   const int requested_motor_id)
 {
+  if (hardware.teaching_active && operation == MotorPowerOperation::ENABLE) {
+    return {false, false, 2001, "exit drag teaching to hold current position"};
+  }
   if (!complete_raw_motor_state(hardware)) {
     return {false, false, 2001, "raw motor state feedback is incomplete"};
   }

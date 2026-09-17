@@ -324,6 +324,11 @@
               <fieldset>
                 <legend>总体控制</legend>
                 <div class="overall-buttons">
+                  <button id="dragTeachingBtn" class="btn-secondary" aria-pressed="false">进入拖拽示教</button>
+                  <span id="dragTeachingStatus" role="status">连接后查看示教状态</span>
+                </div>
+                <p class="hint">正常运动到位后保持位置。拖拽示教会释放全部电机力矩，请先支撑机械臂；停止拖动后结束示教，将在当前位置保持。</p>
+                <div class="overall-buttons">
                   <button
                     class="btn-primary"
                     data-cmd="enable_motor"
@@ -770,7 +775,7 @@
                     ><button id="saveModelPoint">保存模型预览目标</button>
                   </div>
                   <p>
-                    实机示教：由操作者支撑、搬动机械臂，停止后记录；本页不会自动关闭电机或进入力控拖动。模型示教：关闭“松手执行”，拖动关节后保存预览。
+                    实机示教：在总体控制中进入“拖拽示教”，支撑并搬动机械臂，静止后记录点位；结束示教后在当前位置保持。模型示教：关闭“松手执行”，拖动关节后保存预览。
                   </p>
                   <p id="pointStatus" role="status">连接后加载点位库</p>
                 </fieldset>

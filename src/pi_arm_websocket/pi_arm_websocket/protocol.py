@@ -17,6 +17,7 @@ CODE_MOTION_BUSY = 2003
 POINT_COMMANDS = {'point_list', 'point_save', 'point_delete'}
 
 COMMANDS = POINT_COMMANDS | {
+    "set_teaching",
     "preview_motion",
     "output_move",
     "move_preset",
@@ -74,9 +75,30 @@ def parse_request(raw: str) -> Request:
     return Request(msg_id, command, params)
 
 
+POINT_FIELDS = {
+    "values", "joint_angles_deg", "position_mm", "rpy_deg", "pose", "pose_mm_deg",
+    "current_joint_angles", "start_joint_angles_deg", "target_joint_angles_deg",
+    "error_joint_angles_deg", "raw_protocol_positions_deg", "target_output_deg",
+    "target_output_angles_deg", "positions_deg", "joints_deg", "joints",
+    "points", "tool_xyz_mm", "target_pose",
+}
+
+
+def point_precision(value, rounded=False):
+    """Wire-only rounding. Keep control math, radians, quaternions and timestamps intact."""
+    if isinstance(value, dict):
+        return {k: point_precision(v, k in POINT_FIELDS or (rounded and k in {"x", "y", "z", "rx", "ry", "rz"}))
+                for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [point_precision(v, rounded) for v in value]
+    if rounded and isinstance(value, float) and math.isfinite(value):
+        return round(value, 3) + 0.0
+    return value
+
+
 def response(msg_id: int, code: int, message: str, data: dict[str, Any] | None = None) -> str:
     return json.dumps(
-        {"type": "rsp", "msg_id": msg_id, "code": code, "ms": message, "data": data or {}},
+        {"type": "rsp", "msg_id": msg_id, "code": code, "ms": message, "data": point_precision(data or {})},
         ensure_ascii=False,
         separators=(",", ":"),
     )

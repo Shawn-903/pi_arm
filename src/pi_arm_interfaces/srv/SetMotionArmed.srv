@@ -1,4 +1,6 @@
 bool armed
+# Successful arrival only: revoke writes but retain motor position loop.
+bool hold_position
 uint64 lease_id
 # Per-lease output-shaft speed ceiling, rad/s; zero selects 5 deg/s.
 float64 max_output_velocity

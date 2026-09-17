@@ -336,6 +336,52 @@ bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & comm
   return enqueue_batch(std::move(batch));
 }
 
+bool CanDriver::hold_positions(const std::vector<PositionCommand> & commands)
+{
+  if (config_.read_only || commands.empty() || mode_.load() != DriverMode::MONITORING ||
+    motion_stop_status() == MotionStopStatus::PENDING ||
+    motion_stop_status() == MotionStopStatus::FAILED) {return false;}
+  TxBatch batch;
+  batch.completion = std::make_shared<std::promise<bool>>();
+  auto sent = batch.completion->get_future();
+  try {
+    for (const auto & command : commands) {
+      if (!validate_motor_id(command.motor_id)) {return false;}
+      batch.frames.push_back(make_position_command(command.motor_id,
+        command.protocol_angle_deg, command.max_protocol_speed_dps));
+    }
+  } catch (...) {return false;}
+  // Explicit teaching exit, serialized with management; never restore old targets via RUN.
+  mode_.store(DriverMode::EXCLUSIVE_MANAGEMENT);
+  const auto since = std::chrono::steady_clock::now();
+  const bool transmitted = enqueue_batch(std::move(batch), true) &&
+    sent.wait_for(std::chrono::seconds(1)) == std::future_status::ready && sent.get();
+  // Polling is paused in exclusive management. Resume it after transmission
+  // so the fresh angle/status checks below can actually be satisfied.
+  if (mode_.load() != DriverMode::FAULT) {mode_.store(DriverMode::MONITORING);}
+  bool confirmed = false;
+  if (transmitted) {
+    std::unique_lock<std::shared_mutex> lock(state_mutex_);
+    confirmed = state_cv_.wait_for(lock, std::chrono::seconds(1), [&]() {
+      for (const auto & command : commands) {
+        const auto & s = states_.at(command.motor_id);
+        if (s.position_ack_update <= since || s.angle_update <= since || s.status1_update <= since || s.status2_update <= since ||
+          s.error_state != 0 || (s.motor_state != 0x00 && s.motor_state != 0x30) ||
+          s.protocol_speed_dps != 0 || s.stationary_samples < 3 ||
+          std::abs(s.protocol_angle_deg - command.protocol_angle_deg) > 0.1) {return false;}
+      }
+      return true;
+    });
+  }
+  if (mode_.load() != DriverMode::FAULT) {mode_.store(DriverMode::MONITORING);}
+  if (!confirmed) {
+    std::vector<std::uint8_t> ids;
+    for (const auto & command : commands) {ids.push_back(command.motor_id);}
+    stop_motors(ids);
+  }
+  return confirmed;
+}
+
 bool CanDriver::stop_motors(const std::vector<std::uint8_t> & motor_ids)
 {
   return request_motor_stop(motor_ids, true) && wait_for_motor_stop();
@@ -736,6 +782,7 @@ void CanDriver::process_received_frame(const CanFrame & frame)
       break;
     case Opcode::READ_STATUS_2:
     case Opcode::POSITION_CONTROL_2:
+      if (opcode == Opcode::POSITION_CONTROL_2) {state.position_ack_update = now;}
       state.temperature_c = static_cast<std::int8_t>(frame.data[1]);
       state.iq_or_power_raw = read_le<std::int16_t>(&frame.data[2]);
       state.protocol_speed_dps = static_cast<double>(read_le<std::int16_t>(&frame.data[4]));

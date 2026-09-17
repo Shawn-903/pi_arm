@@ -279,3 +279,22 @@ TEST(Calibration, UnapprovedCandidateFailsClosedAndApprovedCandidateComputesOffs
 }
 
 }  // namespace
+
+TEST(MockBackend, TeachingBlocksMotionAndExitsWithoutReplayingControllerTarget)
+{
+  pi_arm_hardware::MockBackend b(make_config()); b.configure(); b.activate();
+  pi_arm_hardware::HardwareSample s;
+  for (int i=0; i<3; ++i) {b.read(s);}
+  ASSERT_TRUE(b.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 0).success);
+  ASSERT_TRUE(b.set_teaching(true).success);
+  ASSERT_FALSE(b.set_motion_armed(true, 1).success);
+  ASSERT_FALSE(b.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 0).success);
+  ASSERT_TRUE(b.set_teaching(false).success);
+  ASSERT_TRUE(b.write(std::vector<double>(6, 0.1), std::vector<double>(6, 0.0)));
+  b.read(s);
+  EXPECT_EQ(s.positions_rad, std::vector<double>(6, 0.0));
+  ASSERT_TRUE(b.set_motion_armed(true, 2).success);
+  ASSERT_TRUE(b.write(std::vector<double>(6, 0.1), std::vector<double>(6, 0.0)));
+  b.read(s);
+  EXPECT_NEAR(s.positions_rad[0], 0.1, 1e-10);
+}

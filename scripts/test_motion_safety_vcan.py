@@ -43,6 +43,7 @@ class Emulator:
             self.dynamic = dynamic
             self.drop_stop_ack = set()
             self.drop_feedback = set()
+            self.drop_position_ack = set()
             self.frames = []
             self.last = time.monotonic()
 
@@ -85,14 +86,15 @@ class Emulator:
                 if data[0] == 0xa4:
                     self.targets[motor] = struct.unpack('<i', data[4:])[0]/100
                     self.speeds[motor] = struct.unpack('<H', data[2:4])[0]
-                    reply = response(self.motors[motor], bytes([0x9c])+bytes(7))
+                    reply = bytes([0xa4]) + response(self.motors[motor], bytes([0x9c])+bytes(7))[1:]
                 else:
                     if data[0] == 0x81:
                         self.targets[motor] = self.positions[motor]
                         self.speeds[motor] = 0
                     reply = response(self.motors[motor], data)
                 if ((data[0] == 0x81 and motor in self.drop_stop_ack) or
-                        (data[0] in (0x92, 0x9a, 0x9c) and motor in self.drop_feedback)):
+                        (data[0] in (0x92, 0x9a, 0x9c) and motor in self.drop_feedback) or
+                        (data[0] == 0xa4 and motor in self.drop_position_ack)):
                     reply = None
             if reply is not None:
                 self.bus.send(CAN_FRAME.pack(CAN_BASE+motor, 8, reply))
@@ -470,7 +472,71 @@ def main():
                     expected = protocol_pack[axis-1]-signs[axis-1]*old_pack_output[axis-1]*entry['motor_direction']*entry['protocol_angle_ratio']
                     assert abs(actual-expected) <= .011, (axis, actual, expected)
                 command(p, 'disarm')
-            print('PASS: 21 production-backend virtual CAN safety scenarios')
+            print('CASE: successful arrival retains A4 loop, no stale writes, explicit stop still works')
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'write')
+                time.sleep(.1)
+                command(p, 'hold_wrong', ok=False)
+                command(p, 'hold')
+                assert not emulator.frames_for(0x81), 'normal completion must not stop motors'
+                sent = len(emulator.frames_for(0xa4))
+                command(p, 'write_target 1 2')
+                assert len(emulator.frames_for(0xa4)) == sent, 'released lease allowed stale controller write'
+                command(p, 'disarm')
+                emulator.assert_stopped(range(1,7))
+
+            print('CASE: teaching releases all motors; exit captures moved position, never old target')
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'write')
+                command(p, 'teach_on')
+                assert {i for i,_ in emulator.frames_for(0x81)} == set(range(1,7))
+                assert not emulator.frames_for(0x80), 'teaching must preserve multi-turn reference'
+                command(p, 'arm', ok=False)
+                command(p, 'enable', ok=False)
+                emulator.inject(1, 36.0)  # hand drag output 1 by one degree
+                time.sleep(.2)
+                before = len(emulator.frames_for(0xa4))
+                command(p, 'teach_off')
+                held = emulator.frames_for(0xa4)[before:]
+                assert len(held) == 6
+                assert struct.unpack('<i', dict(held)[1][4:])[0] == 3600
+                assert not emulator.frames_for(0x88), 'must not RUN the previous target'
+                command(p, 'write_target 1 10')
+                assert len(emulator.frames_for(0xa4)) == before+6
+                values,_ = command(p, 'read')
+                assert values['control'] == '1' and values['teaching'] == '0'
+                command(p, 'disarm')
+
+            print('CASE: stale feedback cannot exit teaching')
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'teach_on')
+                with emulator.lock: emulator.drop_feedback.add(2)
+                time.sleep(1.1)
+                command(p, 'teach_off', ok=False)
+                assert not emulator.frames_for(0xa4)
+            print('CASE: already-reached goals explicitly establish position hold')
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'idle')
+                command(p, 'arm')
+                command(p, 'hold')
+                assert len(emulator.frames_for(0xa4)) == 6
+                assert not emulator.frames_for(0x81)
+
+            print('CASE: missing position ACK cannot falsely report teaching exit success')
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'teach_on')
+                with emulator.lock: emulator.drop_position_ack.add(4)
+                command(p, 'teach_off', ok=False)
+                values,_ = command(p, 'read')
+                assert values['teaching'] == '1' and values['control'] == '0'
+                assert {i for i,_ in emulator.frames_for(0x81)} == set(range(1,7))
+                assert not emulator.frames_for(0x80), 'failed hold must preserve multi-turn reference'
+            print('PASS: 26 production-backend virtual CAN safety scenarios')
         finally:
             emulator.close()
 

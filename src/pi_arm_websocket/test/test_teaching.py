@@ -103,7 +103,7 @@ def test_disabled_readonly_capture_and_disk_round_trip(model,tmp_path):
     assert cart['values']==pytest.approx(p['pose_mm_deg'])
     state=json.loads(WebSocketGateway(b)._state_message())
     assert state['base_frames']['valid'] and state['points_available']
-    assert state['pose']['x']==pytest.approx(p['pose_mm_deg'][0])
+    assert state['pose']['x']==round(p['pose_mm_deg'][0],3)
     assert call(b,'point_delete',id=p['id'],revision=2)['revision']==3
 
 
@@ -144,3 +144,37 @@ def test_competing_writers_do_not_overwrite(model,tmp_path):
     with ThreadPoolExecutor(max_workers=2) as executor:results=list(executor.map(writer,[1,2]))
     assert sum(r is not None for r in results)==1
     assert len(PointStore(path).list()['points'])==1
+
+
+def test_point_wire_precision_preserves_disk_and_coordinate_math(model,tmp_path):
+    from pi_arm_websocket.protocol import response, point_precision
+    b=Bridge(model,tmp_path/'points.json')
+    data=call(b,name='precise',kind='joint',source='manual',values=[1.234567]*6,revision=0)
+    wire=json.loads(response(1,0,'ok',data))['data']['points'][0]
+    assert wire['values']==[1.235]*6
+    assert wire['pose_mm_deg']==[round(v,3) for v in data['points'][0]['pose_mm_deg']]
+    assert b.points.list()['points'][0]['values']==[1.234567]*6
+    assert wire['orientation_xyzw']==data['points'][0]['orientation_xyzw']
+    assert point_precision({'model_output_positions_rad':[1.234567]})['model_output_positions_rad']==[1.234567]
+
+
+@pytest.mark.parametrize('enabled',[True,False])
+def test_teaching_dispatch_uses_explicit_service_not_motion(enabled):
+    from pi_arm_interfaces.srv import SetTeaching
+    class B:
+        read_only=False
+        commissioning=False
+        async def call_service(self,cmd,req):
+            assert cmd=='set_teaching' and req.enabled==enabled
+            return SetTeaching.Response(success=True,message='ok')
+    result=asyncio.run(CommandGateway(B()).dispatch(Request(1,'set_teaching',{'enabled':enabled})))
+    assert result['cmd']=='set_teaching'
+
+
+@pytest.mark.parametrize('params',[{}, {'enabled':1}, {'enabled':'false'}, {'enabled':True,'motor_id':1}])
+def test_teaching_dispatch_rejects_ambiguous_requests(params):
+    class B:
+        read_only=False
+        commissioning=False
+    with pytest.raises(ProtocolError):
+        asyncio.run(CommandGateway(B()).dispatch(Request(1,'set_teaching',params)))
