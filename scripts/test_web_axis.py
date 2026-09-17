@@ -21,6 +21,10 @@ def main():
         page.locator("#connectBtn").click()
         page.wait_for_function("lastState !== null")
         assert page.evaluate('lastState.commissioning && lastState.can_interface === "vcan0"')
+        assert page.locator('#motorTestStep').input_value() == '5'
+        assert page.locator('#motorTestStep').get_attribute('max') == '5'
+        assert page.locator('#motorTestSpeed').input_value() == '1'
+        assert page.locator('#motorTestSpeed').get_attribute('max') == '1'
         page.locator("#testMotorId").select_option("3")
         page.locator("#testEnableMotor").click()
         positive = page.locator('[data-axis-test="motor"][data-sign="1"]')
@@ -42,6 +46,12 @@ def main():
         snapshot = json.loads(Path(download.value.path()).read_text())
         record = snapshot["axis_tests"][-1]
         assert record["request"]["space"] == "motor" and record["request"]["axis_id"] == 3
+        assert record['request']['delta_deg'] == 5 and record['request']['speed_deg_s'] == 1
+        if not args.stall:
+            assert 'succeeded' in record['after']['axis_test']['status']
+            before_angles = record['before']['raw_protocol_positions_deg']
+            after_angles = record['after']['raw_protocol_positions_deg']
+            assert abs(after_angles[2] - before_angles[2] - 180) < .02
         assert "VCAN TEST" in record["observation"]
         assert record["after"]["axis_test"]["active"] is False
         if args.stall:

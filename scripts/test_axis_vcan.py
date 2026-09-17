@@ -72,7 +72,7 @@ async def main(url, joint=False, watchdog=False):
             if not state["kinematics_valid"]:
                 denied = await command("axis_test", {"space": "joint", "axis_id": 2, "delta_deg": 0.1, "speed_deg_s": 0.2})
                 assert denied["code"] != 0, denied
-        denied = await command("axis_test", {"space": "motor", "axis_id": 3, "delta_deg": 0.6, "speed_deg_s": 0.2})
+        denied = await command("axis_test", {"space": "motor", "axis_id": 3, "delta_deg": 5.01, "speed_deg_s": 0.2})
         assert denied["code"] != 0, denied
         print("PASS", "watchdog" if watchdog else "joint" if joint else "uncoupled motor", result["axis_test"], "CAN position IDs:", commanded)
 

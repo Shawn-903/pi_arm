@@ -39,7 +39,7 @@ python3 -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL)
 children+=("$!")
 echo "网页：http://localhost:${web_port}/control.html （远程访问请替换 localhost 为本机 IP）"
 if [[ "$launch_file" == "commissioning_web.launch.py" ]]; then
-  echo "单轴方向测试：每次最大 0.5°，速度最大 0.5°/s，仅在网页点击后执行。"
+  echo "电机方向测试：输出轴单步最大 5°、距首次测试起点 ±30°、速度最大 1°/s；仅在网页点击后执行。"
 elif [[ "$launch_file" == "monitor_web.launch.py" ]]; then
   echo "实机只读排查：轮询 CAN 反馈，不启动电机控制服务。Ctrl+C 停止服务。"
 else

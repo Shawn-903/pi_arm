@@ -20,6 +20,8 @@ int main(int argc, char **argv) {
   c.joint_upper_limits_rad={3.141592654,1.757546556759,1.494001839708,.523598776,1.047197551,3.141592654};
   for(double v:c.joint_upper_limits_rad)c.joint_lower_limits_rad.push_back(-v);
   c.joint_velocity_limits_rad_s.assign(6,.1745329);
+  c.joint_feedback_tolerances_rad = {0, 3*3.141592653589793/180,
+    3*3.141592653589793/180, 0, 0, 0};
   pi_arm_hardware::RealBackend b(c); b.configure(); b.activate();
   std::this_thread::sleep_for(350ms);
   std::cout << "READY" << std::endl;
@@ -48,7 +50,21 @@ int main(int argc, char **argv) {
       auto r=b.set_motion_armed(true,++lease);q[0]=.01;v[0]=.01;
       ok=r.success;detail=std::string("armed=")+(r.success?"true":"false")+" write="+(b.write(q,v)?"true":"false");
     }
+    if(command=="recover" || command=="write_speed") {
+      double cap; input >> cap;
+      auto q=s.positions_rad;std::vector<double> v(6,0);b.write(q,v);
+      auto r=b.set_motion_armed(true,++lease,cap*3.141592653589793/180);
+      if(command=="recover")q[1]-=.1*3.141592653589793/180;
+      else {q[0]+=.01;v[0]=.1;}
+      ok=r.success && b.write(q,v);detail=r.message;
+    }
     if(op=="disarm") {auto r=b.set_motion_armed(false,0); b.write(std::vector<double>(6,0),std::vector<double>(6,0));ok=r.success;detail=r.message;}
+    if(command=="write_target") {
+      int axis; double degrees; input >> axis >> degrees;
+      std::vector<double> q(6,0),v(6,0);
+      q.at(axis-1)=degrees*3.141592653589793/180;
+      ok=b.write(q,v);
+    }
     if(op=="arm") {auto r=b.set_motion_armed(true,++lease);ok=r.success;detail=r.message;}
     if(op=="wrong_lease") {auto r=b.set_motion_armed(false,lease+100);ok=r.success;detail=r.message;}
     if(op=="race") {
@@ -63,6 +79,7 @@ int main(int argc, char **argv) {
     }
     if(op=="stop") {auto r=b.stop_axis_test("operator stop");ok=r.success;detail=r.message;}
     std::cout << "op=" << command << " ok=" << ok << " read_us=" << read_us << " q2_deg=" << s.positions_rad[1]*180/3.141592653589793 << " q5_deg=" << s.positions_rad[3]*180/3.141592653589793
+      << " q3_deg=" << s.positions_rad[2]*180/3.141592653589793
       << " kin=" << s.kinematics_valid << " control=" << s.control_permitted
       << " joint_permit=" << s.joint_test_permitted << " active=" << b.axis_test_active()
       << " stop_pending=" << s.motion_stop_pending << " stop_failed=" << s.motion_stop_failed

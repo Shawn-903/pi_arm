@@ -1,4 +1,6 @@
 trajectory_msgs/JointTrajectory trajectory
+# Output-shaft speed ceiling, rad/s; zero selects 5 deg/s.
+float64 max_output_velocity
 ---
 bool success
 int32 code

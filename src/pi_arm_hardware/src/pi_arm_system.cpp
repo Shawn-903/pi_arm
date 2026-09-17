@@ -450,6 +450,8 @@ bool PiArmSystem::parse_configuration()
     }
     backend_config_.joint_lower_limits_rad.push_back(limits->second.min_position);
     backend_config_.joint_upper_limits_rad.push_back(limits->second.max_position);
+    backend_config_.joint_feedback_tolerances_rad[index] =
+      parameter_or<double>(joint.parameters, "feedback_position_tolerance_rad", 0.0);
     backend_config_.joint_velocity_limits_rad_s.push_back(limits->second.max_velocity);
 
     const int motor_id = required_joint_parameter<int>(joint.parameters, joint.name, "motor_id");
@@ -605,7 +607,8 @@ void PiArmSystem::start_auxiliary_node()
       const std::shared_ptr<SetMotionArmed::Request> request,
       std::shared_ptr<SetMotionArmed::Response> response)
     {
-      const auto result = backend_->set_motion_armed(request->armed, request->lease_id);
+      const auto result = backend_->set_motion_armed(
+        request->armed, request->lease_id, request->max_output_velocity);
       response->success = result.success;
       response->armed = result.armed;
       response->message = result.message;

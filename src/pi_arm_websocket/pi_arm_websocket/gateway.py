@@ -21,6 +21,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import websockets
 from websockets.exceptions import ConnectionClosed
+from .presets import PosePresets, JOINT_NAMES, PRESET_JOINT_SPEED_DEG_S
 
 from .protocol import (
     CODE_COMMAND_FAILED,
@@ -47,6 +48,7 @@ class RosBridge(Node):
         self.declare_parameter("hardware_type", "real")
         self.declare_parameter("read_only", False)
         self.declare_parameter("commissioning", False)
+        self.declare_parameter("calibration_file", "")
         self.declare_parameter("state_timeout_sec", 1.0)
         self.declare_parameter("port", 8765)
         self.declare_parameter("state_push_interval_ms", 100)
@@ -59,6 +61,7 @@ class RosBridge(Node):
         self.hardware_type = str(self.get_parameter("hardware_type").value)
         self.read_only = bool(self.get_parameter("read_only").value)
         self.commissioning = bool(self.get_parameter("commissioning").value)
+        self.presets = PosePresets(str(self.get_parameter("calibration_file").value), self.hardware_type)
         if self.read_only and self.commissioning:
             raise ValueError("read_only and commissioning are mutually exclusive")
         self.state_timeout = float(self.get_parameter("state_timeout_sec").value)
@@ -305,6 +308,22 @@ class CommandGateway:
         command, params = request.command, request.params
         if self.bridge.read_only:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "只读排查模式：仅查看反馈，不提供控制服务")
+        if command == "move_preset":
+            name = params.get("preset")
+            if name not in ("packing", "zero"):
+                raise ProtocolError(CODE_INVALID_PARAMS, "preset 必须为 packing 或 zero")
+            if set(params) - {"preset", "output_speed_limit"}:
+                raise ProtocolError(CODE_INVALID_PARAMS, "仅接受 preset 和 output_speed_limit 参数")
+            state = self.bridge.state_snapshot()
+            catalog = getattr(self.bridge, "presets", PosePresets()).status(self.bridge, state)
+            preset = catalog[name]
+            if not preset["available"]:
+                raise ProtocolError(CODE_STATE_UNAVAILABLE, preset["reason"])
+            task_id = await self._direct(JOINT_NAMES, preset["target_joint_angles_deg"], PRESET_JOINT_SPEED_DEG_S,
+                                         self._output_speed(params))
+            return {"cmd": command, "preset": name, "task_id": task_id,
+                    "target_joint_angles_deg": preset["target_joint_angles_deg"],
+                    "joint_speed_deg_s": PRESET_JOINT_SPEED_DEG_S}
         if command.startswith("axis_test") or (
             self.bridge.commissioning and command in {"motor_stop", "stop_motion"}
         ):
@@ -322,9 +341,7 @@ class CommandGateway:
             return {"cmd": command, "axis_test_id": result.test_id, "message": result.message}
         if self.bridge.commissioning and command not in {"enable_motor", "disable_motor", "reset_motor"}:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "方向测试模式请使用电机/关节小步点动")
-        if command in {"movej", "movejs", "movel"} and self.bridge.hardware_type != "mock":
-            raise ProtocolError(CODE_STATE_UNAVAILABLE, "实机当前仅支持 DirectMove，请使用关节直接运动")
-        if command in {"movej", "movejs", "movel", "move", "motor_move"}:
+        if command in {"movej", "movejs", "movel", "move", "motor_move", "output_move"}:
             state = self.bridge.state_snapshot()
             if state is None or not state.hardware.control_permitted:
                 raise ProtocolError(
@@ -357,8 +374,14 @@ class CommandGateway:
         if command == "move":
             targets = self._joint_vector(params, "targets")
             speed = required_float(params, "max_speed", positive=True)
-            task_id = await self._direct(self._joint_names(), targets, speed)
+            task_id = await self._direct(self._joint_names(), targets, speed, self._output_speed(params))
             return {"cmd": "move", "task_id": task_id}
+        if command == "output_move":
+            targets = required_vector(params, "targets", 6)
+            speed = self._output_speed(params)
+            task_id = await self._direct(JOINT_NAMES, targets, 1.0, speed, output_space=True)
+            return {"cmd": command, "task_id": task_id, "target_output_deg": targets,
+                    "output_speed_limit": speed * RAD_TO_DEG}
         if command == "motor_move":
             return await self._motor_move(params, stop=False)
         if command == "motor_stop":
@@ -379,6 +402,7 @@ class CommandGateway:
         velocity = required_float(params, "vel", positive=True)
         acceleration = required_float(params, "acc", positive=True)
         goal = MoveJ.Goal()
+        goal.max_output_velocity = self._output_speed(params)
         goal.joint_names = self._joint_names()
         goal.positions = [value * DEG_TO_RAD for value in target]
         goal.max_velocity = velocity * DEG_TO_RAD
@@ -409,6 +433,7 @@ class CommandGateway:
             )
             trajectory.points.append(point)
         goal = MoveJs.Goal()
+        goal.max_output_velocity = self._output_speed(params)
         goal.trajectory = trajectory
         task_id = await self.bridge.send_goal("movejs", goal)
         return {"cmd": "movejs", "task_id": task_id, "point_count": len(targets), "dt": dt_ms}
@@ -434,6 +459,7 @@ class CommandGateway:
         pose.pose.orientation.z = qz
         pose.pose.orientation.w = qw
         goal = MoveL.Goal()
+        goal.max_output_velocity = self._output_speed(params)
         goal.target = pose
         goal.max_linear_velocity = linear_velocity / 1000.0
         goal.max_linear_acceleration = linear_acceleration / 1000.0
@@ -454,13 +480,23 @@ class CommandGateway:
         }
 
     async def _direct(
-        self, names: list[str], targets_deg: list[float], speed_deg_s: float
+        self, names: list[str], targets_deg: list[float], speed_deg_s: float,
+        output_speed: float = 5.0 * DEG_TO_RAD, *, output_space: bool = False
     ) -> int:
         goal = DirectMove.Goal()
         goal.joint_names = names
         goal.positions = [value * DEG_TO_RAD for value in targets_deg]
         goal.max_velocity = speed_deg_s * DEG_TO_RAD
+        goal.max_output_velocity = output_speed
+        goal.output_space = output_space
         return await self.bridge.send_goal("direct", goal)
+
+    @staticmethod
+    def _output_speed(params: dict[str, Any]) -> float:
+        speed = required_float({"limit": params.get("output_speed_limit", 5.0)}, "limit", positive=True)
+        if speed < 1.0 / 6.0:
+            raise ProtocolError(CODE_INVALID_PARAMS, "输出轴限速不得低于协议分辨率 1/6 °/s")
+        return speed * DEG_TO_RAD
 
     async def _motor_move(self, params: dict[str, Any], *, stop: bool) -> dict[str, Any]:
         joint_id = integer_param(params, "joint_id")
@@ -473,7 +509,7 @@ class CommandGateway:
             return {"cmd": "motor_stop", "joint_id": joint_id}
         speed = required_float({"max_speed": params.get("max_speed", 1)}, "max_speed", positive=True)
         angle = required_float(params, "target_angle")
-        task_id = await self._direct([names[joint_id - 1]], [angle], speed)
+        task_id = await self._direct([names[joint_id - 1]], [angle], speed, self._output_speed(params))
         return {
             "cmd": "motor_move",
             "task_id": task_id,
@@ -667,6 +703,7 @@ class WebSocketGateway:
         body["motion_stop_pending"] = bool(hardware and hardware.motion_stop_pending)
         body["motion_stop_failed"] = bool(hardware and hardware.motion_stop_failed)
         body["state_available"] = state is not None
+        body["preset_poses"] = getattr(self.bridge, "presets", PosePresets()).status(self.bridge, state)
         body["joint_names"] = list(state.hardware.joint_names) if state else []
         body["hardware_connected"] = state.hardware.connected if state else False
         body["driver_mode"] = state.hardware.driver_mode if state else "UNKNOWN"
@@ -675,9 +712,7 @@ class WebSocketGateway:
         if self.bridge.read_only or self.bridge.commissioning:
             body["control_permitted"] = False
             body["pose"] = {}
-        body["supported_motion_commands"] = ["move", "motor_move"] + (
-            ["movej", "movejs", "movel"] if self.bridge.hardware_type == "mock" else []
-        )
+        body["supported_motion_commands"] = ["move", "motor_move", "output_move", "movej", "movejs", "movel"]
         if self.bridge.read_only or self.bridge.commissioning:
             body["supported_motion_commands"] = []
         return json.dumps(

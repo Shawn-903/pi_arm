@@ -106,6 +106,8 @@ void validate_backend_config(const BackendConfig & config)
       throw std::invalid_argument("actuator motor IDs must be unique");
     }
     if (!std::isfinite(config.joint_lower_limits_rad[index]) ||
+      !std::isfinite(config.joint_feedback_tolerances_rad[index]) ||
+      config.joint_feedback_tolerances_rad[index] < 0.0 ||
       !std::isfinite(config.joint_upper_limits_rad[index]) ||
       config.joint_lower_limits_rad[index] > config.joint_upper_limits_rad[index] ||
       !std::isfinite(config.joint_velocity_limits_rad_s[index]) ||
@@ -339,7 +341,8 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     const bool all_angles_valid =
       std::all_of(angle_valid.begin(), angle_valid.end(), [](const bool value) {return value;});
     if (calibration_.valid && all_angles_valid) {
-      auto status = kinematics_.check_output_position_limits(model_output_positions);
+      auto status = kinematics_.check_output_feedback_limits(
+        model_output_positions, config_.joint_feedback_tolerances_rad);
       if (!status) {
         const std::size_t index = status.axis - 1U;
         output_limit_error[index] = true;
@@ -348,11 +351,12 @@ bool RealBackend::read(HardwareSample & sample) noexcept
         sample.kinematics_error_axis = static_cast<std::int32_t>(status.axis);
         sample.kinematics_error_value = status.value;
         sample.kinematics_error_message =
-          "model output limit exceeded at motor_0" + std::to_string(status.axis);
+          "model output feedback envelope exceeded at motor_0" + std::to_string(status.axis);
         sample.error_message =
           sample.kinematics_error_message + ": value=" + std::to_string(status.value) +
-          " rad, limit=[" + std::to_string(limit.lower_position_rad) + "," +
-          std::to_string(limit.upper_position_rad) + "] rad";
+          " rad, command envelope=[" + std::to_string(limit.lower_position_rad) + "," +
+          std::to_string(limit.upper_position_rad) +
+          "] rad; propagated joint feedback allowance also exceeded";
       } else {
         pi_arm_transmission::Vector6 recovered{};
         status = kinematics_.output_to_joint_position(model_output_positions, recovered);
@@ -365,26 +369,44 @@ bool RealBackend::read(HardwareSample & sample) noexcept
             pi_arm_transmission::to_string(status.error);
           sample.error_message = sample.kinematics_error_message;
         } else {
-          last_joint_positions_rad_ = recovered;
+          {
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            last_joint_positions_rad_ = recovered;
+          }
           sample.positions_rad = to_vector(recovered);
           sample.kinematics_valid = true;
           sample.kinematics_error_code = "NONE";
           sample.kinematics_error_message.clear();
           for (size_t i = 0; i < kAxisCount; ++i) {
-            if (recovered[i] < config_.joint_lower_limits_rad[i] ||
-              recovered[i] > config_.joint_upper_limits_rad[i])
+            const double lower = config_.joint_lower_limits_rad[i];
+            const double upper = config_.joint_upper_limits_rad[i];
+            const double tolerance = config_.joint_feedback_tolerances_rad[i];
+            if (recovered[i] < lower - tolerance || recovered[i] > upper + tolerance)
             {
               sample.kinematics_valid = false;
               sample.kinematics_error_code = "JOINT_POSITION_LIMIT";
               sample.kinematics_error_axis = static_cast<int32_t>(i + 1);
               sample.kinematics_error_value = recovered[i];
-              sample.kinematics_error_message = "joint limit exceeded: " +
+              sample.kinematics_error_message = "joint feedback limit exceeded: " +
                 config_.actuators[i].joint_name + " value=" + std::to_string(recovered[i]) +
-                " rad, limit=[" + std::to_string(config_.joint_lower_limits_rad[i]) + "," +
-                std::to_string(config_.joint_upper_limits_rad[i]) + "] rad";
+                " rad, feedback limit=[" + std::to_string(lower - tolerance) + "," +
+                std::to_string(upper + tolerance) + "] rad";
               sample.error_message = sample.kinematics_error_message;
               output_limit_error[i] = true;
               break;
+            }
+            if ((recovered[i] < lower || recovered[i] > upper) &&
+              sample.kinematics_error_code == "NONE")
+            {
+              sample.kinematics_error_code = "JOINT_COMMAND_LIMIT_WARNING";
+              sample.kinematics_error_axis = static_cast<int32_t>(i + 1);
+              sample.kinematics_error_value = recovered[i];
+              sample.kinematics_error_message =
+                "feedback outside command limits, within feedback allowance: " +
+                config_.actuators[i].joint_name + " command=[" + std::to_string(lower) +
+                "," + std::to_string(upper) + "] rad, feedback allowance=" +
+                std::to_string(tolerance) + " rad; command limits remain enforced";
+              sample.error_message = sample.kinematics_error_message;
             }
           }
         }
@@ -517,7 +539,7 @@ MotionArmResult RealBackend::disarm_motion(
 }
 
 MotionArmResult RealBackend::set_motion_armed(
-  const bool armed, const std::uint64_t lease_id) noexcept
+  const bool armed, const std::uint64_t lease_id, const double max_output_velocity) noexcept
 {
   if (!armed) {
     const auto result = disarm_motion(lease_id, true);
@@ -550,11 +572,23 @@ MotionArmResult RealBackend::set_motion_armed(
   {
     return {false, false, "CAN driver is not available for motion arming"};
   }
+  const double speed_limit = max_output_velocity == 0.0 ? 0.08726646259971647 : max_output_velocity;
+  if (!std::isfinite(speed_limit) || speed_limit < 0.002908882086657216) {
+    return {false, false, "output speed limit must be finite and at least 1/6 deg/s"};
+  }
+  if (motion_write_gate_.armed()) {
+    return {false, true, "motion lease already armed"};
+  }
   if (!motion_write_gate_.arm(lease_id))
   {
     return {
       false, motion_write_gate_.armed(),
       "invalid/conflicting motion lease or no finite idle command baseline"};
+  }
+  output_speed_limit_rad_s_ = speed_limit;
+  {
+    std::lock_guard<std::mutex> feedback_lock(feedback_mutex_);
+    recovery_start_ = last_joint_positions_rad_;
   }
   // Remain in MONITORING until write() observes a controller command that is
   // newer than the idle/hold command captured above.
@@ -600,6 +634,13 @@ bool RealBackend::write(
     return false;
   }
   const auto lease_id = motion_write_gate_.active_lease_id();
+  pi_arm_transmission::Vector6 recovery_start{};
+  double output_speed_limit = 0.0;
+  {
+    std::lock_guard<std::mutex> lock(motion_mutex_);
+    recovery_start = recovery_start_;
+    output_speed_limit = output_speed_limit_rad_s_;
+  }
   if (!motion_write_gate_.permit_write(positions_rad, velocities_rad_s)) {
     // This is the captured idle/hold command, not a new controller command.
     return true;
@@ -616,8 +657,15 @@ bool RealBackend::write(
         disarm_motion(0U);
         return false;
       }
-      if (positions_rad[index] < config_.joint_lower_limits_rad[index] ||
-        positions_rad[index] > config_.joint_upper_limits_rad[index])
+      const double lower = config_.joint_lower_limits_rad[index];
+      const double upper = config_.joint_upper_limits_rad[index];
+      const double tolerance = config_.joint_feedback_tolerances_rad[index];
+      // JTC may interpolate from measured feedback in the allowance region.
+      // Accept only that captured start envelope, and project transmitted
+      // targets onto the standard command range. Never send out-of-range q.
+      if (positions_rad[index] < std::min(lower, recovery_start[index]) - 1e-12 ||
+        positions_rad[index] > std::max(upper, recovery_start[index]) + 1e-12 ||
+        positions_rad[index] < lower - tolerance || positions_rad[index] > upper + tolerance)
       {
         log_write_reject(
           "write rejected: position limit exceeded at joint[%zu] pos=%.17g lim=[%.17g,%.17g]",
@@ -626,7 +674,7 @@ bool RealBackend::write(
         disarm_motion(0U);
         return false;
       }
-      joint_positions[index] = positions_rad[index];
+      joint_positions[index] = std::clamp(positions_rad[index], lower, upper);
       joint_velocities[index] = clamp_joint_velocity(
         velocities_rad_s[index], config_.joint_velocity_limits_rad_s[index], index);
     }
@@ -662,31 +710,17 @@ bool RealBackend::write(
       return false;
     }
 
-    pi_arm_transmission::Matrix6 jacobian{};
-    status = kinematics_.jacobian(joint_positions, jacobian);
-    if (!status) {
-      disarm_motion(0U);
-      return false;
-    }
-
     std::vector<pi_arm_can::PositionCommand> commands;
     commands.reserve(kAxisCount);
     for (std::size_t index = 0; index < kAxisCount; ++index) {
       const auto & actuator = config_.actuators[index];
-      double protocol_speed =
-        std::abs(output_velocity_to_protocol_dps(output_velocities[index], actuator));
-      if (protocol_speed < 1.0) {
-        double output_speed_envelope = 0.0;
-        for (std::size_t joint_index = 0; joint_index < kAxisCount; ++joint_index) {
-          output_speed_envelope +=
-            std::abs(jacobian[index][joint_index]) *
-            config_.joint_velocity_limits_rad_s[joint_index];
-        }
-        protocol_speed =
-          std::max(
-          1.0,
-          std::abs(output_velocity_to_protocol_dps(output_speed_envelope, actuator)));
-      }
+      const double protocol_cap = std::min(65535.0, std::floor(
+          std::abs(output_velocity_to_protocol_dps(output_speed_limit, actuator)) + 1e-10));
+      if (protocol_cap < 1.0) {disarm_motion(0U); return false;}
+      // A4 speed is a ceiling, not a feedforward velocity. JTC's sampled
+      // positions define the trajectory timing. Rounding feedforward down
+      // accumulates tracking lag; setting zero can remove the motor's limit.
+      const double protocol_speed = protocol_cap;
       commands.push_back(
         pi_arm_can::PositionCommand{
           actuator.motor_id,
@@ -1035,7 +1069,7 @@ ManagementResult MockBackend::manage(
 }
 
 MotionArmResult MockBackend::set_motion_armed(
-  const bool armed, const std::uint64_t lease_id) noexcept
+  const bool armed, const std::uint64_t lease_id, const double max_output_velocity) noexcept
 {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!configured_) {
@@ -1043,6 +1077,9 @@ MotionArmResult MockBackend::set_motion_armed(
   }
   if (armed && lease_id == 0U) {
     return {false, false, "invalid mock motion lease"};
+  }
+  if (armed && (!std::isfinite(max_output_velocity) || max_output_velocity < 0.0)) {
+    return {false, false, "invalid output speed limit"};
   }
   // Mock has no CAN write boundary; accept the manager handshake without
   // changing its existing deterministic command behavior.

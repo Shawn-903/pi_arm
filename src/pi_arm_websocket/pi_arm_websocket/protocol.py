@@ -15,6 +15,8 @@ CODE_COMMAND_FAILED = 2002
 CODE_MOTION_BUSY = 2003
 
 COMMANDS = {
+    "output_move",
+    "move_preset",
     "axis_test", "axis_test_heartbeat", "axis_test_stop",
     "enable_motor",
     "disable_motor",

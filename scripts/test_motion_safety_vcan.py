@@ -7,6 +7,7 @@ It compiles a temporary probe and uses synthetic zero-offset calibration only.
 import contextlib
 import json
 import math
+import runpy
 from pathlib import Path
 import select
 import socket
@@ -139,8 +140,8 @@ def backend(executable, calibration, commissioning=False):
                 raise
 
 
-def settle(process):
-    for _ in range(40):
+def settle(process, attempts=40):
+    for _ in range(attempts):
         values, line = command(process, 'update')
         if values['active'] == '0':
             assert 'succeeded' in line, line
@@ -154,9 +155,18 @@ def main():
     with tempfile.TemporaryDirectory(prefix='pi_arm_regression_') as directory:
         work = Path(directory)
         calibration = work/'zero.yaml'
-        data = yaml.safe_load((ROOT/'src/pi_arm_hardware/config/pack_reference_calibration.R02.recorded.yaml').read_text())
+        data = yaml.safe_load((ROOT/'docs/calibration-history/pack_reference_calibration.R02.recorded.yaml').read_text())
         data['calibration'].update(robot_id='VCAN-ONLY', calibration_id='VCAN-ONLY-ZERO',
                                   packing_pose_joint_rad=[0.0]*6, raw_output_at_packing_rad=[0.0]*6)
+        cable_file = ROOT/'src/pi_arm_description/config/cable_kinematics.yaml'
+        directions = yaml.safe_load(cable_file.read_text())['cable_kinematics'].get(
+            'output_directions', {f'motor_{i:02d}': 1 for i in range(1, 7)})
+        signs = [directions[f'motor_{i:02d}'] for i in range(1, 7)]
+        candidate = runpy.run_path(str(ROOT/'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
+        mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36 if i <= 3 else 6,
+                        motor_direction=direction)
+                   for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, 1, -1, -1, -1, 1]), 1)]
+        data['calibration']['configuration_fingerprint'] = candidate['configuration_fingerprint'](cable_file, mapping)
         calibration.write_text(yaml.safe_dump(data))
         packages = ['pi_arm_hardware', 'pi_arm_can', 'pi_arm_transmission']
         executable = work/'probe'
@@ -166,8 +176,66 @@ def main():
                         *['-l'+p for p in packages], '-pthread', '-o', str(executable)], check=True)
         emulator = Emulator()
         try:
+            print('CASE: normal wire speed ceiling, low-speed fallback and tolerant start projection')
+            for cap in (5.0, .2, 1.5):
+                emulator.reset()
+                with backend(executable, calibration) as p:
+                    command(p, f'write_speed {cap}')
+                    time.sleep(.1)
+                    frames = emulator.frames_for(0xa4)
+                    assert len(frames) == 6
+                    for motor, data in frames:
+                        speed = struct.unpack('<H', data[2:4])[0]
+                        assert 1 <= speed <= math.floor(cap*(36 if motor <= 3 else 6)+1e-9)
+                    command(p, 'disarm')
+
+            print('CASE: feedback allowance preserves measured angles, command bounds stay strict')
+            def protocol_from_joint_degrees(q2, q3):
+                coupling = 28.5 / 16.25
+                original = [0, q2*36, -(51.75/16.25*q3-coupling*q2)*36,
+                        -coupling*q2*6, -coupling*q2*6,
+                        .5*(20.25/12.25+28.5/17.25)*q2*6]
+                return [value*sign for value, sign in zip(original, signs)]
+
+            emulator.reset(protocol_from_joint_degrees(101.7, 0))
+            with backend(executable, calibration) as p:
+                command(p, 'recover 5')
+                time.sleep(.1)
+                sent = dict(emulator.frames_for(0xa4))
+                assert len(sent) == 6
+                # Interpolated q2=101.6 is accepted as recovery, but the actual
+                # A4 target is the standard 100.7-degree command boundary.
+                assert abs(struct.unpack('<i', sent[2][4:])[0]/100/36 - 100.7) < .0003
+                command(p, 'disarm')
+
+            for axis, bound in ((2, 100.7), (3, 85.6)):
+                for sign in (-1, 1):
+                    for extra, expected_valid in ((1.0, '1'), (2.99, '1'), (3.01, '0')):
+                        angle = sign*(bound+extra)
+                        emulator.reset(protocol_from_joint_degrees(
+                            angle if axis == 2 else 0, angle if axis == 3 else 0))
+                        with backend(executable, calibration) as p:
+                            values, _ = command(p, 'read')
+                            assert values['kin'] == values['control'] == expected_valid
+                            if expected_valid == '1':
+                                assert values['error'] == 'JOINT_COMMAND_LIMIT_WARNING'
+                                assert abs(float(values[f'q{axis}_deg'])-angle) < .002
+                            else:
+                                assert values['error'] in ('JOINT_POSITION_LIMIT', 'OUTPUT_POSITION_LIMIT')
+                            assert not emulator.frames_for(0xa4)
+                    emulator.reset()
+                    with backend(executable, calibration) as p:
+                        command(p, 'write')
+                        deadline = time.monotonic() + 1
+                        while len(emulator.frames_for(0xa4)) < 6 and time.monotonic() < deadline:
+                            time.sleep(.01)
+                        sent = len(emulator.frames_for(0xa4))
+                        assert sent == 6
+                        command(p, f'write_target {axis} {sign*(bound+1)}', ok=False)
+                        assert len(emulator.frames_for(0xa4)) == sent
+
             print('CASE: joint feedback limit inhibits normal control')
-            outside = -6*180/math.pi*(33.94/16.25)*math.sin(math.radians(35))
+            outside = -signs[3]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(35))
             emulator.reset([0, 0, 0, outside, 0, 0])
             with backend(executable, calibration) as p:
                 values, _ = command(p, 'read')
@@ -252,7 +320,7 @@ def main():
                 emulator.assert_stopped([4])
 
             print('CASE: near-limit coupled test rejected before any A4')
-            near = -6*180/math.pi*(33.94/16.25)*math.sin(math.radians(29.99))
+            near = -signs[3]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(29.99))
             emulator.reset([0, 0, 0, near, 0, 0])
             with backend(executable, calibration, True) as p:
                 _, line = command(p, 'joint 2 .1 .2', ok=False)
@@ -272,7 +340,7 @@ def main():
             emulator.reset()
             with backend(executable, calibration, True) as p:
                 command(p, 'joint 2 .1 .2')
-                emulator.inject(4, .02)  # opposite to the accepted negative protocol direction
+                emulator.inject(4, signs[3]*.02)  # opposite to accepted J2 compensation
                 values, line = command(p, 'update')
                 assert values['kin'] == '1' and values['active'] == '0'
                 assert 'validated asynchronous path' in line
@@ -309,7 +377,100 @@ def main():
                 values, line = command(p, 'noheartbeat')
                 assert values['active'] == '0' and 'heartbeat expired' in line
                 emulator.assert_stopped([3])
-            print('PASS: 12 production-backend virtual CAN safety scenarios')
+
+            for motor, ratio, sign in [(1, 36, 1), (4, 6, -1)]:
+                print(f'CASE: CAN {motor} output step 5 deg at 1 deg/s, ratio {ratio}')
+                emulator.reset(dynamic=True)
+                with backend(executable, calibration, True) as p:
+                    for delta, speed in [(5.01, 1), (-5.01, 1), (5, 1.01)]:
+                        command(p, f'motor {motor} {delta} {speed}', ok=False)
+                    # Enlarging raw motor tests does not enlarge joint requests.
+                    command(p, 'joint 1 .51 .2', ok=False)
+                    command(p, 'joint 1 .1 .51', ok=False)
+                    assert not emulator.frames_for(0xa4)
+                    command(p, f'motor {motor} {sign*5} 1')
+                    settle(p, attempts=80)  # Heartbeat stays alive during the 5-second move.
+                    frames = emulator.frames_for(0xa4)
+                    assert len(frames) == 1 and frames[0][0] == motor
+                    data = frames[0][1]
+                    assert struct.unpack('<i', data[4:])[0] == sign*5*ratio*100
+                    assert struct.unpack('<H', data[2:4])[0] == ratio
+                    with emulator.lock:
+                        assert abs(emulator.positions[motor]/ratio-sign*5) < .001
+                        assert all(abs(value) < .001 for i, value in emulator.positions.items() if i != motor)
+                    emulator.assert_stopped([motor])
+
+            for sign in (1, -1):
+                print(f'CASE: signed session boundary {sign*30} output deg from nonzero origin')
+                origin = 60.0  # CAN 4 protocol angle, 10 output degrees.
+                emulator.reset([0, 0, 0, origin, 0, 0])
+                with backend(executable, calibration, True) as p:
+                    for step in range(1, 7):
+                        command(p, f'motor 4 {sign*5} 1')
+                        emulator.inject(4, origin+sign*step*5*6)
+                        settle(p)
+                    sent = len(emulator.frames_for(0xa4))
+                    assert sent == 6
+                    _, line = command(p, f'motor 4 {sign*.01} 1', ok=False)
+                    assert 'session displacement exceeds 30 deg' in line
+                    assert len(emulator.frames_for(0xa4)) == sent
+                    # Returning inside the envelope is allowed, without resetting its origin.
+                    command(p, f'motor 4 {-sign*5} 1')
+                    emulator.inject(4, origin+sign*25*6)
+                    settle(p)
+
+            print('CASE: small requested step retains a small displacement guard')
+            emulator.reset()
+            with backend(executable, calibration, True) as p:
+                command(p, 'motor 1 .1 .2')
+                emulator.inject(1, .2*36)
+                values, line = command(p, 'update')
+                assert values['active'] == '0' and 'unexpected output-shaft displacement' in line
+                emulator.assert_stopped([1])
+            print('CASE: cable directions reach A4 targets and feedback for motors 3 and 4')
+            for axis in (3, 4):
+                emulator.reset()
+                with backend(executable, calibration) as p:
+                    command(p, 'write')
+                    command(p, f'write_target {axis} 1')
+                    time.sleep(.1)
+                    sent = dict(emulator.frames_for(0xa4))
+                    protocol = struct.unpack('<i', sent[axis][4:])[0]/100
+                    base = 51.75/16.25 if axis == 3 else 33.94/16.25*math.sin(math.radians(1))*180/math.pi
+                    expected = -signs[axis-1]*base*(36 if axis == 3 else 6)
+                    assert abs(protocol-expected) <= .011, (axis, protocol, expected)
+                    emulator.inject(axis, protocol)
+                    values, _ = command(p, 'read')
+                    assert abs(float(values['q3_deg' if axis == 3 else 'q5_deg'])-1) < .002
+                    command(p, 'disarm')
+            print('CASE: accepted packing measurements survive direction rebind; zero target reverses')
+            reference = yaml.safe_load((ROOT/'docs/calibration-history/pack_reference_calibration.R03.recorded.yaml').read_text())
+            reference['calibration']['configuration_fingerprint'] = data_fingerprint = candidate['configuration_fingerprint'](cable_file, mapping)
+            assert data_fingerprint
+            pack_calibration = work/'packing.yaml'
+            pack_calibration.write_text(yaml.safe_dump(reference))
+            raw = reference['calibration']['raw_output_at_packing_rad']
+            protocol_pack = [math.degrees(value)*entry['protocol_angle_ratio']*entry['motor_direction']
+                             for value, entry in zip(raw, mapping)]
+            emulator.reset(protocol_pack)
+            with backend(executable, pack_calibration) as p:
+                values, _ = command(p, 'read')
+                assert values['kin'] == values['control'] == '1'
+                assert abs(float(values['q2_deg'])-100.7) < .002
+                assert abs(float(values['q3_deg'])+85.6) < .002
+                command(p, 'write')  # q1=.01 rad, all other joints zero, virtual CAN only
+                time.sleep(.1)
+                sent = dict(emulator.frames_for(0xa4))
+                old_pack_output = [0, 100.7, (51.75*-85.6-28.5*100.7)/16.25,
+                                   28.5/16.25*100.7, 28.5/16.25*100.7,
+                                   .5*(20.25/12.25+28.5/17.25)*100.7]
+                for axis in (3, 4):
+                    actual = struct.unpack('<i', sent[axis][4:])[0]/100
+                    entry = mapping[axis-1]
+                    expected = protocol_pack[axis-1]-signs[axis-1]*old_pack_output[axis-1]*entry['motor_direction']*entry['protocol_angle_ratio']
+                    assert abs(actual-expected) <= .011, (axis, actual, expected)
+                command(p, 'disarm')
+            print('PASS: 21 production-backend virtual CAN safety scenarios')
         finally:
             emulator.close()
 

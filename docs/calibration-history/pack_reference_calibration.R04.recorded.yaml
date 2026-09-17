@@ -1,0 +1,38 @@
+# Direction-only rebind of pack_reference_calibration.R03.recorded.yaml; original measurements retained.
+# Explicitly requested signs for onsite testing; not a new physical measurement.
+calibration:
+  schema_version: 1
+  robot_id: PIARM-R1-SN0001
+  calibration_id: PIARM-R1-SN0001-PACKCAL-20260917-R04
+  approved: true
+  model_version: 3
+  created_at_utc: '2026-09-17T04:17:09+00:00'
+  configuration_fingerprint: fnv1a64:b5d2844758bf73d4
+  joint_names:
+  - joint_01
+  - joint_02
+  - joint_04
+  - joint_05
+  - joint_06
+  - joint_09
+  motor_ids:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  packing_pose_joint_rad:
+  - 0.0
+  - 1.75754655675829
+  - -1.494001839707146
+  - 0.0
+  - 0.0
+  - 0.0
+  raw_output_at_packing_rad:
+  - 1.1150714665519e-05
+  - 4.8481368110954e-05
+  - -4.3633231299858e-05
+  - 0.0
+  - -6.4965033268678e-05
+  - 5.8177641733144e-05

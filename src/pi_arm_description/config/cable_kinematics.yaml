@@ -3,6 +3,19 @@ cable_kinematics:
   angle_unit: rad
   length_unit: mm
 
+  # Cable equation -> physical reducer output-shaft direction, +1 or -1.
+  # Multiplies the ENTIRE equation (self motion AND J2 compensation).
+  # This is NOT motor_direction (protocol encoder -> output shaft, in URDF).
+  # Motor IDs 1..6 map to joint_01, joint_02, joint_04, joint_05, joint_06, joint_09.
+  # After editing, rebind the packing calibration to this model and restart.
+  output_directions:
+    motor_01: 1
+    motor_02: 1
+    motor_03: -1
+    motor_04: -1
+    motor_05: 1
+    motor_06: -1
+
   validation:
     asin_domain_tolerance: 1.0e-12
     cosine_singularity_threshold: 1.0e-6

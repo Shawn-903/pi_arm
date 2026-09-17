@@ -71,6 +71,21 @@ def main():
         assert "0.166667" in page.locator("#motorTestReason").inner_text()
         assert page.locator("#axisTestStop").is_enabled()
         assert page.locator('[data-axis-test="motor"][data-sign="1"]').is_disabled()
+        page.evaluate('''handleMessage({...lastState, preset_poses:{
+          packing:{target_joint_angles_deg:[0,100.7,-85.6,0,0,0],available:false,
+                   reason:"方向测试模式未启动整臂轨迹控制器；标定尚未确认"},
+          zero:{target_joint_angles_deg:[0,0,0,0,0,0],available:false,reason:"标定尚未确认"}}})''')
+        assert page.locator('#movePackingPose').is_visible() and page.locator('#movePackingPose').is_disabled()
+        assert page.locator('#moveZeroPose').is_visible() and page.locator('#moveZeroPose').is_disabled()
+        assert '100.700' in page.locator('#packingPoseStatus').inner_text()
+        assert '标定尚未确认' in page.locator('#zeroPoseStatus').inner_text()
+        assert page.evaluate('sendCommand("move_preset", {preset:"packing"})') is False
+        page.evaluate('''handleMessage({...lastState, calibrated:true, kinematics_valid:true,
+          current_joint_angles:[0,101.7,-86.6,0,0,0], current_speeds:[0,0,0,0,0,0],
+          kinematics_error:{code:"JOINT_COMMAND_LIMIT_WARNING",axis:2,value:1.775,
+            message:"feedback outside command limits, within feedback allowance"}})''')
+        assert '仍在解算容差内' in page.locator('#diagnosticSummary').inner_text()
+        assert page.locator('[data-status-row="2"] [data-field="angle"]').inner_text() == '101.700000'
         page.evaluate("lastStateAt = Date.now() - 2000; refreshControlGate()")
         assert "状态已过期" in page.locator("#diagnosticSummary").inner_text()
         assert page.locator('[data-coordinate-row="2"] [data-coordinate="fresh"]').inner_text() == "缺失/过期"

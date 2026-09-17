@@ -31,6 +31,8 @@ struct BackendConfig
   // The single source of truth for these values is the robot description.
   std::vector<double> joint_lower_limits_rad;
   std::vector<double> joint_upper_limits_rad;
+  // Read-side allowance only; never added to command or trajectory limits.
+  pi_arm_transmission::Vector6 joint_feedback_tolerances_rad{};
   std::vector<double> joint_velocity_limits_rad_s;
   std::chrono::milliseconds poll_interval{20};
   std::size_t status1_poll_divider{5U};
@@ -115,7 +117,7 @@ public:
   virtual ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept = 0;
   virtual MotionArmResult set_motion_armed(
-    bool armed, std::uint64_t lease_id) noexcept = 0;
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept = 0;
 };
 
 class RealBackend final : public Backend
@@ -135,7 +137,7 @@ public:
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
   MotionArmResult set_motion_armed(
-    bool armed, std::uint64_t lease_id) noexcept override;
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept override;
 
   // Only the dedicated, single-threaded commissioning node may call these.
   ManagementResult start_axis_test(const std::string & space, int axis_id,
@@ -152,6 +154,9 @@ private:
   // Serialize the final command submission with lease changes. ACK waiting
   // happens after releasing this mutex, never in read()/write().
   std::mutex motion_mutex_;
+  std::mutex feedback_mutex_;
+  pi_arm_transmission::Vector6 recovery_start_{};
+  double output_speed_limit_rad_s_{0.08726646259971647};
   bool normal_motion_sent_{false};
   bool axis_test_raw_ready(bool require_still) const;
   bool axis_test_active_{false};
@@ -192,7 +197,7 @@ public:
   ManagementResult manage(
     pi_arm_can::ManagementOperation operation, int motor_id) noexcept override;
   MotionArmResult set_motion_armed(
-    bool armed, std::uint64_t lease_id) noexcept override;
+    bool armed, std::uint64_t lease_id, double max_output_velocity = 0.0) noexcept override;
 
 private:
   bool valid_motor_id(int motor_id) const noexcept;

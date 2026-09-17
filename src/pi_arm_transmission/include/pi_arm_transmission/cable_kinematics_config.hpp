@@ -44,6 +44,9 @@ struct OutputPositionLimits
 
 struct CableKinematicsParameters
 {
+  // Sign of each complete cable equation in the physical output-shaft frame.
+  // Independent of encoder/reducer installation direction. Legacy default: +1.
+  std::array<int, 6> output_directions{{1, 1, 1, 1, 1, 1}};
   LinearAxisParameters axis1;
   LinearAxisParameters axis2;
   CoupledAxis3Parameters axis3;

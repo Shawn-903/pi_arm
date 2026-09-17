@@ -13,6 +13,8 @@ find_package(moveit_core REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(pi_arm_interfaces REQUIRED)
+find_package(pi_arm_transmission REQUIRED)
+find_package(hardware_interface REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(trajectory_msgs REQUIRED)
@@ -23,7 +25,7 @@ target_include_directories(pi_arm_manager_node PUBLIC
   $<INSTALL_INTERFACE:include>)
 ament_target_dependencies(pi_arm_manager_node
   control_msgs geometry_msgs moveit_core moveit_msgs moveit_ros_planning_interface pi_arm_interfaces
-  rclcpp rclcpp_action trajectory_msgs)
+  rclcpp rclcpp_action trajectory_msgs pi_arm_transmission hardware_interface)
 
 install(TARGETS pi_arm_manager_node DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)

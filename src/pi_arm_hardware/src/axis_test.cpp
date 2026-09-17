@@ -9,9 +9,13 @@ namespace pi_arm_hardware
 namespace
 {
 constexpr double kRad = 3.14159265358979323846 / 180.0;
-constexpr double kStepLimitDeg = 0.5;
-constexpr double kSessionLimitDeg = 2.0;
-constexpr double kSpeedLimitDegS = 0.5;
+// Raw motor tests use reducer-output degrees, before direction/cable mapping.
+constexpr double kMotorStepLimitDeg = 5.0;
+constexpr double kMotorSessionLimitDeg = 30.0;
+constexpr double kMotorSpeedLimitDegS = 1.0;
+constexpr double kJointStepLimitDeg = 0.5;
+constexpr double kJointSessionLimitDeg = 2.0;
+constexpr double kJointSpeedLimitDegS = 0.5;
 }
 
 bool RealBackend::axis_test_raw_ready(const bool require_still) const
@@ -41,11 +45,17 @@ ManagementResult RealBackend::start_axis_test(
   if (!axis_test_raw_ready(true)) {
     return {false, 2001, "axis test requires commissioning mode and six fresh, error-free, stationary motors"};
   }
+  const bool motor_test = space == "motor";
+  const double step_limit = motor_test ? kMotorStepLimitDeg : kJointStepLimitDeg;
+  const double session_limit = motor_test ? kMotorSessionLimitDeg : kJointSessionLimitDeg;
+  const double speed_limit = motor_test ? kMotorSpeedLimitDegS : kJointSpeedLimitDegS;
   if ((space != "motor" && space != "joint") || axis_id < 1 || axis_id > 6 ||
-    !std::isfinite(delta_deg) || std::abs(delta_deg) < 0.01 || std::abs(delta_deg) > kStepLimitDeg ||
-    !std::isfinite(speed_deg_s) || speed_deg_s < 0.05 || speed_deg_s > kSpeedLimitDegS)
+    !std::isfinite(delta_deg) || std::abs(delta_deg) < 0.01 || std::abs(delta_deg) > step_limit ||
+    !std::isfinite(speed_deg_s) || speed_deg_s < 0.05 || speed_deg_s > speed_limit)
   {
-    return {false, 1004, "step must be +/-0.01..0.5 deg; speed 0.05..0.5 deg/s; axis 1..6"};
+    return {false, 1004, motor_test ?
+      "motor output step must be +/-0.01..5 deg; output speed 0.05..1 deg/s; CAN ID 1..6" :
+      "joint step must be +/-0.01..0.5 deg; speed 0.05..0.5 deg/s; axis 1..6"};
   }
   const auto snapshot = driver_->snapshot();
   std::vector<double> origin;
@@ -127,10 +137,12 @@ ManagementResult RealBackend::start_axis_test(
   for (size_t i = 0; i < 6; ++i) {
     const auto & actuator = config_.actuators[i];
     const double output_delta = (target[i] - origin[i]) / actuator.protocol_angle_ratio;
-    if (std::abs(output_delta) > kStepLimitDeg + 1e-9 ||
-      std::abs((target[i] - session_origin[i]) / actuator.protocol_angle_ratio) > kSessionLimitDeg)
-    {return {false, 1004, "output step exceeds 0.5 deg or session displacement exceeds 2 deg"};}
-    duration = std::max(duration, std::abs(output_delta) / kSpeedLimitDegS);
+    if (std::abs(output_delta) > step_limit + 1e-9 ||
+      std::abs((target[i] - session_origin[i]) / actuator.protocol_angle_ratio) > session_limit + 1e-9)
+    {return {false, 1004, motor_test ?
+      "output step exceeds 5 deg or session displacement exceeds 30 deg" :
+      "output step exceeds 0.5 deg or session displacement exceeds 2 deg"};}
+    duration = std::max(duration, std::abs(output_delta) / speed_limit);
   }
   double encoded_duration = 0.0;
   for (size_t i = 0; i < 6; ++i) {
@@ -141,7 +153,7 @@ ManagementResult RealBackend::start_axis_test(
       return {false, 2001, "selected/coupled motor is not enabled"};
     }
     double speed_cap = std::min(std::abs(target[i] - origin[i]) / duration,
-      actuator.protocol_angle_ratio * kSpeedLimitDegS);
+      actuator.protocol_angle_ratio * speed_limit);
     if (space == "motor") {
       speed_cap = std::min(speed_cap, actuator.protocol_angle_ratio * speed_deg_s);
     } else if (i == static_cast<size_t>(axis_id - 1)) {
@@ -223,7 +235,14 @@ void RealBackend::update_axis_test(const HardwareSample & sample)
     {stop_axis_test("failed: motor left the validated asynchronous path"); return;}
     const double displacement = std::abs(state.protocol_angle_deg - axis_test_origin_protocol_[i]) /
       actuator.protocol_angle_ratio;
-    if (displacement > kStepLimitDeg + 0.05 ||
+    const double requested_displacement = std::abs(axis_test_target_protocol_[i] -
+      axis_test_origin_protocol_[i]) / actuator.protocol_angle_ratio;
+    const double session_displacement = std::abs(state.protocol_angle_deg -
+      axis_test_session_origin_[i]) / actuator.protocol_angle_ratio;
+    const double session_limit = axis_test_space_ == "motor" ?
+      kMotorSessionLimitDeg : kJointSessionLimitDeg;
+    if (displacement > requested_displacement + 0.05 ||
+      session_displacement > session_limit + 0.05 ||
       (command == axis_test_commands_.end() && displacement > 0.05))
     {stop_axis_test("failed: unexpected output-shaft displacement"); return;}
     if (command != axis_test_commands_.end()) {

@@ -115,6 +115,10 @@ BackendConfig backend_config_from_robot_description(const std::string & robot_de
           "motor_direction")});
     config.joint_lower_limits_rad.push_back(limits->second.min_position);
     config.joint_upper_limits_rad.push_back(limits->second.max_position);
+    config.joint_feedback_tolerances_rad[config.actuators.size() - 1U] =
+      parse_value<double>(parameter_or(
+        joint.parameters, "feedback_position_tolerance_rad", "0"),
+        "feedback_position_tolerance_rad");
     config.joint_velocity_limits_rad_s.push_back(limits->second.max_velocity);
   }
   return config;

@@ -10,6 +10,7 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>pi_arm_interfaces</exec_depend>
   <exec_depend>python3-websockets</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>tf2_ros_py</exec_depend>
   <exec_depend>trajectory_msgs</exec_depend>

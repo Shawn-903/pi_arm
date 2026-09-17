@@ -3,6 +3,8 @@ float64 max_linear_velocity
 float64 max_linear_acceleration
 float64 max_angular_velocity
 float64 max_angular_acceleration
+# Output-shaft speed ceiling, rad/s; zero selects 5 deg/s.
+float64 max_output_velocity
 ---
 bool success
 int32 code

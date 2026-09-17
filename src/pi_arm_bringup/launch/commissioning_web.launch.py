@@ -16,5 +16,6 @@ def generate_launch_description():
         Node(package="pi_arm_websocket", executable="pi_arm_websocket",
              name="pi_arm_websocket", output="screen",
              parameters=[{"hardware_type": "real", "commissioning": True,
+                          "calibration_file": LaunchConfiguration("calibration_file"),
                           "port": LaunchConfiguration("websocket_port")}]),
     ])

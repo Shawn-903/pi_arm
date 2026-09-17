@@ -63,6 +63,19 @@ def main():
         page.locator("#multiSpeed").fill("1")
         print("PASS multi joint and empty input rejection", flush=True)
 
+        assert page.locator('#outputSpeedLimit').input_value() == '5'
+        page.locator('#outputSpeedLimit').fill('0.5')
+        page.locator('#copyOutputTargets').click()
+        output_before = float(page.locator('#outputTarget1').input_value())
+        page.locator('#outputTarget1').fill(str(output_before+.1))
+        before = previous_task()
+        page.locator('#moveOutputTargets').click()
+        wait_task_after(before)
+        output_after = page.evaluate('lastState.model_output_positions_rad[0]*180/Math.PI')
+        assert abs(output_after-output_before-.1) < .01
+        page.locator('#outputSpeedLimit').fill('5')
+        print('PASS model output target, cable inverse and editable output speed ceiling', flush=True)
+
         page.locator("#copyCurrentBtn").click()
         # The top-level button must read single-joint cards, even on the multi tab.
         page.locator("#multiJoint1").fill("500")

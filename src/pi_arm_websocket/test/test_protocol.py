@@ -124,11 +124,35 @@ def test_stop_never_sends_a_new_motion_even_without_control_permission():
     assert bridge.goals == []
 
 
-def test_real_planned_motion_is_rejected_before_action_submission():
+def test_real_cartesian_request_uses_normal_action_and_output_speed_ceiling():
     bridge = _CommandBridge()
     bridge.hardware_type = "real"
-    with pytest.raises(ProtocolError, match="DirectMove"):
-        asyncio.run(CommandGateway(bridge).dispatch(parse_request('{"cmd":"movel"}')))
+    asyncio.run(CommandGateway(bridge).dispatch(parse_request(json.dumps({
+        'cmd':'movel', 'params':{'target':[100,20,300,0,0,0], 'linear_vel':1,
+        'linear_acc':1, 'angular_vel':1, 'angular_acc':1, 'output_speed_limit':2}}))))
+    name, goal = bridge.goals[0]
+    assert name == 'movel' and goal.target.header.frame_id == 'base_link'
+    assert goal.target.pose.position.x == pytest.approx(.1)
+    assert goal.max_output_velocity == pytest.approx(2*3.141592653589793/180)
+
+
+def test_output_targets_keep_model_output_coordinates_until_manager_inverse():
+    bridge = _CommandBridge()
+    result = asyncio.run(CommandGateway(bridge).dispatch(parse_request(json.dumps({
+        'cmd':'output_move', 'params':{'targets':[1,-2,3,-4,5,-6], 'output_speed_limit':3}}))))
+    name, goal = bridge.goals[0]
+    assert name == 'direct' and goal.output_space
+    assert list(goal.positions) == pytest.approx([v*3.141592653589793/180 for v in [1,-2,3,-4,5,-6]])
+    assert goal.max_output_velocity == pytest.approx(3*3.141592653589793/180)
+    assert result['output_speed_limit'] == pytest.approx(3)
+
+
+@pytest.mark.parametrize('speed', [0, -.1, .1, float('inf'), float('nan')])
+def test_invalid_output_speed_never_submits_goal(speed):
+    bridge = _CommandBridge()
+    with pytest.raises(ProtocolError):
+        asyncio.run(CommandGateway(bridge).dispatch(parse_request(json.dumps({
+            'cmd':'move', 'params':{'targets':[0]*6, 'max_speed':1, 'output_speed_limit':speed}}))))
     assert not bridge.goals
 
 

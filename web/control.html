@@ -437,17 +437,30 @@
     </div>
     <button id="exportDiagnosticBtn" disabled>下载当前诊断 JSON</button>
   </fieldset>
+  <fieldset id="presetPosePanel">
+    <legend>预设姿态</legend>
+    <p>执行整臂关节运动，关节速度上限 1°/s，同时受网页输出轴限速约束。打包目标来自后端标定；零位目标为六个主动关节角 0°。这两个按钮不会重设电机零点。</p>
+    <div class="endpoint-row">
+      <button id="movePackingPose" data-preset="packing" class="btn-primary" disabled>运动到打包姿态</button>
+      <button id="moveZeroPose" data-preset="zero" class="btn-primary" disabled>运动到零位姿态</button>
+      <button data-cmd="stop_motion" class="btn-red">停止运动</button>
+    </div>
+    <p>目标角顺序：joint_01、joint_02、joint_04、joint_05、joint_06、joint_09。</p>
+    <div id="packingPoseStatus" role="status">打包姿态：等待连接</div>
+    <div id="zeroPoseStatus" role="status">零位姿态：等待连接</div>
+  </fieldset>
   <fieldset id="axisTestPanel" hidden>
     <legend>单轴方向测试</legend>
     <p>电机测试的“+”表示协议角增加：只按减速比换算输出轴步长，不应用 motor_direction、软件偏置或绳索耦合。关节测试使用当前模型，可能驱动多个电机；无有效反解时禁止关节点动。</p>
-    <p>默认每次 0.1°；每次最多 0.5°，最高 0.5°/s，各输出轴距本次服务首次测试起点最多 ±2°。连接丢失或心跳超过 0.8s 时请求 0x81 停止。此功能不能代替物理急停。</p>
+    <p>电机测试完成仅表示协议角到达目标，不代表实物关节到位；当前关节角来自绳索模型反解，并非独立关节传感器。若电机转动而关节未动，请停止点动并记录机械止挡、松绳或其他现场现象。放宽软件限位不能消除机械止挡。</p>
+    <p>电机测试：默认每步输出轴 5°、速度 1°/s；单步最多 5°，输出轴速度最高 1°/s，各输出轴距本次服务首次测试起点最多 ±30°（不是累计行程）。关节测试仍限制单步 0.5°、速度 0.5°/s，且各输出轴单步最多 0.5°、距同一起点最多 ±2°。连接丢失或心跳超过 0.8s 时请求 0x81 停止。此功能不能代替物理急停。</p>
     <div class="endpoint-row">
       <strong>电机输出轴</strong>
       <select id="testMotorId"></select>
       <button id="testEnableMotor">使能所选电机</button>
       <button id="testDisableMotor">关闭所选电机</button>
-      <label>步长(°) <input id="motorTestStep" type="number" value="0.1" min="0.01" max="0.5" step="any"></label>
-      <label>速度(°/s) <input id="motorTestSpeed" type="number" value="0.2" min="0.05" max="0.5" step="any"></label>
+      <label>输出轴步长(°) <input id="motorTestStep" type="number" value="5" min="0.01" max="5" step="any"></label>
+      <label>输出轴速度(°/s) <input id="motorTestSpeed" type="number" value="1" min="0.05" max="1" step="any"></label>
       <button data-axis-test="motor" data-sign="-1">电机 − 步进</button>
       <button data-axis-test="motor" data-sign="1">电机 + 步进</button>
     </div>
@@ -534,6 +547,18 @@
 
       <fieldset id="normalMotionControls">
         <legend></legend>
+        <label>输出轴速度上限（°/s）
+          <input id="outputSpeedLimit" type="number" min="0.16666666666666666" step="any" value="5">
+        </label>
+        <p>对下一次输出轴、关节、预设姿态及笛卡尔运动生效；执行中修改不影响当前任务。驱动按减速比落实限速，速度按协议分辨率向下取整。</p>
+        <p>起点允许反馈容差，运动目标必须在标准限位内。若起点超出标准范围，起始过渡及未选轴的保持目标会取最近合法边界；笛卡尔直线从该合法起点规划。</p>
+        <fieldset>
+          <legend>输出轴目标（模型零位，规定正方向）</legend>
+          <div id="outputTargetGrid" class="joint-grid"></div>
+          <button id="copyOutputTargets">读取当前输出角</button>
+          <button id="moveOutputTargets" data-motion="true">运动到输出轴目标</button>
+          <p>单位 °；六轴目标先通过绳索反解检查标准关节限位，再进入整臂轨迹控制。此处是输出轴目标控制，不是原始电机协议角点动。</p>
+        </fieldset>
         <div class="tabs">
           <div class="tab-head" role="tablist">
             <button class="tab-button active" data-tab="single">单关节控制</button>
@@ -589,7 +614,7 @@
               <fieldset>
                 <legend>运动模式</legend>
                 <label><input type="radio" name="motionMode" value="joint" checked> 关节直接运动 (DirectMove)</label>
-                <label style="margin-left: 20px;"><input type="radio" name="motionMode" value="line"> 直线插补（仅 mock）</label>
+                <label style="margin-left: 20px;"><input type="radio" name="motionMode" value="line"> 笛卡尔直线（base_link → tool0）</label>
               </fieldset>
               <fieldset id="jointParamCard" class="param-card">
                 <legend>关节直接运动参数</legend>
@@ -650,7 +675,7 @@
     let ownAxisTest = null;
     const axisTestRecords = [];
     const pending = new Map();
-    const motionCommands = new Set(["motor_move", "move", "movej", "movejs", "movel"]);
+    const motionCommands = new Set(["motor_move", "move", "output_move", "movej", "movejs", "movel", "move_preset"]);
 
     const els = {
       jointStatusBody: document.getElementById("jointStatusBody"),
@@ -726,9 +751,11 @@
         updateMotionMode();
       }
       document.getElementById("copyCurrentBtn").disabled = !fresh || !lastState.kinematics_valid;
+      document.getElementById("copyOutputTargets").disabled = !fresh || !lastState.kinematics_valid;
       document.getElementById("exportDiagnosticBtn").disabled = !lastState;
       updateDiagnostics(lastState, fresh);
       refreshAxisTests(fresh);
+      refreshPresetPoses(fresh, permitted);
       els.safetyState.textContent = connected
         ? (!fresh ? "已连接 / 等待新鲜机械臂状态" :
           `${lastState.hardware_type || "未知后端"}${lastState.read_only ? " 只读排查" : lastState.commissioning ? " 方向测试" : ""} / ${lastState.robot_state} / ${permitted ? "可发送运动" : "禁止新运动"}`)
@@ -738,6 +765,22 @@
     function setConnectionState(state) {
       connectionState = state;
       refreshControlGate();
+    }
+
+    function refreshPresetPoses(fresh, permitted) {
+      for (const [name, statusId] of [["packing", "packingPoseStatus"], ["zero", "zeroPoseStatus"]]) {
+        const preset = lastState?.preset_poses?.[name];
+        const available = fresh && permitted && preset?.available === true;
+        const button = document.querySelector(`[data-preset="${name}"]`);
+        button.disabled = !available;
+        const angles = preset?.target_joint_angles_deg;
+        const target = Array.isArray(angles) && angles.length === 6
+          ? `[${angles.map((v) => formatNumber(v, 3)).join(", ")}]°` : "目标未加载";
+        const reason = !fresh ? "等待连接及新鲜状态" : !preset ? "后端尚未提供预设姿态" :
+          preset.reason || (!permitted ? "等待当前运动或请求结束" : "可执行");
+        button.title = reason;
+        document.getElementById(statusId).textContent = `${name === "packing" ? "打包姿态" : "零位姿态"}：${target}；${reason}`;
+      }
     }
 
     function connect() {
@@ -815,6 +858,14 @@
         return false;
       }
       if (cmd === "axis_test" && (ownAxisTest !== null || [...pending.values()].some((item) => item.cmd === "axis_test"))) return false;
+      if (cmd === "move_preset" && lastState?.preset_poses?.[params.preset]?.available !== true) {
+        log("运动被拒绝：预设姿态尚不可用");
+        return false;
+      }
+      if (motionCommands.has(cmd)) {
+        try {params = {...params, output_speed_limit: readPositiveFloat("outputSpeedLimit")};}
+        catch (error) {log("参数错误", {message:error.message}); return false;}
+      }
       const payload = {
         type: "req",
         msg_id: msgId++,
@@ -958,6 +1009,9 @@
           if (!state.hardware_connected) reasons.push("硬件连接异常");
           if (!state.calibrated) reasons.push("标定无效：仍可查看原始电机反馈，模型角可能不可用");
           if (!state.kinematics_valid) reasons.push("运动学无效：关节角和末端姿态不作为有效反馈显示");
+          if (state.kinematics_valid && state.kinematics_error?.code === "JOINT_COMMAND_LIMIT_WARNING") {
+            reasons.push("反馈角超过运动指令限位，仍在解算容差内；显示原始反解角度，目标与运动路径仍受指令限位约束");
+          }
           const staleIds = state.motor_ids?.filter((id, i) => state.motor_fresh?.[i] !== true) || [];
           if (staleIds.length) reasons.push(`反馈缺失或过期的 CAN ID：${staleIds.join(", ")}`);
           if (!state.control_permitted) reasons.push(state.commissioning ? "普通控制关闭；独立电机/关节点动权限见测试区" : "硬件未授予运动许可");
@@ -967,7 +1021,7 @@
           `后端：${state.hardware_type} ${state.can_interface || ""} / ${state.read_only ? "只读排查" : state.commissioning ? "方向测试" : "控制模式"} / 状态：${state.robot_state}`,
           `驱动：${state.driver_mode || "--"} / 标定有效：${boolText(state.calibrated)} / 运动学有效：${boolText(state.kinematics_valid)} / 控制许可：${boolText(state.control_permitted)}`,
           `标定 ID：${state.calibration_id || "--"}`,
-          `运动学错误：${error.code || "--"} / 轴序号：${error.axis ?? "--"} / 值：${error.value ?? "--"}`,
+          `运动学诊断：${error.code || "--"} / 轴序号：${error.axis ?? "--"} / 值：${error.value ?? "--"}`,
           error.message || "", state.diagnostic || "", ...reasons,
         ].filter(Boolean).join("\n");
       }
@@ -1274,9 +1328,22 @@
       buildStatusTable();
       buildSingleMotorControls();
       buildJointInputs(els.multiJointGrid, "multiJoint");
+      document.getElementById("outputTargetGrid").innerHTML = motorIds.map(id =>
+        `<label>输出轴 ${id} (°)<input id="outputTarget${id}" type="number" step="any" value="0"></label>`).join("");
+      document.getElementById("copyOutputTargets").addEventListener("click", () => {
+        const values = lastState?.model_output_positions_rad;
+        if (!values || values.length !== 6 || !values.every(Number.isFinite)) return;
+        values.forEach((value, i) => {document.getElementById(`outputTarget${i+1}`).value = String(value * 180 / Math.PI);});
+      });
+      document.getElementById("moveOutputTargets").addEventListener("click", () => {
+        try {sendCommand("output_move", {targets:motorIds.map(id => readNumber(`outputTarget${id}`))});}
+        catch (error) {log("参数错误", {message:error.message});}
+      });
       bindTabs();
       bindCommands();
       bindAxisTests();
+      document.querySelectorAll("[data-preset]").forEach((button) =>
+        button.addEventListener("click", () => sendCommand("move_preset", {preset: button.dataset.preset})));
       updateMotionMode();
       setConnectionState("closed");
       setInterval(refreshControlGate, 300);

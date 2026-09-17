@@ -151,6 +151,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_manager", default_value="true"),
             DeclareLaunchArgument("use_websocket", default_value="true"),
+            DeclareLaunchArgument("websocket_port", default_value="8765"),
             Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
@@ -231,7 +232,8 @@ def generate_launch_description():
                 executable="pi_arm_websocket",
                 name="pi_arm_websocket",
                 output="screen",
-                parameters=[{"hardware_type": hardware_type}],
+                parameters=[{"hardware_type": hardware_type, "calibration_file": calibration_file,
+                             "port": LaunchConfiguration("websocket_port")}],
                 condition=IfCondition(use_websocket),
             ),
             rviz,

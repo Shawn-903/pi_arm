@@ -3,7 +3,7 @@
 审查基线：`17af2f8`，分支 `feature/pack-rom-zero-calibration`。
 该提交已保存网页诊断、电机/关节单轴调试和此前暂存的 README 修改。
 
-后续已基于 vcan 实施修复，见 [修复及验证记录](fixes.md)。本文和同目录复现脚本保留为原版本的审查快照，下面的“尚未修复”描述仅针对上述基线。
+后续已基于 vcan 实施修复，见 [修复及验证记录](fixes.md)。本文保留为原版本的审查快照，下面的“尚未修复”描述仅针对上述基线。
 
 结论：确认 **3 项 P1、1 项 P2**。当前版本可以继续用于网页状态查看，尚不能据此判定实机运动测试已具备完整保护。下面列出的缺陷在本次审查中没有修改；应先修复停止、反馈限位和速度编码问题，再进行现场运动测试。J2 实机方向与反馈对应关系仍待现场验证。
 
@@ -73,20 +73,7 @@ goal_accepted= True cancel_requested= False active_goal_count= 1
 - 历史 R02 标定的 `approved=true` 表示文件记录状态，不等于本次审查重新确认了硬件映射。没有依据推断 J2 差异必然来自某一方向符号，故未修改方向或放宽限位。
 - 本次没有测量电机真实加减速、停止距离、负载下的绳索弹性/回差和通信恢复行为。现场恢复供电后，先确认网页六轴新鲜反馈及错误状态，再按修复后的低速流程逐轴采集方向。
 
-## 复现材料
+## 当前回归入口
 
-`evidence.txt` 保存审查时的关键输出。`probe_backend.cpp` 直接链接工作区生产库；`reproduce.py` 生成临时虚拟标定、编译探针并回应虚拟 CAN。探针仅绑定 `vcan0`，Python 入口还检查接口类型确实为 vcan；不会创建接口、启停实机服务或使用真实标定进行控制。
-
-这些脚本是针对 `17af2f8` 的缺陷复现快照，断言的含义是“观察到了已知缺陷”，不是安全验收通过。后续修复后相关断言失败是预期结果。C++ 探针的关节边界和映射固定为审查版本的数据。
-
-先构建工作区，并确保已存在且没有其他模拟器/驱动占用的 `vcan0`，然后在仓库根目录执行：
-
-```bash
-source install/setup.bash
-python3 docs/reviews/2026-09-17/reproduce.py
-python3 docs/reviews/2026-09-17/gateway_timeout.py
-colcon test --event-handlers console_direct+
-colcon test-result --verbose
-```
-
-依赖：工作区已构建的库、g++、Python PyYAML、iproute2、ROS 2 环境，以及已配置的虚拟 CAN。
+历史复现脚本和输出已在阶段整理时移除；原内容可在 Git 提交 `e0aa86f` 查阅。
+对应问题已纳入 `scripts/test_motion_safety_vcan.py` 和网关单元测试。本文仍为历史审查结论。

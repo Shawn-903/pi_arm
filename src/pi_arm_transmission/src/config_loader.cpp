@@ -165,7 +165,8 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
   const auto root = require_map(document, "cable_kinematics");
   reject_unknown_keys(
     root,
-    {"model_version", "angle_unit", "length_unit", "axes", "output_limits", "validation"},
+    {"model_version", "angle_unit", "length_unit", "axes", "output_limits", "validation",
+      "output_directions"},
     "cable_kinematics");
   const int model_version = require_value<int>(root, "model_version");
   if (model_version != 3) {
@@ -184,6 +185,16 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
     "axes");
 
   CableKinematicsParameters parameters;
+  if (root["output_directions"]) {
+    const auto directions = require_map(root, "output_directions");
+    reject_unknown_keys(directions,
+      {"motor_01", "motor_02", "motor_03", "motor_04", "motor_05", "motor_06"},
+      "output_directions");
+    for (std::size_t i = 0; i < parameters.output_directions.size(); ++i) {
+      const auto name = "motor_0" + std::to_string(i + 1);
+      parameters.output_directions[i] = require_value<int>(directions, name.c_str());
+    }
+  }
   parameters.axis1 = parse_linear(require_map(axes, "joint_01"));
   parameters.axis2 = parse_linear(require_map(axes, "joint_02"));
   parameters.axis3 = parse_coupled_axis3(require_map(axes, "joint_04"));
