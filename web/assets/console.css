@@ -1629,3 +1629,106 @@ body[data-view="commissioning"] .workspace-grid {
     font-size: 9px;
   }
 }
+
+/* Interactive model workbench */
+.interactive-panel {
+  margin: 0 20px 16px;
+  padding: 16px;
+  border: 1px solid #d7e4f3;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #f5f9ff, #f3faf8);
+}
+.interactive-toolbar,
+.preview-actions,
+.path-playback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.interactive-toolbar {
+  justify-content: space-between;
+}
+.interactive-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.interactive-panel p {
+  margin: 10px 0;
+}
+.interactive-panel small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 8px;
+}
+.preview-actions button {
+  font-size: 12px;
+  padding: 6px 10px;
+  min-height: 36px;
+}
+.release-toggle:has(input:checked) {
+  color: #b74e18;
+  font-weight: 700;
+}
+.preview-joint-result {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.preview-joint-result span {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #147e70;
+}
+.path-playback {
+  margin-top: 12px;
+}
+.path-playback input {
+  flex: 1;
+  min-width: 100px;
+  accent-color: #dd8a28;
+}
+.path-playback output {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.joint-slider {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.joint-slider label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+.joint-slider input {
+  width: 100%;
+  accent-color: #168a7a;
+  margin: 8px 0 0;
+  min-height: 24px;
+  touch-action: none;
+}
+.joint-slider output {
+  color: #147e70;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .interactive-panel {
+    margin: 0 12px 12px;
+    padding: 12px;
+  }
+  .preview-actions button {
+    flex: 1 1 40%;
+  }
+  .preview-joint-result {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

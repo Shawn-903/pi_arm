@@ -108,7 +108,9 @@ function refreshControlGate() {
     lastState.control_permitted === true &&
     lastState.robot_state === "READY" &&
     lastState.task?.status !== 1 &&
-    ![...pending.values()].some((item) => motionCommands.has(item.cmd));
+    ![...pending.values()].some(
+      (item) => motionCommands.has(item.cmd) || item.cmd === "preview_motion",
+    );
   document
     .querySelectorAll(
       "button[data-cmd], #multiStopBtn, button[data-action='stop']",
@@ -146,6 +148,11 @@ function refreshControlGate() {
     : connectionState === "connecting"
       ? "正在连接…"
       : "未连接 / 禁止运动";
+  window.PiArmInteractive?.refresh(lastState, {
+    fresh,
+    permitted,
+    connectionState,
+  });
   window.PiArmConsole?.refresh(lastState, {
     fresh,
     permitted,
@@ -227,7 +234,10 @@ function connect() {
   });
 
   ws.addEventListener("close", () => {
-    for (const item of pending.values()) clearTimeout(item.timer);
+    for (const item of pending.values()) {
+      clearTimeout(item.timer);
+      item.reject?.(new Error("连接已断开"));
+    }
     pending.clear();
     ownAxisTest = null;
     lastState = null;
@@ -246,6 +256,8 @@ function connect() {
 }
 
 function sendCommand(cmd, params = {}) {
+  if (["stop_motion", "motor_stop", "disable_motor"].includes(cmd))
+    window.PiArmInteractive?.cancelActions("停止或下使能请求，松手执行已关闭");
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     log("发送失败：WebSocket 未连接", { cmd, params });
     return false;
@@ -262,7 +274,9 @@ function sendCommand(cmd, params = {}) {
       !lastState.control_permitted ||
       lastState.robot_state !== "READY" ||
       acceptedTaskId !== null ||
-      [...pending.values()].some((item) => motionCommands.has(item.cmd)))
+      [...pending.values()].some(
+        (item) => motionCommands.has(item.cmd) || item.cmd === "preview_motion",
+      ))
   ) {
     log("运动被拒绝：状态未就绪或有运动请求等待响应");
     return false;
@@ -350,6 +364,12 @@ function handleMessage(data) {
     if (item) clearTimeout(item.timer);
     pending.delete(data.msg_id);
     const ok = data.code === 0;
+    if (item?.cmd === "preview_motion") {
+      if (ok) item.resolve(data.data);
+      else item.reject(new Error(data.ms || "预览失败"));
+      refreshControlGate();
+      return;
+    }
     if (item?.cmd === "axis_test_heartbeat") return;
     if (item?.record) {
       item.record.test_id = data.data?.axis_test_id;
@@ -655,20 +675,16 @@ function bindAxisTests() {
   document
     .getElementById("testMotorId")
     .addEventListener("change", refreshControlGate);
-  document
-    .getElementById("testEnableMotor")
-    .addEventListener("click", () =>
-      sendCommand("enable_motor", {
-        motor_id: Number(document.getElementById("testMotorId").value),
-      }),
-    );
-  document
-    .getElementById("testDisableMotor")
-    .addEventListener("click", () =>
-      sendCommand("disable_motor", {
-        motor_id: Number(document.getElementById("testMotorId").value),
-      }),
-    );
+  document.getElementById("testEnableMotor").addEventListener("click", () =>
+    sendCommand("enable_motor", {
+      motor_id: Number(document.getElementById("testMotorId").value),
+    }),
+  );
+  document.getElementById("testDisableMotor").addEventListener("click", () =>
+    sendCommand("disable_motor", {
+      motor_id: Number(document.getElementById("testMotorId").value),
+    }),
+  );
   document.querySelectorAll("[data-axis-test]").forEach((button) =>
     button.addEventListener("click", () => {
       try {
@@ -1047,3 +1063,56 @@ function init() {
 }
 
 init();
+
+// Single transport and the same motion gate for all interactive UI controls.
+window.PiArmControl = {
+  moveJoint(index, angle) {
+    try {
+      return sendCommand("motor_move", {
+        joint_id: index + 1,
+        target_angle: angle,
+        max_speed: readPositiveFloat(`speed${index + 1}`),
+      });
+    } catch (error) {
+      log("参数错误", { message: error.message });
+      return false;
+    }
+  },
+  preview(params) {
+    return new Promise((resolve, reject) => {
+      if (
+        !ws ||
+        ws.readyState !== WebSocket.OPEN ||
+        !lastState ||
+        Date.now() - lastStateAt >= 1500 ||
+        lastState.read_only ||
+        lastState.commissioning ||
+        !lastState.preview_modes?.includes(params.mode) ||
+        lastState.task?.status === 1 ||
+        acceptedTaskId !== null ||
+        [...pending.values()].some(
+          (p) => motionCommands.has(p.cmd) || p.cmd === "preview_motion",
+        )
+      ) {
+        reject(new Error("预览不可用：请连接新版正常控制服务，等待机械臂静止"));
+        return;
+      }
+      const id = msgId++;
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error("预览超时，请重新计算"));
+        refreshControlGate();
+      }, 15000);
+      pending.set(id, { cmd: "preview_motion", timer, resolve, reject });
+      ws.send(
+        JSON.stringify({
+          type: "req",
+          msg_id: id,
+          cmd: "preview_motion",
+          params,
+        }),
+      );
+      refreshControlGate();
+    });
+  },
+};

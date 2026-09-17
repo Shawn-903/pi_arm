@@ -24,7 +24,7 @@ from control_msgs.action import FollowJointTrajectory
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from pi_arm_interfaces.action import DirectMove
 from pi_arm_interfaces.msg import HardwareState, RobotState
-from pi_arm_interfaces.srv import SetMotionArmed
+from pi_arm_interfaces.srv import SetMotionArmed, PreviewMotion
 from rclpy.qos import qos_profile_sensor_data
 import xacro
 import yaml
@@ -48,6 +48,7 @@ class Fixture(Node):
         self.move_server=ActionServer(self,MoveGroup,'/move_action',execute_callback=lambda h: self.unexpected(h,MoveGroup),callback_group=self.group)
         self.execute_server=ActionServer(self,ExecuteTrajectory,'/execute_trajectory',execute_callback=lambda h: self.unexpected(h,ExecuteTrajectory),callback_group=self.group)
         self.client=ActionClient(self,DirectMove,'/pi_arm/direct_move',callback_group=self.group)
+        self.preview=self.create_client(PreviewMotion,'/pi_arm/preview_motion',callback_group=self.group)
 
     def unexpected(self,handle,action):
         handle.abort()
@@ -120,6 +121,13 @@ def main():
         process=subprocess.Popen([str(executable),'--ros-args','--params-file',str(config)],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
         try:
             assert node.client.wait_for_server(timeout_sec=30),'manager not ready'
+            assert node.preview.wait_for_service(timeout_sec=5)
+            time.sleep(.2)
+            preview=PreviewMotion.Request(mode='output', positions=[0.]*6, max_velocity=math.radians(1))
+            answer=await_future(node.preview.call_async(preview))
+            assert answer.success and not node.armed and node.goal is None, answer
+            assert len(answer.trajectory.points)==201
+            print('PASS preview is read-only: no lease, controller or MoveIt execution',flush=True)
             for mode in ('offset','settle','drift'):
                 node.mode=mode;node.goal=None;node.positions=[0.]*6;node.sent_at=0
                 deadline=time.monotonic()+5
@@ -127,6 +135,10 @@ def main():
                 time.sleep(.15)
                 goal=DirectMove.Goal();goal.joint_names=NAMES;goal.positions=[0.]*6;goal.max_velocity=math.radians(1);goal.max_output_velocity=math.radians(1)
                 handle=await_future(node.client.send_goal_async(goal));assert handle.accepted,mode
+                if mode=='offset':
+                    blocked=await_future(node.preview.call_async(preview))
+                    assert not blocked.success and blocked.code==2003, blocked
+                    print('PASS manager rejects preview during an active motion task',flush=True)
                 result=await_future(handle.get_result_async(),10).result
                 time.sleep(.15)
                 arrival=node.result_state.task.arrival_state

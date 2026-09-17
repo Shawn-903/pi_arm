@@ -1,0 +1,23 @@
+# Read-only. Never enables motors or executes a trajectory. SI units.
+# joint/output: preview the existing DirectMove interpolation; ik: endpoint only;
+# lin: plan using the same Pilz pipeline as MoveL.
+string mode
+float64[] positions
+geometry_msgs/Pose target
+float64 max_velocity
+float64 max_output_velocity
+float64 max_linear_velocity
+float64 max_linear_acceleration
+float64 max_angular_velocity
+---
+bool success
+int32 code
+string message
+string[] joint_names
+float64[] start_positions
+float64[] target_positions
+float64[] output_positions
+geometry_msgs/Pose target_pose
+# Sampled, position-only display trajectory. Not an execution authorization.
+trajectory_msgs/JointTrajectory trajectory
+geometry_msgs/Point[] tcp_path

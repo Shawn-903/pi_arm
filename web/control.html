@@ -192,7 +192,7 @@
                     <div class="viewer-legend">
                       <span class="legend-feedback">模型反馈</span
                       ><span class="legend-target">目标预览</span
-                      ><span>X 红 / Y 绿 / Z 蓝</span>
+                      ><span>X 红 / Y 绿 / Z 蓝 · 路径橙色</span>
                     </div>
                   </div>
                   <div
@@ -209,7 +209,8 @@
                   <div class="viewer-preview">
                     <label for="viewerPreview">叠加预览</label>
                     <select id="viewerPreview">
-                      <option value="none">不显示目标</option>
+                      <option value="interactive">交互目标 / 后端预览</option>
+                      <option value="none" selected>不显示目标</option>
                       <option value="single">六轴目标 · 单关节面板</option>
                       <option value="multi">六轴目标 · 多关节面板</option>
                       <option value="zero">零位姿态</option>
@@ -217,9 +218,73 @@
                     </select>
                     <span id="viewerPreviewStatus">预览不下发运动</span>
                   </div>
+                  <div class="interactive-panel" id="interactivePanel">
+                    <div class="interactive-toolbar">
+                      <label
+                        >鼠标操作
+                        <select id="modelInteraction">
+                          <option value="orbit">旋转视角</option>
+                          <option value="joint">拖动关节</option>
+                        </select></label
+                      >
+                      <label class="release-toggle"
+                        ><input
+                          type="checkbox"
+                          id="releaseExecute"
+                          autocomplete="off"
+                        />松手执行单轴运动</label
+                      >
+                    </div>
+                    <p id="gestureStatus" role="status">
+                      选择连杆或 J1–J6
+                      后，在“拖动关节”模式左右拖动模型区域。向右增大角度，0.2°/像素。默认仅预览。
+                    </p>
+                    <div class="preview-actions">
+                      <button id="previewJoint" data-preview="joint">
+                        关节路径预览
+                      </button>
+                      <button id="previewOutput" data-preview="output">
+                        输出轴反解 / 路径
+                      </button>
+                      <button id="previewIK" data-preview="ik">
+                        笛卡尔 IK
+                      </button>
+                      <button id="previewLIN" data-preview="lin">
+                        LIN 路径规划
+                      </button>
+                      <button id="clearPreview" class="text-button">
+                        清除预览
+                      </button>
+                    </div>
+                    <p id="planningStatus" role="status">
+                      选择下方控制面板的目标后计算；预览不发送运动。
+                    </p>
+                    <div
+                      id="previewJointResult"
+                      class="preview-joint-result"
+                    ></div>
+                    <div id="pathPlayback" class="path-playback" hidden>
+                      <button id="playPreview">回放 · 10 s</button>
+                      <input
+                        id="pathScrub"
+                        type="range"
+                        min="0"
+                        max="200"
+                        value="200"
+                        step="1"
+                        aria-label="规划路径回放进度"
+                      />
+                      <output id="pathTime">--</output>
+                    </div>
+                    <small
+                      >橙线：tool0
+                      路径。回放仅用于查看；执行按钮会从最新反馈重新生成轨迹。关节
+                      / 输出轴插值不检查碰撞。</small
+                    >
+                  </div>
                   <div class="viewer-footer">
                     <span id="viewerTcp">模型 tool0：--</span
-                    ><span>仅关节姿态预览，不代表路径或碰撞检查</span>
+                    ><span>模型反馈与目标独立显示，运动结果请查看任务状态</span>
                   </div>
                   <p class="viewer-note" id="viewerNote">
                     模型由编码器经绳索运动学推算，请与实机姿态对照。拖动旋转 ·
@@ -923,5 +988,6 @@
     <script src="assets/viewer.js"></script>
     <script src="assets/console.js"></script>
     <script src="assets/control.js"></script>
+    <script src="assets/interactive.js"></script>
   </body>
 </html>

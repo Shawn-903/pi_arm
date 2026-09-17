@@ -2,6 +2,7 @@
 
 2026-09-17。存档：`v0.2.0-viewer-baseline` / `85974a2`，包含操作者已确认的实机只读三维显示。
 分支：`feature/motion-accuracy-and-interactive-preview`。
+实现与软件验收已完成，实机运动仍待操作者切换版本确认，见 [验收与操作说明](INTERACTIVE_REVIEW.md)。
 
 ## 顺序与提交
 

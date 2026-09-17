@@ -13,7 +13,7 @@ from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import PoseStamped
 from pi_arm_interfaces.action import DirectMove, MoveJ, MoveJs, MoveL
 from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState
-from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion
+from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -99,6 +99,7 @@ class RosBridge(Node):
             "reset_motor": self.create_client(ManageMotor, "/pi_arm/reset_motor"),
 
             "stop_motion": self.create_client(StopMotion, "/pi_arm/stop_motion"),
+            "preview_motion": self.create_client(PreviewMotion, "/pi_arm/preview_motion"),
         }
         self.action_clients = {} if self.read_only or self.commissioning else {
             "movej": ActionClient(self, MoveJ, "/pi_arm/movej"),
@@ -153,7 +154,7 @@ class RosBridge(Node):
         if not available:
             self.get_logger().error(f"服务不可用: {command}")
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "manager 服务不可用")
-        result = await self.wait_future(client.call_async(request))
+        result = await self.wait_future(client.call_async(request), 12.0 if command == "preview_motion" else None)
         if not result.success:
             code = int(result.code) if result.code else CODE_COMMAND_FAILED
             self.get_logger().warning(
@@ -291,7 +292,8 @@ class CommandGateway:
             )
             data = await self.dispatch(request)
             self.bridge.get_logger().info(
-                f"WS 响应成功: msg_id={msg_id} cmd={request.command} data={data}"
+                f"WS 响应成功: msg_id={msg_id} cmd={request.command} "
+                f"data={data if request.command != 'preview_motion' else data.get('message')}"
             )
             return response(msg_id, 0, "ok", data)
         except ProtocolError as exc:
@@ -308,6 +310,8 @@ class CommandGateway:
         command, params = request.command, request.params
         if self.bridge.read_only:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "只读排查模式：仅查看反馈，不提供控制服务")
+        if command == "preview_motion":
+            return await self._preview(params)
         if command == "move_preset":
             name = params.get("preset")
             if name not in ("packing", "zero"):
@@ -387,6 +391,44 @@ class CommandGateway:
         if command == "motor_stop":
             return await self._motor_move(params, stop=True)
         raise ProtocolError(CODE_INVALID_PARAMS, f"未实现命令: {command}")
+
+    async def _preview(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.bridge.commissioning:
+            raise ProtocolError(CODE_STATE_UNAVAILABLE, "方向测试模式不提供规划预览")
+        mode = params.get("mode")
+        if mode not in {"joint", "output", "ik", "lin"}:
+            raise ProtocolError(CODE_INVALID_PARAMS, "mode 必须为 joint/output/ik/lin")
+        request = PreviewMotion.Request()
+        request.mode = mode
+        request.max_output_velocity = self._output_speed(params)
+        if mode in {"joint", "output"}:
+            request.positions = [v * DEG_TO_RAD for v in required_vector(params, "targets", 6)]
+            request.max_velocity = (1.0 if mode == "output" else
+                required_float(params, "max_speed", positive=True)) * DEG_TO_RAD
+        else:
+            target = required_vector(params, "target", 6)
+            request.target.position.x, request.target.position.y, request.target.position.z = [v / 1000.0 for v in target[:3]]
+            q = quaternion_from_rpy(*[v * DEG_TO_RAD for v in target[3:]])
+            (request.target.orientation.x, request.target.orientation.y,
+             request.target.orientation.z, request.target.orientation.w) = q
+            if mode == "lin":
+                request.max_linear_velocity = required_float(params, "linear_vel", positive=True) / 1000.0
+                request.max_linear_acceleration = required_float(params, "linear_acc", positive=True) / 1000.0
+                request.max_angular_velocity = required_float(params, "angular_vel", positive=True) * DEG_TO_RAD
+        result = await self.bridge.call_service("preview_motion", request)
+        pose = result.target_pose
+        rpy = rpy_from_quaternion(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w)
+        return dict(cmd="preview_motion", mode=mode, message=result.message,
+                    joint_names=list(result.joint_names),
+                    start_joint_angles_deg=[v * RAD_TO_DEG for v in result.start_positions],
+                    target_joint_angles_deg=[v * RAD_TO_DEG for v in result.target_positions],
+                    target_output_angles_deg=[v * RAD_TO_DEG for v in result.output_positions],
+                    target_pose=[pose.position.x * 1000, pose.position.y * 1000, pose.position.z * 1000,
+                                 *[v * RAD_TO_DEG for v in rpy]],
+                    points=[dict(t=p.time_from_start.sec + p.time_from_start.nanosec / 1e9,
+                                 joints=[v * RAD_TO_DEG for v in p.positions],
+                                 tcp=[tcp.x, tcp.y, tcp.z])
+                            for p, tcp in zip(result.trajectory.points, result.tcp_path)])
 
     def _joint_names(self) -> list[str]:
         state = self.bridge.state_snapshot()
@@ -692,6 +734,8 @@ class WebSocketGateway:
             }
         body["pose"] = self._pose() if state is not None else {}
         body["hardware_type"] = self.bridge.hardware_type
+        preview = getattr(self.bridge, "service_clients", {}).get("preview_motion")
+        body["preview_modes"] = ["joint", "output", "ik", "lin"] if preview and preview.service_is_ready() else []
         body["read_only"] = self.bridge.read_only
         body["commissioning"] = self.bridge.commissioning
         hardware = state.hardware if state else None

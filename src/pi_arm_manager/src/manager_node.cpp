@@ -18,6 +18,7 @@
 
 #include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "moveit/move_group_interface/move_group_interface.hpp"
+#include "moveit_msgs/srv/get_position_ik.hpp"
 #include "pi_arm_interfaces/action/direct_move.hpp"
 #include "pi_arm_interfaces/action/move_j.hpp"
 #include "pi_arm_interfaces/action/move_js.hpp"
@@ -26,6 +27,7 @@
 #include "pi_arm_interfaces/msg/robot_state.hpp"
 #include "pi_arm_interfaces/msg/task_state.hpp"
 #include "pi_arm_interfaces/srv/manage_motor.hpp"
+#include "pi_arm_interfaces/srv/preview_motion.hpp"
 #include "pi_arm_interfaces/srv/set_motion_armed.hpp"
 #include "pi_arm_interfaces/srv/stop_motion.hpp"
 #include "pi_arm_manager/management_gate.hpp"
@@ -186,6 +188,12 @@ public:
       shared_from_this(), "pi_arm");
     move_group_->setEndEffectorLink("tool0");
     load_joint_limits();
+    ik_client_ = create_client<moveit_msgs::srv::GetPositionIK>(
+      "/compute_ik", rmw_qos_profile_services_default, service_group_);
+    preview_service_ = create_service<pi_arm_interfaces::srv::PreviewMotion>(
+      "/pi_arm/preview_motion",
+      std::bind(&ManagerNode::preview_motion, this, std::placeholders::_1, std::placeholders::_2),
+      rmw_qos_profile_services_default, service_group_);
 
     movej_server_ = rclcpp_action::create_server<MoveJ>(
       this, "/pi_arm/movej",
@@ -240,6 +248,207 @@ private:
     std::vector<double> result(joint.begin(), joint.end());
     validate_direct_positions(joint_limits_, names, result, "output target inverse");
     return result;
+  }
+
+  pi_arm_interfaces::msg::HardwareState preview_start()
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if ((now() - last_hardware_time_).seconds() > hardware_timeout_ ||
+      !hardware_.connected || !hardware_.kinematics_valid ||
+      hardware_.joint_names.size() != 6 || hardware_.positions.size() != 6 ||
+      hardware_.fresh.size() != 6 || hardware_.motor_fresh.size() != 6 ||
+      !std::all_of(hardware_.fresh.begin(), hardware_.fresh.end(), [](bool v) {return v;}) ||
+      !std::all_of(hardware_.motor_fresh.begin(), hardware_.motor_fresh.end(), [](bool v) {return v;})) {
+      throw std::runtime_error("preview requires fresh complete joint feedback");
+    }
+    if (hardware_.velocities.size() != 6 ||
+      !std::all_of(hardware_.velocities.begin(), hardware_.velocities.end(),
+        [this](double v) {return std::isfinite(v) && std::abs(v) <= still_velocity_;})) {
+      throw std::runtime_error("preview requires stationary feedback");
+    }
+    validate_direct_positions(joint_limits_, hardware_.joint_names, hardware_.positions, "preview start", true);
+    return hardware_;
+  }
+
+  void preview_motion(
+    const std::shared_ptr<pi_arm_interfaces::srv::PreviewMotion::Request> request,
+    std::shared_ptr<pi_arm_interfaces::srv::PreviewMotion::Response> response)
+  {
+    // Sharing MoveGroupInterface is safe because previews and motion claims are
+    // mutually exclusive. Do not hold command_mutex_ while waiting on MoveIt.
+    {
+      std::lock_guard<std::mutex> lock(command_mutex_);
+      if (task_claimed_.load() || preview_active_.exchange(true)) {
+        response->code = 2003;
+        response->message = "motion or preview already active";
+        return;
+      }
+    }
+    struct Release {std::atomic_bool & flag; ~Release() {flag.store(false);}} release{preview_active_};
+    try {
+      const auto start = preview_start();
+      response->joint_names = start.joint_names;
+      response->start_positions = start.positions;
+      auto & trajectory = response->trajectory;
+      trajectory.joint_names = start.joint_names;
+      const auto & mode = request->mode;
+      if (mode != "joint" && mode != "output" && mode != "ik" && mode != "lin") {
+        throw std::runtime_error("unknown preview mode");
+      }
+      const auto output_speed = resolved_output_speed(request->max_output_velocity);
+      if (mode == "joint" || mode == "output") {
+        DirectMove::Goal goal;
+        goal.joint_names = start.joint_names;
+        goal.positions = request->positions;
+        goal.output_space = mode == "output";
+        response->target_positions = direct_targets(goal);
+        validate_direct_positions(joint_limits_, start.joint_names, response->target_positions, "preview target");
+        if (!valid_joint_goal(start.joint_names, response->target_positions, request->max_velocity)) {
+          throw std::runtime_error("invalid joint speed");
+        }
+        double duration = 0.1;
+        for (size_t i = 0; i < 6; ++i) {
+          duration = std::max(duration,
+            std::abs(response->target_positions[i] - start.positions[i]) / request->max_velocity);
+        }
+        trajectory_msgs::msg::JointTrajectoryPoint end;
+        end.positions = response->target_positions;
+        end.time_from_start = rclcpp::Duration::from_seconds(duration);
+        trajectory.points.push_back(end);
+        response->message = "DirectMove joint interpolation; no collision planning";
+      } else {
+        const auto & p = request->target;
+        const auto & q = p.orientation;
+        const double norm = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w;
+        if (!std::isfinite(p.position.x) || !std::isfinite(p.position.y) ||
+          !std::isfinite(p.position.z) || !std::isfinite(norm) || std::abs(norm - 1.0) > 1e-5) {
+          throw std::runtime_error("invalid base_link/tool0 target pose");
+        }
+        if (mode == "ik") {
+          auto ik = std::make_shared<moveit_msgs::srv::GetPositionIK::Request>();
+          ik->ik_request.group_name = "pi_arm";
+          ik->ik_request.ik_link_name = "tool0";
+          ik->ik_request.avoid_collisions = true;
+          ik->ik_request.pose_stamped.header.frame_id = "base_link";
+          ik->ik_request.pose_stamped.pose = p;
+          ik->ik_request.robot_state.joint_state.name = start.joint_names;
+          ik->ik_request.robot_state.joint_state.position = start.positions;
+          for (size_t i = 0; i < 6; ++i) {
+            const auto & bound = joint_limits_.at(start.joint_names[i]);
+            ik->ik_request.robot_state.joint_state.position[i] =
+              std::clamp(start.positions[i], bound.lower, bound.upper);
+          }
+          ik->ik_request.timeout.sec = 2;
+          if (!ik_client_->wait_for_service(1s)) {throw std::runtime_error("IK service unavailable");}
+          auto future = ik_client_->async_send_request(ik);
+          if (future.wait_for(4s) != std::future_status::ready) {
+            ik_client_->remove_pending_request(future);
+            throw std::runtime_error("IK timeout");
+          }
+          const auto result = future.get();
+          if (result->error_code.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
+            throw std::runtime_error("IK failed: " + std::to_string(result->error_code.val));
+          }
+          const auto & joints = result->solution.joint_state;
+          for (const auto & name : start.joint_names) {
+            const auto found = std::find(joints.name.begin(), joints.name.end(), name);
+            if (found == joints.name.end()) {throw std::runtime_error("incomplete IK result");}
+            response->target_positions.push_back(joints.position.at(std::distance(joints.name.begin(), found)));
+          }
+          response->message = "IK endpoint with scene collision check; not a path";
+        } else {
+          if (!std::isfinite(request->max_linear_velocity) || request->max_linear_velocity <= 0 ||
+            request->max_linear_velocity > linear_velocity_limit_ ||
+            !std::isfinite(request->max_linear_acceleration) || request->max_linear_acceleration <= 0 ||
+            request->max_linear_acceleration > linear_acceleration_limit_ ||
+            !std::isfinite(request->max_angular_velocity) || request->max_angular_velocity <= 0 ||
+            request->max_angular_velocity > angular_velocity_limit_) {
+            throw std::runtime_error("invalid Cartesian speed/acceleration");
+          }
+          move_group_->clearPoseTargets();
+          move_group_->setPlanningPipelineId(kPilzPipeline);
+          move_group_->setPlannerId(kPilzLinPlanner);
+          move_group_->setPoseReferenceFrame("base_link");
+          move_group_->setPoseTarget(p, "tool0");
+          move_group_->setMaxVelocityScalingFactor(clamp_scaling(std::min(
+              request->max_linear_velocity / linear_velocity_limit_,
+              request->max_angular_velocity / angular_velocity_limit_)));
+          move_group_->setMaxAccelerationScalingFactor(clamp_scaling(
+              request->max_linear_acceleration / linear_acceleration_limit_));
+          prepare_planning_start();
+          moveit::planning_interface::MoveGroupInterface::Plan plan;
+          const auto code = move_group_->plan(plan);
+          move_group_->clearPoseTargets();
+          if (code != moveit::core::MoveItErrorCode::SUCCESS) {
+            throw std::runtime_error("LIN planning failed: " + std::to_string(code.val));
+          }
+          trajectory = plan.trajectory.joint_trajectory;
+          if (trajectory.points.empty()) {throw std::runtime_error("empty LIN trajectory");}
+          response->target_positions = trajectory.points.back().positions;
+          response->message = "Pilz LIN path; execution will replan from current feedback";
+        }
+      }
+      validate_direct_positions(joint_limits_, start.joint_names, response->target_positions, "preview inverse");
+      pi_arm_transmission::Vector6 target{}, output{};
+      std::copy(response->target_positions.begin(), response->target_positions.end(), target.begin());
+      if (!cable_->joint_to_output_position(target, output) || !cable_->check_output_position_limits(output)) {
+        throw std::runtime_error("preview output limit exceeded");
+      }
+      response->output_positions.assign(output.begin(), output.end());
+      moveit::core::RobotState model(move_group_->getRobotModel());
+      model.setToDefaultValues();
+      const auto fk = [&model, &start](const std::vector<double> & positions) {
+          for (size_t i = 0; i < 6; ++i) {model.setVariablePosition(start.joint_names[i], positions[i]);}
+          model.update();
+          const auto & transform = model.getGlobalLinkTransform("tool0");
+          geometry_msgs::msg::Pose pose;
+          pose.position.x = transform.translation().x();
+          pose.position.y = transform.translation().y();
+          pose.position.z = transform.translation().z();
+          Eigen::Quaterniond q(transform.rotation());
+          pose.orientation.x = q.x(); pose.orientation.y = q.y();
+          pose.orientation.z = q.z(); pose.orientation.w = q.w();
+          return pose;
+        };
+      response->target_pose = fk(response->target_positions);
+      if (!trajectory.points.empty()) {
+        prepare_trajectory(trajectory, output_speed);
+        const auto original = trajectory.points;
+        trajectory.points.clear();
+        const double duration = rclcpp::Duration(original.back().time_from_start).seconds();
+        // Sample the exact position-linear JTC segments for display, not a new plan.
+        size_t segment = 0;
+        for (int sample = 0; sample <= 200; ++sample) {
+          const double t = duration * sample / 200.0;
+          while (segment + 1 < original.size() &&
+            rclcpp::Duration(original[segment].time_from_start).seconds() < t) {++segment;}
+          const double before_t = segment == 0 ? 0.0 :
+            rclcpp::Duration(original[segment - 1].time_from_start).seconds();
+          const auto & before = segment == 0 ? start.positions : original[segment - 1].positions;
+          const double after_t = rclcpp::Duration(original[segment].time_from_start).seconds();
+          const double u = std::clamp((t - before_t) / std::max(1e-9, after_t - before_t), 0.0, 1.0);
+          trajectory_msgs::msg::JointTrajectoryPoint point;
+          for (size_t i = 0; i < 6; ++i) {
+            point.positions.push_back(before[i] + u * (original[segment].positions[i] - before[i]));
+          }
+          point.time_from_start = rclcpp::Duration::from_seconds(t);
+          response->tcp_path.push_back(fk(point.positions).position);
+          trajectory.points.push_back(point);
+        }
+      }
+      const auto end = preview_start();
+      if (end.joint_names != start.joint_names) {throw std::runtime_error("preview feedback order changed");}
+      for (size_t i = 0; i < 6; ++i) {
+        if (std::abs(end.positions[i] - start.positions[i]) > goal_position_tolerance_) {
+          throw std::runtime_error("preview start changed; calculate again");
+        }
+      }
+      response->success = true;
+    } catch (const std::exception & error) {
+      *response = pi_arm_interfaces::srv::PreviewMotion::Response();
+      response->code = 2002;
+      response->message = error.what();
+    }
   }
 
   void prepare_planning_start()
@@ -643,6 +852,10 @@ private:
   bool claim_goal(const std::string & command)
   {
     std::lock_guard<std::mutex> command_lock(command_mutex_);
+    if (preview_active_.load()) {
+      RCLCPP_WARN(get_logger(), "motion rejected while read-only preview is calculating");
+      return false;
+    }
     const auto state = current_state();
     if (state != pi_arm_interfaces::msg::RobotState::READY) {
       RCLCPP_WARN(
@@ -1639,6 +1852,9 @@ private:
   std::mutex state_mutex_;
   std::mutex follow_mutex_;
   std::mutex command_mutex_;
+  std::atomic_bool preview_active_{false};
+  rclcpp::Service<pi_arm_interfaces::srv::PreviewMotion>::SharedPtr preview_service_;
+  rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedPtr ik_client_;
   pi_arm_interfaces::msg::HardwareState hardware_;
   pi_arm_interfaces::msg::TaskState task_;
   rclcpp::Time last_hardware_time_{0, 0, RCL_ROS_TIME};

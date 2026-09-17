@@ -1,4 +1,4 @@
-/* Read-only model view. This file never calls sendCommand or opens a WebSocket. */
+/* Model rendering and gestures. Transport and motion gating live in control.js. */
 (() => {
   const $ = (id) => document.getElementById(id);
   const card = $("robotViewer");
@@ -27,6 +27,8 @@
     lastValidTime = "";
   const meshes = [],
     jointButtons = [];
+  let externalPreview = null,
+    pathLine = null;
   const RAD = Math.PI / 180;
   const finite = (v) => typeof v === "number" && Number.isFinite(v);
   const six = (v) => Array.isArray(v) && v.length === 6 && v.every(finite);
@@ -188,6 +190,7 @@
     let target = null,
       message = "预览不下发运动",
       error = false;
+    if (source === "interactive") target = externalPreview?.target || null;
     if (source === "zero") target = [0, 0, 0, 0, 0, 0];
     if (source === "packing") {
       // Targets are emitted in the backend's fixed preset order, matching this model.
@@ -222,7 +225,10 @@
             : `J${bad + 1} 目标超出标准限位，预览已隐藏`;
         target = null;
       } else {
-        message = "青绿色为关节目标 · 仅预览，不执行";
+        message =
+          source === "interactive"
+            ? externalPreview?.label || "交互目标预览"
+            : "青绿色为关节目标 · 仅预览，不执行";
       }
     }
     const key = JSON.stringify([source, target]);
@@ -292,7 +298,7 @@
           ? `解算无效 ${error?.code || ""}`
           : "轴反馈不新鲜";
     $("viewerNote").textContent = valid
-      ? `模型由编码器经绳索运动学推算，请与实机姿态对照。${error?.code && error.code !== "NONE" ? error.code + " · " + (error.message || "") : "拖动旋转 · 滚轮缩放 · 右键平移。"}`
+      ? `模型由编码器经绳索运动学推算，请与实机姿态对照。${error?.code && error.code !== "NONE" ? error.code + " · " + (error.message || "") : $("modelInteraction")?.value === "joint" ? "拖动关节：先选择 J1–J6，再左右拖动模型区域。" : "拖动旋转 · 滚轮缩放 · 右键平移。"}`
       : `${reason}。${lastAngles ? "保留姿态已标灰，不能作为当前位置。" : "当前只显示零位几何参考。"}`;
     const p = new T.Vector3();
     robot.links[manifest.tip].getWorldPosition(p);
@@ -326,6 +332,11 @@
       selected,
       jointNames: manifest.joint_names,
       sourceHash: manifest.source_sha256,
+      limits: manifest.joint_names.map((n) => ({
+        lower: manifest.limits_rad[n].lower / RAD,
+        upper: manifest.limits_rad[n].upper / RAD,
+      })),
+      pathPointCount: pathLine?.geometry.attributes.position.count || 0,
       angles: lastAngles?.slice(),
       previewVisible: Boolean(ghost?.visible),
       joints: Object.fromEntries(
@@ -362,6 +373,64 @@
     },
     setView,
     snapshot,
+    setPreview(target, points = [], label = "交互目标预览") {
+      externalPreview = target ? { target: target.slice(), label } : null;
+      if (pathLine) {
+        scene.remove(pathLine);
+        pathLine.traverse((obj) => {
+          obj.geometry?.dispose();
+          obj.material?.dispose();
+        });
+        pathLine = null;
+      }
+      if (ready && !failed && points.length > 1) {
+        const geometry = new T.BufferGeometry().setFromPoints(
+          points.map((p) => new T.Vector3(...p.tcp)),
+        );
+        pathLine = new T.Line(
+          geometry,
+          new T.LineBasicMaterial({ color: 0xe59229, depthTest: false }),
+        );
+        pathLine.renderOrder = 4;
+        // A small world-space tube keeps the path legible on high-DPI/mobile
+        // WebGL, where LineBasicMaterial linewidth is fixed to one pixel.
+        const curve = new T.CurvePath();
+        for (let i = 1; i < points.length; ++i) {
+          const a = new T.Vector3(...points[i - 1].tcp),
+            b = new T.Vector3(...points[i].tcp);
+          if (a.distanceTo(b) > 1e-9) curve.add(new T.LineCurve3(a, b));
+        }
+        if (curve.curves.length) {
+          const tube = new T.Mesh(
+            new T.TubeGeometry(curve, 200, 0.0018, 6, false),
+            new T.MeshBasicMaterial({ color: 0xe59229, depthTest: false }),
+          );
+          tube.renderOrder = 4;
+          pathLine.add(tube);
+        }
+        for (const [index, color] of [
+          [0, 0x187b57],
+          [points.length - 1, 0xe59229],
+        ]) {
+          const marker = new T.Mesh(
+            new T.SphereGeometry(0.006, 12, 8),
+            new T.MeshBasicMaterial({ color, depthTest: false }),
+          );
+          marker.position.set(...points[index].tcp);
+          marker.renderOrder = 5;
+          pathLine.add(marker);
+        }
+        scene.add(pathLine);
+      }
+      $("viewerPreview").value = target ? "interactive" : "none";
+      updatePreview();
+      requestRender();
+    },
+    scrub(target) {
+      if (!externalPreview) return;
+      externalPreview.target = target.slice();
+      updatePreview();
+    },
   };
 
   async function init() {
@@ -590,33 +659,89 @@
         behavior: "smooth",
       });
     });
-    let down = null;
-    renderer.domElement.addEventListener("pointerdown", (e) => {
-      down = [e.clientX, e.clientY];
-    });
-    renderer.domElement.addEventListener("pointerup", (e) => {
-      if (
-        !down ||
-        e.button !== 0 ||
-        Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5
-      )
-        return;
+    let down = null,
+      dragging = false;
+    const pick = (e) => {
       const rect = renderer.domElement.getBoundingClientRect();
       const pointer = new T.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        (-(e.clientY - rect.top) / rect.height) * 2 + 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       const ray = new T.Raycaster();
       ray.setFromCamera(pointer, camera);
-      const hit = ray.intersectObjects(meshes, false)[0];
-      if (hit?.object.userData.axis >= 0) selectJoint(hit.object.userData.axis);
+      return ray.intersectObjects(meshes, false)[0]?.object.userData.axis ?? -1;
+    };
+    const cancelDrag = () => {
+      if (dragging)
+        window.PiArmInteractive?.endGesture(true, renderer.domElement);
+      dragging = false;
       down = null;
+      controls.enabled = true;
+    };
+    renderer.domElement.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (
+          e.button !== 0 ||
+          (down && $("modelInteraction")?.value === "joint")
+        )
+          return;
+        down = { x: e.clientX, y: e.clientY, id: e.pointerId };
+        if ($("modelInteraction")?.value !== "joint") return;
+        // Capture before OrbitControls so a joint gesture cannot also rotate the camera.
+        controls.enabled = false;
+        const hit = pick(e);
+        const axis = hit >= 0 ? hit : selected;
+        if (
+          axis < 0 ||
+          !valid ||
+          !window.PiArmInteractive?.beginGesture(
+            axis,
+            lastAngles[axis],
+            renderer.domElement,
+          )
+        ) {
+          down = null;
+          return;
+        }
+        selectJoint(axis);
+        down.angle = lastAngles[axis];
+        dragging = true;
+        renderer.domElement.setPointerCapture(e.pointerId);
+      },
+      true,
+    );
+    renderer.domElement.addEventListener("pointermove", (e) => {
+      if (!dragging || down?.id !== e.pointerId) return;
+      window.PiArmInteractive?.updateGesture(
+        down.angle + (e.clientX - down.x) * 0.2,
+        renderer.domElement,
+      );
     });
+    renderer.domElement.addEventListener("pointerup", (e) => {
+      if (!down || down.id !== e.pointerId) {
+        if (!dragging) controls.enabled = true;
+        return;
+      }
+      if (dragging) {
+        window.PiArmInteractive?.endGesture(false, renderer.domElement);
+        dragging = false;
+      } else if (Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 5) {
+        const axis = pick(e);
+        if (axis >= 0) selectJoint(axis);
+      }
+      down = null;
+      controls.enabled = true;
+    });
+    renderer.domElement.addEventListener("pointercancel", cancelDrag);
+    renderer.domElement.addEventListener("lostpointercapture", cancelDrag);
+    window.addEventListener("blur", cancelDrag);
+    $("modelInteraction")?.addEventListener("change", cancelDrag);
     new ResizeObserver(requestRender).observe($("viewerCanvas"));
     new IntersectionObserver(([entry]) => {
       onScreen = entry.isIntersecting;
       if (onScreen) requestRender();
-    }).observe(card);
+    }).observe($("viewerCanvas"));
     document.addEventListener("visibilitychange", requestRender);
     ready = true;
     $("viewerLoading").hidden = true;
