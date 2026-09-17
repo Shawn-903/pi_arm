@@ -84,7 +84,7 @@ RPY 使用固定轴 XYZ，旋转矩阵 `Rz(yaw) Ry(pitch) Rx(roll)`；欧拉角�
 cd /home/cr/pi_arm
 bash scripts/start_web.sh \
   hardware_type:=real can_interface:=can0 allow_real_control:=true \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R07.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml
 ```
 
 现场先记录一个已知姿态，核对六关节角和 base 下的 tool0 位姿，刷新网页后加载检查目标。

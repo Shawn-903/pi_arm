@@ -57,7 +57,7 @@ source install/setup.bash
 cd /home/cr/pi_arm
 bash scripts/start_web.sh \
   hardware_type:=real can_interface:=can0 allow_real_control:=true \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R07.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml
 ```
 
 打开 `http://树莓派IP:8000/control.html`，点击连接。WebSocket 默认端口 8765。
@@ -70,10 +70,10 @@ bash scripts/start_web.sh \
 bash scripts/start_web.sh hardware_type:=mock
 
 bash scripts/start_web.sh --monitor can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R07.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml
 
 bash scripts/start_web.sh --commissioning can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R07.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml
 ```
 
 HTTP 端口用 `PI_ARM_WEB_PORT=8001` 设置，WebSocket 可用 `websocket_port:=8766` 指定。
@@ -86,7 +86,7 @@ HTTP 端口用 `PI_ARM_WEB_PORT=8001` 设置，WebSocket 可用 `websocket_port:
 | J2 | joint_02 | 36 | +1 | +1 |
 | J3 | joint_04 | 36 | −1 | −1 |
 | J4 | joint_05 | 6 | −1 | −1 |
-| J5 | joint_06 | 6 | −1 | −1 |
+| J5 | joint_06 | 6 | −1 | +1 |
 | J6 | joint_09 | 6 | +1 | −1 |
 
 统一角度单位时：`φ = F(q)`、`φ = d × p / G + b`、`b = F(q_pack) − raw_pack`。
@@ -115,9 +115,9 @@ p 是协议角，φ 是物理输出轴相对模型零位的角，q 是关节角�
 ```bash
 source /opt/ros/jazzy/setup.bash
 python3 scripts/rebind_cable_directions.py \
-  --reference src/pi_arm_hardware/config/pack_reference_calibration.R07.recorded.yaml \
-  --output src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml \
-  --calibration-id PIARM-R1-SN0001-PACKCAL-20260917-R08
+  --reference src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml \
+  --output src/pi_arm_hardware/config/pack_reference_calibration.R07.recorded.yaml \
+  --calibration-id PIARM-R1-SN0001-PACKCAL-20260917-R07
 ```
 
 脚本保留原始测量，不连接 CAN、不写 ROM；拒绝几何、耦合项、限位或安装映射变化。
