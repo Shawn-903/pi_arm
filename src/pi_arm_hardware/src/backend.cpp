@@ -484,6 +484,13 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     } else if (stopping) {
       sample.error_message = "waiting for motor stop acknowledgements";
     }
+    if (reboot_reference_uncertain_.load()) {
+      sample.calibrated = false;
+      sample.kinematics_valid = false;
+      sample.kinematics_error_code = "REBOOT_REFERENCE_UNVERIFIED";
+      sample.kinematics_error_message = "reboot position reference requires verification; motion inhibited";
+      sample.error_message = sample.kinematics_error_message;
+    }
     sample.control_permitted =
       config_.allow_real_control && calibration_.valid && sample.kinematics_valid &&
       all_enabled && all_fresh && !any_motor_error && !stopping && !stop_failed;
@@ -563,7 +570,8 @@ MotionArmResult RealBackend::set_motion_armed(
   if (config_.commissioning) {
     return {false, false, "commissioning mode cannot arm normal controller writes"};
   }
-  if (!config_.allow_real_control || !calibration_.valid || !control_permitted_.load()) {
+  if (!config_.allow_real_control || !calibration_.valid || !control_permitted_.load() ||
+    reboot_reference_uncertain_.load()) {
     return {false, false, "real-control prerequisites are not satisfied"};
   }
   if (!driver_ || !driver_->running() ||
@@ -771,10 +779,17 @@ ManagementResult RealBackend::manage(
   if (!driver_) {
     return {false, 2, "CAN driver is not configured"};
   }
+  if (operation == pi_arm_can::ManagementOperation::MOTOR_REBOOT && motor_id <= 0) {
+    return {false, 1004, "reboot requires one explicit motor_id"};
+  }
+  if (operation == pi_arm_can::ManagementOperation::MOTOR_RUN && reboot_reference_uncertain_.load()) {
+    return {false, 2002, "reboot position reference unverified; enabling is inhibited"};
+  }
   // Power and fault-management operations are never motion-authorizing. They
   // revoke an existing lease before any management frame is queued.
   const auto stopped = set_motion_armed(false, 0U);
-  if (!stopped.success && operation == pi_arm_can::ManagementOperation::MOTOR_RUN) {
+  if (!stopped.success && (operation == pi_arm_can::ManagementOperation::MOTOR_RUN ||
+    operation == pi_arm_can::ManagementOperation::MOTOR_REBOOT)) {
     return {false, 2002, stopped.message};
   }
   if (operation == pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO) {
@@ -800,6 +815,37 @@ ManagementResult RealBackend::manage(
         return {false, 5, "motor must report zero speed for three consecutive samples"};
       }
     }
+  }
+  if (operation == pi_arm_can::ManagementOperation::MOTOR_REBOOT) {
+    // Do not mix reboot with a trajectory, or infer a preserved multi-turn
+    // reference merely from CAN returning. No ROM/RAM zero command is sent.
+    const auto before = driver_->snapshot();
+    const auto before_time = std::chrono::steady_clock::now();
+    for (const auto id : ids) {
+      const auto & state = before.at(id);
+      if (!state.angle_valid || age_seconds(state.angle_update, before_time) > config_.state_stale_timeout_sec) {
+        return {false, 2001, "reboot requires fresh pre-reboot angle feedback"};
+      }
+    }
+    const bool previously_uncertain = reboot_reference_uncertain_.exchange(true);
+    control_permitted_.store(false);
+    if (!driver_->execute_management(operation, ids)) {
+      return {false, 2002, driver_->last_error() + "; verify position reference before resuming"};
+    }
+    const auto after = driver_->snapshot();
+    for (const auto & actuator : config_.actuators) {
+      if (std::find(ids.begin(), ids.end(), actuator.motor_id) == ids.end()) {continue;}
+      const auto difference = std::abs(protocol_position_to_output_rad(
+          after.at(actuator.motor_id).protocol_angle_deg - before.at(actuator.motor_id).protocol_angle_deg, actuator));
+      if (!std::isfinite(difference) || difference > 0.003490658503988659) {
+        return {false, 2002, "reboot feedback recovered but output angle changed >0.2 deg; position reference unverified"};
+      }
+    }
+    reboot_reference_uncertain_.store(previously_uncertain);
+    if (previously_uncertain) {
+      return {false, 2002, "motor feedback recovered; earlier reboot reference remains unverified"};
+    }
+    return {true, 0, "reboot command sent (no ACK); fresh feedback recovered, errors clear, motor disabled; enable separately"};
   }
   if (!driver_->execute_management(operation, ids)) {
     const auto detail = driver_->last_error();
@@ -1025,6 +1071,9 @@ ManagementResult MockBackend::manage(
       false, 6,
       "ROM zero is disabled in the normal hardware service; use the local maintenance CLI"};
   }
+  if (operation == pi_arm_can::ManagementOperation::MOTOR_REBOOT && motor_id <= 0) {
+    return {false, 1004, "reboot requires one explicit motor_id"};
+  }
   if (motor_id != 0 && !valid_motor_id(motor_id)) {
     return {false, 1, "motor_id is not configured (use 0 for all motors)"};
   }
@@ -1050,6 +1099,10 @@ ManagementResult MockBackend::manage(
       case pi_arm_can::ManagementOperation::MOTOR_RUN:
         sample_.motor_enabled[index] = true;
         break;
+      case pi_arm_can::ManagementOperation::MOTOR_REBOOT:
+        sample_.motor_enabled[index] = false;
+        sample_.motor_in_motion[index] = false;
+        [[fallthrough]];
       case pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS:
         sample_.motor_has_error[index] = false;
         sample_.motor_error_codes[index] = 0;

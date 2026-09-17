@@ -108,4 +108,16 @@ inline MotorPowerDecision decide_motor_power_operation(
   return {true, false, 0, "ok"};
 }
 
+// Recovery needs raw stationary motor feedback, not valid cable inversion or
+// motion permission. A motor already off still needs the recovery command.
+inline MotorPowerDecision decide_motor_recovery(
+  const pi_arm_interfaces::msg::HardwareState & hardware,
+  uint8_t state, bool task_claimed, bool still, int motor_id)
+{
+  auto decision = decide_motor_power_operation(
+    MotorPowerOperation::DISABLE, hardware, state, task_claimed, still, motor_id);
+  if (decision.already_satisfied) {return {true, false, 0, "ok"};}
+  return decision;
+}
+
 }  // namespace pi_arm_manager

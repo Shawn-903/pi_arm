@@ -313,6 +313,7 @@ const char * operation_name(const pi_arm_can::ManagementOperation operation)
     case pi_arm_can::ManagementOperation::MOTOR_OFF: return "MOTOR_OFF";
     case pi_arm_can::ManagementOperation::MOTOR_RUN: return "MOTOR_RUN";
     case pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS: return "CLEAR_ERROR_FLAGS";
+    case pi_arm_can::ManagementOperation::MOTOR_REBOOT: return "MOTOR_REBOOT";
     case pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO:
       return "SET_CURRENT_POSITION_ZERO";
   }
@@ -601,6 +602,8 @@ void PiArmSystem::start_auxiliary_node()
     "/pi_arm/hardware/enable_motor", pi_arm_can::ManagementOperation::MOTOR_RUN);
   create_management_service(
     "/pi_arm/hardware/reset_motor", pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS);
+  create_management_service(
+    "/pi_arm/hardware/reboot_motor", pi_arm_can::ManagementOperation::MOTOR_REBOOT);
   motion_arm_service_ = node_->create_service<SetMotionArmed>(
     "/pi_arm/hardware/set_motion_armed",
     [this](

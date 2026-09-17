@@ -20,6 +20,7 @@ constexpr double kJointSpeedLimitDegS = 0.5;
 
 bool RealBackend::axis_test_raw_ready(const bool require_still) const
 {
+  if (reboot_reference_uncertain_.load()) {return false;}
   if (!driver_ || !driver_->running() || config_.read_only || !config_.commissioning ||
     (driver_->mode() != pi_arm_can::DriverMode::MONITORING &&
     driver_->mode() != pi_arm_can::DriverMode::CONTROL)) {return false;}

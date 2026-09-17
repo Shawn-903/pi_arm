@@ -15,6 +15,7 @@ def main():
                  commissioning=False, calibrated=True, kinematics_valid=True,
                  control_permitted=True, calibration_id='MOCK-UI-TEST',
                  motor_ids=list(range(1, 7)), motor_fresh=[True]*6,
+                 motor_in_motion=[False]*6, reboot_available=True,
                  motor_enabled=[True]*6, enabled=[True]*6,
                  motor_error_codes=[0]*6, motor_ages_sec=[.01]*6,
                  has_error=[False]*6, in_motion=[False]*6,
@@ -77,8 +78,32 @@ def main():
         page.locator('#globalStop').click()
         page.wait_for_function('pending.size > 0')
         assert len(sent)==1 and sent[0]['cmd']=='stop_motion'
+        page.evaluate('r=>handleMessage({type:"rsp",msg_id:r.msg_id,code:0,ms:"ok",data:{}})',sent[-1])
+        page.locator('[data-view-target="workbench"]').click()
+        assert page.locator('#rebootMotorBtn').is_enabled(), 'FAULT must allow recovery without kinematics'
+        page.locator('#recoveryMotorId').select_option('2')
+        page.locator('#rebootMotorBtn').click()
+        page.wait_for_function('pending.size > 0')
+        assert len(sent)==2 and sent[-1]['cmd']=='reboot_motor' and sent[-1]['params']['motor_id']==2
+        assert page.locator('#rebootMotorBtn').is_disabled()
+        assert page.locator('#clearMotorFaultBtn').is_disabled()
+        page.evaluate('s=>handleMessage(s)',state)
+        assert page.locator('#moveZeroPose').is_disabled(), 'Recovery must block new motion even with a READY sample'
+        assert page.locator('button[data-cmd="enable_motor"]').first.is_disabled()
+        page.evaluate('r=>handleMessage({type:"rsp",msg_id:r.msg_id,code:2002,ms:"position reference unverified",data:{}})',sent[-1])
+        assert 'position reference unverified' in page.locator('#recoveryResult').inner_text()
+        page.locator('#rebootMotorBtn').click()
+        page.wait_for_function('pending.size > 0')
+        page.evaluate('r=>handleMessage({type:"rsp",msg_id:r.msg_id,code:0,ms:"ok",data:{message:"fresh disabled feedback confirmed"}})',sent[-1])
+        assert '电机保持关闭' in page.locator('#recoveryResult').inner_text()
+        for changes in (dict(motor_fresh=[False]*6), dict(motor_in_motion=[True]+[False]*5),
+                        dict(motor_in_motion=[]), dict(hardware_connected=False),
+                        dict(task=dict(task_id=0,status=1)), dict(reboot_available=False)):
+            page.evaluate('s=>handleMessage(s)',{**state,**changes})
+            assert page.locator('#rebootMotorBtn').is_disabled(), changes
         page.evaluate('s=>handleMessage({...s,read_only:true,control_permitted:false})',state)
         assert page.locator('#globalStop').is_disabled()
+        assert page.locator('#rebootMotorBtn').is_disabled()
         page.locator('#disconnectBtn').click()
         page.wait_for_function('connectionState === "closed"')
         assert page.locator('#globalStop').is_disabled()

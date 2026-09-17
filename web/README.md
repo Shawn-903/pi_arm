@@ -23,6 +23,8 @@
 操作工作台提供六关节概览、使能/停止、关节/输出轴目标、多关节页内的笛卡尔直线与预设姿态。
 输出轴限速仍由页面输入，下一条运动生效。顶部软件停止在滚动时保持可达。
 运行记录显示原始请求与终态；开发诊断显示原始 CAN/坐标链和标定；方向测试需独立 commissioning 服务。
+工作台的「电机故障恢复」提供选定 CAN 电机的清错（0x9B）与重启（0x07），FAULT 下也可操作。
+重启后保持关闭，失败或位置参考无法确认时继续禁止运动；详见 [恢复说明](../docs/frontend/MOTOR_RECOVERY.md)。
 
 三维视图同时用于工作台和方向测试页；支持鼠标/触控旋转缩放、正视/侧视/俯视、坐标轴及关节选择。
 J1–J6 显示按名称映射的后端关节角；无新鲜有效反馈时为灰色零位参考或最后有效姿态。
@@ -41,7 +43,7 @@ J1–J6 显示按名称映射的后端关节角；无新鲜有效反馈时为灰
 安装 Python Playwright 和 Chromium 后：
 
 ```bash
-python3 scripts/test_web_console.py       # 离线：导航、尺寸、门禁、软件停止路由
+python3 scripts/test_web_console.py       # 离线：导航、尺寸、门禁、软件停止及故障恢复
 python3 scripts/test_web_diagnostics.py   # 离线：故障、诊断、导出
 python3 scripts/test_web_preview_races.py # 离线：预览失效、迟到响应和手势取消
 # 无 ROS/CAN 的三维测试（需 NumPy，脚本自建临时本地 HTTP）：
@@ -51,6 +53,7 @@ python3 scripts/test_web_viewer.py
 # 独立终端启动模拟服务（测试不会控制实机）：
 ROS_DOMAIN_ID=81 PI_ARM_WEB_PORT=8001 bash scripts/start_web.sh hardware_type:=mock websocket_port:=8766
 python3 scripts/test_web_mock.py --url 'http://127.0.0.1:8001/control.html?ws=ws://127.0.0.1:8766'
+python3 scripts/test_web_recovery.py --ws ws://127.0.0.1:8766 # 仅 mock：选定电机重启/清错
 # 在刚启动、初始零位的独立 mock 实例执行：
 python3 scripts/test_web_interactive.py --url 'http://127.0.0.1:8001/control.html?ws=ws://127.0.0.1:8766'
 python3 scripts/test_web_viewer.py --mock-url 'http://127.0.0.1:8001/control.html?ws=ws://127.0.0.1:8766'

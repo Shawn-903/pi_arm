@@ -154,6 +154,8 @@ public:
       "/pi_arm/hardware/reset_motor", rmw_qos_profile_services_default, service_group_);
     motion_arm_client_ = create_client<pi_arm_interfaces::srv::SetMotionArmed>(
       "/pi_arm/hardware/set_motion_armed", rmw_qos_profile_services_default, service_group_);
+    reboot_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
+      "/pi_arm/hardware/reboot_motor", rmw_qos_profile_services_default, service_group_);
     follow_client_ = rclcpp_action::create_client<Follow>(
       this, follow_action_name_, action_group_);
 
@@ -163,6 +165,8 @@ public:
       "/pi_arm/disable_motor", disable_client_, Operation::DISABLE);
     reset_service_ = make_management_service(
       "/pi_arm/reset_motor", reset_client_, Operation::RESET);
+    reboot_service_ = make_management_service(
+      "/pi_arm/reboot_motor", reboot_client_, Operation::REBOOT);
     stop_service_ = create_service<pi_arm_interfaces::srv::StopMotion>(
       "/pi_arm/stop_motion",
       std::bind(
@@ -218,7 +222,7 @@ public:
   }
 
 private:
-  enum class Operation {ENABLE, DISABLE, RESET};
+  enum class Operation {ENABLE, DISABLE, RESET, REBOOT};
 
   static bool valid_output_speed(double speed)
   {
@@ -636,7 +640,7 @@ private:
           }
         }
         const auto state = aggregate_state(hardware_snapshot, task_snapshot);
-        const bool still = (operation == Operation::DISABLE ?
+        const bool still = (operation != Operation::ENABLE ?
           raw_still_frames_.load() : still_frames_.load()) >= 3;
         const bool task_claimed = task_claimed_.load();
         bool allowed = false;
@@ -660,13 +664,15 @@ private:
           rejection_code = decision.code;
           rejection_message = decision.message;
         } else {
-          switch (operation) {
-            case Operation::ENABLE:
-            case Operation::DISABLE:
-              break;
-            case Operation::RESET:
-              allowed = state != pi_arm_interfaces::msg::RobotState::DISCONNECTED;
-              break;
+          const auto decision = decide_motor_recovery(hardware_snapshot, state,
+              task_claimed || preview_active_.load(), still, request->motor_id);
+          allowed = decision.allowed;
+          rejection_code = decision.code;
+          rejection_message = decision.message;
+          if (operation == Operation::REBOOT && request->motor_id <= 0) {
+            allowed = false;
+            rejection_code = 1004;
+            rejection_message = "reboot requires one explicit motor_id";
           }
         }
         if (!allowed) {
@@ -1879,6 +1885,8 @@ private:
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr enable_service_;
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr disable_service_;
   rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reset_service_;
+  rclcpp::Client<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reboot_client_;
+  rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr reboot_service_;
 
   rclcpp::Service<pi_arm_interfaces::srv::StopMotion>::SharedPtr stop_service_;
   rclcpp::CallbackGroup::SharedPtr service_group_;

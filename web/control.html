@@ -339,9 +339,48 @@
                     data-cmd="reset_motor"
                     data-motor-id="0"
                   >
-                    所有电机错误复位
+                    清除所有电机错误（0x9B）
                   </button>
                 </div>
+              </fieldset>
+              <fieldset id="motorRecoveryPanel">
+                <legend>电机故障恢复</legend>
+                <div class="overall-buttons">
+                  <label
+                    >CAN 电机
+                    <select id="recoveryMotorId" aria-label="故障恢复电机">
+                      <option value="1">CAN 1</option>
+                      <option value="2">CAN 2</option>
+                      <option value="3">CAN 3</option>
+                      <option value="4">CAN 4</option>
+                      <option value="5">CAN 5</option>
+                      <option value="6">CAN 6</option>
+                    </select></label
+                  >
+                  <button
+                    id="clearMotorFaultBtn"
+                    data-cmd="reset_motor"
+                    data-motor-id="1"
+                  >
+                    清除所选错误 · 0x9B
+                  </button>
+                  <button
+                    id="rebootMotorBtn"
+                    data-cmd="reboot_motor"
+                    data-motor-id="1"
+                  >
+                    重启所选电机 · 0x07
+                  </button>
+                </div>
+                <p>
+                  故障状态仍可恢复；需要 CAN
+                  反馈有效、整臂静止。重启会短暂掉线并释放所选电机力矩，请先支撑机械臂。完成后保持关闭，需另行使能。
+                </p>
+                <p id="recoveryGate" role="status">连接后检查恢复条件</p>
+                <p id="recoveryResult" role="status">
+                  0x9B 清除错误标志；0x07 重启驱动，不重新置零。运动学 /
+                  标定错误不能靠重启修复。
+                </p>
               </fieldset>
               <fieldset id="normalMotionControls">
                 <legend>运动目标与参数</legend>

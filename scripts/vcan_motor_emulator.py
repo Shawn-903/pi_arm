@@ -36,6 +36,11 @@ def response(motor: Motor, request: bytes) -> bytes | None:
     if command == 0x9A:
         motor_state = 0x30 if motor.enabled else 0x01
         return struct.pack("<Bb h h BB", command, 25, 2400, 0, motor_state, motor.error)
+    if command == 0x07:
+        motor.enabled = False
+        motor.speed_dps = 0
+        motor.error = 0
+        return None  # Section 29: reboot has no ACK.
     if command == 0x88:
         motor.enabled = True
     elif command == 0x80:

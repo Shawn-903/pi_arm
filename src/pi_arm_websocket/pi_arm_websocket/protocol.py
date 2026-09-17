@@ -22,6 +22,7 @@ COMMANDS = {
     "enable_motor",
     "disable_motor",
     "reset_motor",
+    "reboot_motor",
     "movej",
     "movejs",
     "movel",

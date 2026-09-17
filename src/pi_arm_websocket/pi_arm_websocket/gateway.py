@@ -97,6 +97,7 @@ class RosBridge(Node):
             "enable_motor": self.create_client(ManageMotor, "/pi_arm/enable_motor"),
             "disable_motor": self.create_client(ManageMotor, "/pi_arm/disable_motor"),
             "reset_motor": self.create_client(ManageMotor, "/pi_arm/reset_motor"),
+            "reboot_motor": self.create_client(ManageMotor, "/pi_arm/reboot_motor"),
 
             "stop_motion": self.create_client(StopMotion, "/pi_arm/stop_motion"),
             "preview_motion": self.create_client(PreviewMotion, "/pi_arm/preview_motion"),
@@ -116,7 +117,7 @@ class RosBridge(Node):
             self.action_clients = {}
             self.service_clients = {
                 name: self.create_client(ManageMotor, "/pi_arm/commissioning/" + name)
-                for name in ("enable_motor", "disable_motor", "reset_motor")
+                for name in ("enable_motor", "disable_motor", "reset_motor", "reboot_motor")
             }
             self.service_clients["axis_test"] = self.create_client(AxisTest, "/pi_arm/commissioning/axis_test")
 
@@ -343,7 +344,7 @@ class CommandGateway:
                 ros_request.speed_deg_s = required_float(params, "speed_deg_s", positive=True)
             result = await self.bridge.call_service("axis_test", ros_request)
             return {"cmd": command, "axis_test_id": result.test_id, "message": result.message}
-        if self.bridge.commissioning and command not in {"enable_motor", "disable_motor", "reset_motor"}:
+        if self.bridge.commissioning and command not in {"enable_motor", "disable_motor", "reset_motor", "reboot_motor"}:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "方向测试模式请使用电机/关节小步点动")
         if command in {"movej", "movejs", "movel", "move", "motor_move", "output_move"}:
             state = self.bridge.state_snapshot()
@@ -353,13 +354,13 @@ class CommandGateway:
                     "运动被禁止：标定、运动学或硬件控制许可未满足",
                     request.msg_id,
                 )
-        if command in {"enable_motor", "disable_motor", "reset_motor"}:
-            motor_id = integer_param(params, "motor_id", allow_zero=True)
+        if command in {"enable_motor", "disable_motor", "reset_motor", "reboot_motor"}:
+            motor_id = integer_param(params, "motor_id", allow_zero=command != "reboot_motor")
             ros_request = ManageMotor.Request()
             ros_request.motor_id = motor_id
-            await self.bridge.call_service(command, ros_request)
+            result = await self.bridge.call_service(command, ros_request)
             motor_ids = [motor_id] if motor_id else list(range(1, len(self._joint_names()) + 1))
-            return {"cmd": command, "motor_ids": motor_ids}
+            return {"cmd": command, "motor_ids": motor_ids, "message": getattr(result, "message", "ok")}
         if command == "stop_motion":
             state = self.bridge.state_snapshot()
             task_id = int(state.task.task_id) if state is not None else None
@@ -735,6 +736,8 @@ class WebSocketGateway:
         body["pose"] = self._pose() if state is not None else {}
         body["hardware_type"] = self.bridge.hardware_type
         preview = getattr(self.bridge, "service_clients", {}).get("preview_motion")
+        reboot = getattr(self.bridge, "service_clients", {}).get("reboot_motor")
+        body["reboot_available"] = bool(reboot and reboot.service_is_ready())
         body["preview_modes"] = ["joint", "output", "ik", "lin"] if preview and preview.service_is_ready() else []
         body["read_only"] = self.bridge.read_only
         body["commissioning"] = self.bridge.commissioning

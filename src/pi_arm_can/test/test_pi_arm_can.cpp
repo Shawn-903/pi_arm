@@ -138,3 +138,11 @@ TEST(DriverSafety, ReadOnlyModeRejectsControlAndManagement)
 }
 
 }  // namespace
+
+TEST(Protocol, RebootFrameHasOpcode07AndZeroPayload)
+{
+  const auto frame = pi_arm_can::make_request(2, pi_arm_can::Opcode::MOTOR_REBOOT);
+  EXPECT_EQ(frame.id, 0x142U);
+  const std::array<std::uint8_t, 8> expected{0x07, 0, 0, 0, 0, 0, 0, 0};
+  EXPECT_EQ(frame.data, expected);
+}

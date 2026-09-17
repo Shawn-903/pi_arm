@@ -34,6 +34,7 @@ enum class ManagementOperation
   MOTOR_OFF,
   MOTOR_RUN,
   CLEAR_ERROR_FLAGS,
+  MOTOR_REBOOT,
   SET_CURRENT_POSITION_ZERO,
 };
 

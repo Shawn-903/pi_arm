@@ -184,7 +184,8 @@ public:
       for (const auto & entry : std::vector<std::pair<std::string, pi_arm_can::ManagementOperation>>{
           {"enable_motor", pi_arm_can::ManagementOperation::MOTOR_RUN},
           {"disable_motor", pi_arm_can::ManagementOperation::MOTOR_OFF},
-          {"reset_motor", pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS}})
+          {"reset_motor", pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS},
+          {"reboot_motor", pi_arm_can::ManagementOperation::MOTOR_REBOOT}})
       {
         management_services_.push_back(create_service<ManageMotor>(
           "/pi_arm/commissioning/" + entry.first,

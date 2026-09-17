@@ -14,6 +14,7 @@ constexpr std::size_t kCanPayloadSize = 8U;
 
 enum class Opcode : std::uint8_t
 {
+  MOTOR_REBOOT = 0x07,  // No reply; verify subsequent polled state.
   MOTOR_OFF = 0x80,
   MOTOR_STOP = 0x81,
   MOTOR_RUN = 0x88,

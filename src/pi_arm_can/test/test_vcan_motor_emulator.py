@@ -12,6 +12,13 @@ from vcan_motor_emulator import Motor, response  # noqa: E402
 
 
 class VcanMotorEmulatorTest(unittest.TestCase):
+    def test_reboot_has_no_ack_and_leaves_motor_disabled(self):
+        motor = Motor(angle_raw=1234, enabled=True, error=8)
+        self.assertIsNone(response(motor, bytes([0x07]) + bytes(7)))
+        self.assertFalse(motor.enabled)
+        self.assertEqual(motor.error, 0)
+        self.assertEqual(motor.angle_raw, 1234)
+
     def test_stop_preserves_enable_and_angle(self):
         motor = Motor(angle_raw=1234, speed_dps=3, enabled=True)
         acknowledgement = response(motor, bytes([0x81]) + bytes(7))

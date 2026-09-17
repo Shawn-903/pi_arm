@@ -142,3 +142,20 @@ TEST(ManagementGate, AllowsControlledDisableDespiteKinematicsOrMotorFault)
   EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
     MotorPowerOperation::DISABLE, hardware, RobotState::FAULT, false, true, 0).allowed);
 }
+
+TEST(ManagementGate, RecoveryAllowsFaultEvenWhenKinematicsAreInvalid)
+{
+  auto h = healthy_motors();
+  h.motor_errors[1] = true;
+  h.motor_error_codes[1] = 8;
+  h.kinematics_valid = false;
+  h.control_permitted = false;
+  EXPECT_TRUE(pi_arm_manager::decide_motor_recovery(h, RobotState::FAULT, false, true, 2).allowed);
+  h.motor_enabled.assign(6, false);
+  EXPECT_TRUE(pi_arm_manager::decide_motor_recovery(h, RobotState::FAULT, false, true, 2).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_recovery(h, RobotState::FAULT, true, true, 2).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_recovery(h, RobotState::FAULT, false, false, 2).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_recovery(h, RobotState::FAULT, false, true, 7).allowed);
+  h.motor_fresh[0] = false;
+  EXPECT_FALSE(pi_arm_manager::decide_motor_recovery(h, RobotState::FAULT, false, true, 2).allowed);
+}

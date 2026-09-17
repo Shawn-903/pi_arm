@@ -35,6 +35,8 @@ Opcode management_opcode(const ManagementOperation operation)
       return Opcode::MOTOR_RUN;
     case ManagementOperation::CLEAR_ERROR_FLAGS:
       return Opcode::CLEAR_ERROR_FLAGS;
+    case ManagementOperation::MOTOR_REBOOT:
+      return Opcode::MOTOR_REBOOT;
     case ManagementOperation::SET_CURRENT_POSITION_ZERO:
       return Opcode::SET_CURRENT_POSITION_ZERO;
   }
@@ -62,6 +64,7 @@ const char * to_string(const ManagementOperation operation) noexcept
     case ManagementOperation::MOTOR_OFF: return "MOTOR_OFF";
     case ManagementOperation::MOTOR_RUN: return "MOTOR_RUN";
     case ManagementOperation::CLEAR_ERROR_FLAGS: return "CLEAR_ERROR_FLAGS";
+    case ManagementOperation::MOTOR_REBOOT: return "MOTOR_REBOOT";
     case ManagementOperation::SET_CURRENT_POSITION_ZERO: return "SET_CURRENT_POSITION_ZERO";
   }
   return "UNKNOWN";
@@ -423,6 +426,7 @@ bool CanDriver::execute_management(
       return false;
     }
   }
+  if (operation == ManagementOperation::MOTOR_REBOOT) {set_mode(DriverMode::MONITORING);}
   std::unordered_map<std::uint8_t, std::chrono::steady_clock::time_point> previous_updates;
   {
     std::shared_lock<std::shared_mutex> lock(state_mutex_);
@@ -450,7 +454,7 @@ bool CanDriver::execute_management(
 
   if (!enqueue_batch(std::move(batch), true)) {
     if (exclusive) {
-      mode_.store(previous);
+      mode_.store(operation == ManagementOperation::MOTOR_REBOOT ? DriverMode::MONITORING : previous);
     }
     operation_.store(ManagementOperation::NONE);
     return false;
@@ -462,11 +466,56 @@ bool CanDriver::execute_management(
   }
   const bool success = completion.get();
   if (exclusive && mode_.load() != DriverMode::FAULT) {
-    mode_.store(previous);
+    mode_.store(operation == ManagementOperation::MOTOR_REBOOT ? DriverMode::MONITORING : previous);
   }
   if (!success) {
     operation_.store(ManagementOperation::NONE);
     return false;
+  }
+
+  if (operation == ManagementOperation::MOTOR_REBOOT) {
+    // 0x07 intentionally has NO ACK (vendor manual, section 29). Never retry
+    // reboot automatically and never restore CONTROL after a power cycle.
+    set_mode(DriverMode::MONITORING);
+    {
+      std::unique_lock<std::shared_mutex> lock(state_mutex_);
+      for (const auto id : motor_ids) {
+        auto & state = states_.at(id);
+        state.angle_valid = state.status1_valid = state.status2_valid = false;
+        state.stationary_samples = 0;
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const auto fresh_after = std::chrono::steady_clock::now();
+    TxBatch off;
+    off.completion = std::make_shared<std::promise<bool>>();
+    auto off_result = off.completion->get_future();
+    for (const auto id : motor_ids) {off.frames.push_back(make_request(id, Opcode::MOTOR_OFF));}
+    if (!enqueue_batch(std::move(off), true) ||
+      off_result.wait_for(timeout) != std::future_status::ready || !off_result.get()) {
+      operation_.store(ManagementOperation::NONE);
+      std::lock_guard<std::mutex> lock(error_mutex_);
+      last_error_ = "reboot sent; post-reboot power-off transmission unconfirmed";
+      return false;
+    }
+    std::unique_lock<std::shared_mutex> lock(state_mutex_);
+    const bool recovered = state_cv_.wait_for(lock, timeout, [&]() {
+        for (const auto id : motor_ids) {
+          const auto & state = states_.at(id);
+          if (!state.angle_valid || !state.status1_valid || !state.status2_valid ||
+            state.angle_update <= fresh_after || state.status1_update <= fresh_after ||
+            state.status2_update <= fresh_after || state.error_state != 0 ||
+            state.motor_state == 0x00 || state.motor_state == 0x30 ||
+            state.protocol_speed_dps != 0.0 || state.stationary_samples < 3) {return false;}
+        }
+        return true;
+      });
+    lock.unlock();
+    operation_.store(ManagementOperation::NONE);
+    std::lock_guard<std::mutex> error_lock(error_mutex_);
+    last_error_ = recovered ? "" :
+      "reboot sent without ACK; fresh angle/status, cleared faults or disabled state not confirmed";
+    return recovered;
   }
 
   std::unique_lock<std::shared_mutex> state_lock(state_mutex_);

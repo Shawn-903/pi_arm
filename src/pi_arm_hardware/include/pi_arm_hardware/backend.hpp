@@ -174,6 +174,7 @@ private:
   BackendConfig config_;
   pi_arm_transmission::CableKinematics kinematics_;
   CalibrationResult calibration_;
+  std::atomic_bool reboot_reference_uncertain_{false};
   pi_arm_transmission::Vector6 last_joint_positions_rad_{};
   std::atomic_bool position_initialized_{false};
   std::atomic_bool control_permitted_{false};

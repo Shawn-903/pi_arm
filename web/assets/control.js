@@ -109,7 +109,9 @@ function refreshControlGate() {
     lastState.robot_state === "READY" &&
     lastState.task?.status !== 1 &&
     ![...pending.values()].some(
-      (item) => motionCommands.has(item.cmd) || item.cmd === "preview_motion",
+      (item) =>
+        motionCommands.has(item.cmd) ||
+        ["preview_motion", "reset_motor", "reboot_motor"].includes(item.cmd),
     );
   document
     .querySelectorAll(
@@ -138,6 +140,47 @@ function refreshControlGate() {
   document.getElementById("copyOutputTargets").disabled =
     !fresh || !lastState.kinematics_valid;
   document.getElementById("exportDiagnosticBtn").disabled = !lastState;
+  const recoveryPending = [...pending.values()].some((item) =>
+    ["reset_motor", "reboot_motor"].includes(item.cmd),
+  );
+  const recoveryReady =
+    fresh &&
+    !lastState?.read_only &&
+    lastState?.hardware_connected &&
+    lastState?.motor_fresh?.length === 6 &&
+    lastState.motor_fresh.every(Boolean) &&
+    lastState?.motor_in_motion?.length === 6 &&
+    lastState.motor_in_motion.every((moving) => moving === false) &&
+    lastState.task?.status !== 1 &&
+    !lastState.axis_test?.active &&
+    acceptedTaskId === null &&
+    ![...pending.values()].some(
+      (item) =>
+        motionCommands.has(item.cmd) ||
+        ["preview_motion", "reset_motor", "reboot_motor"].includes(item.cmd),
+    ) &&
+    !recoveryPending;
+  document
+    .querySelectorAll('[data-cmd="reset_motor"], [data-cmd="reboot_motor"]')
+    .forEach((button) => {
+      button.disabled =
+        !recoveryReady ||
+        (button.dataset.cmd === "reboot_motor" && !lastState?.reboot_available);
+    });
+  if (recoveryPending)
+    document.querySelectorAll('[data-cmd="enable_motor"]').forEach((button) => {
+      button.disabled = true;
+    });
+  document.getElementById("recoveryMotorId").disabled = recoveryPending;
+  document.getElementById("recoveryGate").textContent = recoveryPending
+    ? "正在恢复，请等待结果；不会自动重试重启"
+    : lastState?.read_only
+      ? "只读模式不允许发恢复指令，请使用正常控制或方向测试服务"
+      : !recoveryReady
+        ? "等待新鲜的原始电机反馈、整臂静止且无运动任务；无需运动学解算通过"
+        : !lastState?.reboot_available
+          ? "可清除错误；当前后端尚无重启服务，需编译重启新版程序"
+          : "可操作：可先清除错误；若仍故障，可选择电机重启，后端再次核验静止与停止应答";
   updateDiagnostics(lastState, fresh);
   refreshAxisTests(fresh);
   refreshPresetPoses(fresh, permitted);
@@ -256,7 +299,15 @@ function connect() {
 }
 
 function sendCommand(cmd, params = {}) {
-  if (["stop_motion", "motor_stop", "disable_motor"].includes(cmd))
+  if (
+    [
+      "stop_motion",
+      "motor_stop",
+      "disable_motor",
+      "reset_motor",
+      "reboot_motor",
+    ].includes(cmd)
+  )
     window.PiArmInteractive?.cancelActions("停止或下使能请求，松手执行已关闭");
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     log("发送失败：WebSocket 未连接", { cmd, params });
@@ -275,7 +326,9 @@ function sendCommand(cmd, params = {}) {
       lastState.robot_state !== "READY" ||
       acceptedTaskId !== null ||
       [...pending.values()].some(
-        (item) => motionCommands.has(item.cmd) || item.cmd === "preview_motion",
+        (item) =>
+          motionCommands.has(item.cmd) ||
+          ["preview_motion", "reset_motor", "reboot_motor"].includes(item.cmd),
       ))
   ) {
     log("运动被拒绝：状态未就绪或有运动请求等待响应");
@@ -284,7 +337,9 @@ function sendCommand(cmd, params = {}) {
   if (
     cmd === "axis_test" &&
     (ownAxisTest !== null ||
-      [...pending.values()].some((item) => item.cmd === "axis_test"))
+      [...pending.values()].some((item) =>
+        ["axis_test", "reset_motor", "reboot_motor"].includes(item.cmd),
+      ))
   )
     return false;
   if (
@@ -305,6 +360,19 @@ function sendCommand(cmd, params = {}) {
       return false;
     }
   }
+  if (["reset_motor", "reboot_motor"].includes(cmd)) {
+    const button = document.getElementById(
+      cmd === "reboot_motor" ? "rebootMotorBtn" : "clearMotorFaultBtn",
+    );
+    if (button.disabled) {
+      log("恢复请求被拒绝：请检查故障恢复区的条件说明");
+      return false;
+    }
+    document.getElementById("recoveryResult").textContent =
+      cmd === "reboot_motor"
+        ? `CAN ${params.motor_id} 正在请求重启并等待新反馈，请勿重复点击…`
+        : "正在请求清除错误标志…";
+  }
   const payload = {
     type: "req",
     msg_id: msgId++,
@@ -313,6 +381,9 @@ function sendCommand(cmd, params = {}) {
   };
   const timer = setTimeout(() => {
     pending.delete(payload.msg_id);
+    if (["reset_motor", "reboot_motor"].includes(cmd))
+      document.getElementById("recoveryResult").textContent =
+        "恢复请求超时，结果未知；请查看原始反馈，禁止据此认为电机已恢复";
     log("请求响应超时，执行结果未知，请检查任务状态", {
       cmd,
       msg_id: payload.msg_id,
@@ -364,6 +435,15 @@ function handleMessage(data) {
     if (item) clearTimeout(item.timer);
     pending.delete(data.msg_id);
     const ok = data.code === 0;
+    if (["reset_motor", "reboot_motor"].includes(item?.cmd)) {
+      const text = document.getElementById("recoveryResult");
+      text.textContent = ok
+        ? (item.cmd === "reboot_motor"
+            ? "重启请求完成，电机保持关闭。"
+            : "清除错误请求完成。") + (data.data?.message || "")
+        : `恢复失败：${data.ms}`;
+      text.className = ok ? "status-ok" : "status-error";
+    }
     if (item?.cmd === "preview_motion") {
       if (ok) item.resolve(data.data);
       else item.reject(new Error(data.ms || "预览失败"));
@@ -610,7 +690,9 @@ function refreshAxisTests(fresh) {
     commissioning &&
     !lastState.axis_test?.active &&
     ownAxisTest === null &&
-    ![...pending.values()].some((item) => item.cmd === "axis_test");
+    ![...pending.values()].some((item) =>
+      ["axis_test", "reset_motor", "reboot_motor"].includes(item.cmd),
+    );
   const id = Number(document.getElementById("testMotorId").value);
   const index = lastState?.motor_ids?.indexOf(id) ?? -1;
   const enabled = lastState?.motor_enabled?.[index] === true;
@@ -1046,6 +1128,12 @@ function init() {
       log("参数错误", { message: error.message });
     }
   });
+  document
+    .getElementById("recoveryMotorId")
+    .addEventListener("change", (event) => {
+      for (const id of ["clearMotorFaultBtn", "rebootMotorBtn"])
+        document.getElementById(id).dataset.motorId = event.target.value;
+    });
   bindTabs();
   bindCommands();
   bindAxisTests();
@@ -1091,7 +1179,9 @@ window.PiArmControl = {
         lastState.task?.status === 1 ||
         acceptedTaskId !== null ||
         [...pending.values()].some(
-          (p) => motionCommands.has(p.cmd) || p.cmd === "preview_motion",
+          (p) =>
+            motionCommands.has(p.cmd) ||
+            ["preview_motion", "reset_motor", "reboot_motor"].includes(p.cmd),
         )
       ) {
         reject(new Error("预览不可用：请连接新版正常控制服务，等待机械臂静止"));

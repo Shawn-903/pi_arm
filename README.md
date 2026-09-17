@@ -12,6 +12,7 @@
 新界面说明见 [Web README](web/README.md)，截图及测试见 [前端验收](docs/frontend/REVIEW.md)。
 三维模型实现见 [三维验收](docs/frontend/VIEWER_REVIEW.md)。
 新增滑块、模型关节拖动、输出轴反解 / 笛卡尔 IK、路径及回放，软件验收与实机切换见 [交互验收](docs/frontend/INTERACTIVE_REVIEW.md)。
+网页增加选定电机的清错与重启，FAULT 下可使用原始静止反馈恢复，见 [电机故障恢复](docs/frontend/MOTOR_RECOVERY.md)。
 
 ## 已完成
 
