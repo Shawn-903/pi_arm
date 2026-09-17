@@ -51,7 +51,9 @@ def main():
         sockets[0].send(json.dumps(state))
         page.wait_for_function('lastState?.teaching_active===false')
         assert button.get_attribute('aria-pressed')=='false'
-        page.wait_for_timeout(1700)
+        # The stale gate is refreshed by the UI timer; allow its next tick on busy Pis.
+        page.wait_for_function('document.getElementById("dragTeachingBtn").disabled', timeout=5000)
+        assert page.evaluate('Date.now()-lastStateAt >= 1500')
         assert button.is_disabled(), 'stale state must forbid teaching switches'
         assert not errors,errors
         browser.close()
