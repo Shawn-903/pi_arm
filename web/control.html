@@ -26,6 +26,21 @@
             >01</span
           >
         </button>
+        <button class="nav-item" data-view-target="points">
+          <span class="nav-icon"
+            ><svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="6" />
+              <path d="M12 2v5m0 10v5M2 12h5m10 0h5" /></svg></span
+          >点位示教<span class="nav-index">PT</span>
+        </button>
         <button class="nav-item" data-view-target="records">
           <span class="nav-icon">≡</span>运行记录<span class="nav-index"
             >02</span
@@ -432,6 +447,16 @@
                     >
                       输出轴控制
                     </button>
+                    <button
+                      aria-controls="cartesian"
+                      aria-selected="false"
+                      class="tab-button"
+                      data-tab="cartesian"
+                      id="tab-cartesian"
+                      role="tab"
+                    >
+                      笛卡尔控制
+                    </button>
                   </div>
                   <section
                     aria-labelledby="tab-single"
@@ -448,9 +473,47 @@
                     role="tabpanel"
                   >
                     <fieldset>
-                      <legend>关节</legend>
+                      <legend>六关节目标 · 相对关节角（°）</legend>
                       <div class="joint-grid" id="multiJointGrid"></div>
                     </fieldset>
+                    <fieldset class="param-card" id="jointParamCard">
+                      <legend>关节直接运动参数</legend>
+                      <div class="joint-param-grid">
+                        <div class="joint-row">
+                          <label for="multiSpeed">关节速度(°/s)</label>
+                          <input
+                            id="multiSpeed"
+                            max="10"
+                            min="0.01"
+                            step="any"
+                            type="number"
+                            value="1"
+                          />
+                        </div>
+                      </div>
+                    </fieldset>
+                    <div class="toolbar">
+                      <button id="copyJointTargets">读取当前六关节角</button
+                      ><button
+                        class="btn-green"
+                        data-motion="true"
+                        id="multiMoveBtn"
+                      >
+                        执行六关节运动</button
+                      ><button class="btn-red" id="multiStopBtn">停止</button>
+                    </div>
+                    <p>仅使用 J1–J6 目标，按关节空间插值；不读取笛卡尔目标。</p>
+                  </section>
+                  <section
+                    aria-labelledby="tab-cartesian"
+                    class="tab-panel"
+                    id="cartesian"
+                    role="tabpanel"
+                  >
+                    <p>
+                      末端法兰 tool0 相对 base_link。XYZ 使用 mm，姿态为固定轴
+                      RPY（°），R = Rz · Ry · Rx。
+                    </p>
                     <div class="pose-control-row">
                       <fieldset>
                         <legend>位置控制</legend>
@@ -517,104 +580,67 @@
                         </div>
                       </fieldset>
                     </div>
-                    <div class="motion-params">
-                      <fieldset>
-                        <legend>运动模式</legend>
-                        <label
-                          ><input
-                            checked=""
-                            name="motionMode"
-                            type="radio"
-                            value="joint"
+
+                    <fieldset class="param-card" id="lineParamCard">
+                      <legend>直线插补的参数</legend>
+                      <div class="line-param-grid">
+                        <div class="joint-row">
+                          <label for="endSpeed">末端速度(mm/s)</label>
+                          <input
+                            id="endSpeed"
+                            step="any"
+                            type="number"
+                            value="5"
                           />
-                          关节直接运动 (DirectMove)</label
-                        >
-                        <label style="margin-left: 20px"
-                          ><input name="motionMode" type="radio" value="line" />
-                          笛卡尔直线（base_link → tool0）</label
-                        >
-                      </fieldset>
-                      <fieldset class="param-card" id="jointParamCard">
-                        <legend>关节直接运动参数</legend>
-                        <div class="joint-param-grid">
-                          <div class="joint-row">
-                            <label for="multiSpeed">关节速度(°/s)</label>
-                            <input
-                              id="multiSpeed"
-                              max="10"
-                              min="0.01"
-                              step="any"
-                              type="number"
-                              value="1"
-                            />
-                          </div>
                         </div>
-                      </fieldset>
-                      <fieldset class="param-card" hidden="" id="lineParamCard">
-                        <legend>直线插补的参数</legend>
-                        <div class="line-param-grid">
-                          <div class="joint-row">
-                            <label for="endSpeed">末端速度(mm/s)</label>
-                            <input
-                              id="endSpeed"
-                              step="any"
-                              type="number"
-                              value="5"
-                            />
-                          </div>
-                          <div class="joint-row">
-                            <label for="lineAccel">加速度(mm/s²)</label>
-                            <input
-                              id="lineAccel"
-                              min="0.001"
-                              step="any"
-                              type="number"
-                              value="10"
-                            />
-                          </div>
-                          <div class="joint-row">
-                            <label for="angularSpeed">角速度(°/s)</label>
-                            <input
-                              id="angularSpeed"
-                              min="0.001"
-                              step="any"
-                              type="number"
-                              value="1"
-                            />
-                          </div>
-                          <div class="joint-row">
-                            <label for="angularAccel">角加速度(°/s²)</label>
-                            <input
-                              id="angularAccel"
-                              min="0.001"
-                              step="any"
-                              type="number"
-                              value="2"
-                            />
-                          </div>
+                        <div class="joint-row">
+                          <label for="lineAccel">加速度(mm/s²)</label>
+                          <input
+                            id="lineAccel"
+                            min="0.001"
+                            step="any"
+                            type="number"
+                            value="10"
+                          />
                         </div>
-                      </fieldset>
-                    </div>
-                    <div
-                      class="toolbar"
-                      style="justify-content: center; margin-top: 8px"
-                    >
-                      <button
+                        <div class="joint-row">
+                          <label for="angularSpeed">角速度(°/s)</label>
+                          <input
+                            id="angularSpeed"
+                            min="0.001"
+                            step="any"
+                            type="number"
+                            value="1"
+                          />
+                        </div>
+                        <div class="joint-row">
+                          <label for="angularAccel">角加速度(°/s²)</label>
+                          <input
+                            id="angularAccel"
+                            min="0.001"
+                            step="any"
+                            type="number"
+                            value="2"
+                          />
+                        </div>
+                      </div>
+                    </fieldset>
+                    <div class="toolbar">
+                      <button id="copyCartesianTarget">读取当前末端位姿</button
+                      ><button
                         class="btn-green"
                         data-motion="true"
-                        id="multiMoveBtn"
-                        style="font-weight: 700"
+                        id="cartesianMoveBtn"
                       >
-                        运动
-                      </button>
-                      <button
-                        class="btn-red"
-                        id="multiStopBtn"
-                        style="font-weight: 700"
-                      >
+                        执行笛卡尔直线</button
+                      ><button class="btn-red" data-cmd="stop_motion">
                         停止
                       </button>
                     </div>
+                    <p>
+                      仅使用末端位姿目标，经 IK
+                      与直线规划后执行；不读取六关节目标。
+                    </p>
                   </section>
                   <fieldset
                     aria-labelledby="tab-outputControlCard"
@@ -635,11 +661,42 @@
                   </fieldset>
                 </div>
               </fieldset>
+              <p
+                id="loadedPointStatus"
+                class="loaded-point"
+                role="status"
+                hidden
+              ></p>
+              <details class="base-frame-panel" open>
+                <summary>各关节坐标系相对 base_link 的位姿</summary>
+                <p>
+                  J1–J6 的 URDF 子坐标系；XYZ 为 mm，RPY 为
+                  °。这是坐标系姿态，不是关节自身转角。由当前编码器 /
+                  绳索反解推算。
+                </p>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>关节 / 坐标系</th>
+                        <th>X</th>
+                        <th>Y</th>
+                        <th>Z</th>
+                        <th>Roll</th>
+                        <th>Pitch</th>
+                        <th>Yaw</th>
+                      </tr>
+                    </thead>
+                    <tbody id="baseFrameBody"></tbody>
+                  </table>
+                </div>
+                <p id="baseFrameStatus">等待有效反馈</p>
+              </details>
               <fieldset id="presetPosePanel">
                 <legend>预设姿态</legend>
                 <p>
                   执行整臂关节运动，关节速度上限
-                  1°/s，同时受网页输出轴限速约束。打包目标来自后端标定；零位目标为六个主动关节角
+                  由后端配置，同时受网页输出轴限速约束。打包目标来自后端标定；零位目标为六个主动关节角
                   0°。这两个按钮不会重设电机零点。
                 </p>
                 <div class="endpoint-row">
@@ -671,6 +728,61 @@
                 </div>
                 <div id="zeroPoseStatus" role="status">零位姿态：等待连接</div>
               </fieldset>
+            </section>
+            <section class="view-panel" data-view-panel="points" hidden>
+              <div class="section-heading">
+                <div>
+                  <span class="eyebrow">TEACHING POINTS</span>
+                  <h2>点位示教</h2>
+                </div>
+                <button id="refreshPoints">刷新列表</button>
+              </div>
+              <p class="section-description">
+                手动录入、记录实机反馈，或保存模型预览目标。点位保存在树莓派；保存和加载都不会使机械臂运动。
+              </p>
+              <div class="teaching-grid">
+                <fieldset>
+                  <legend>录入点位</legend>
+                  <div class="point-meta">
+                    <label
+                      >名称<input
+                        id="pointName"
+                        maxlength="80"
+                        placeholder="例如：重复定位 A" /></label
+                    ><label
+                      >类型<select id="pointKind">
+                        <option value="joint">六关节点位 · °</option>
+                        <option value="cartesian">笛卡尔点位 · mm / °</option>
+                      </select></label
+                    >
+                  </div>
+                  <label
+                    >备注<input
+                      id="pointNote"
+                      maxlength="1000"
+                      placeholder="测试编号、接近方向、测量条件"
+                  /></label>
+                  <div class="joint-grid" id="pointValues"></div>
+                  <div class="point-actions">
+                    <button class="btn-primary" id="saveManualPoint">
+                      保存手动输入</button
+                    ><button id="capturePoint">记录当前实机反馈</button
+                    ><button id="saveModelPoint">保存模型预览目标</button>
+                  </div>
+                  <p>
+                    实机示教：由操作者支撑、搬动机械臂，停止后记录；本页不会自动关闭电机或进入力控拖动。模型示教：关闭“松手执行”，拖动关节后保存预览。
+                  </p>
+                  <p id="pointStatus" role="status">连接后加载点位库</p>
+                </fieldset>
+                <fieldset>
+                  <legend>已保存点位</legend>
+                  <div class="point-actions">
+                    <button id="exportPoints">导出 JSON 备份</button
+                    ><span id="pointCount">0 个点位</span>
+                  </div>
+                  <div id="pointList" class="point-list"></div>
+                </fieldset>
+              </div>
             </section>
             <section class="view-panel" data-view-panel="records" hidden="">
               <div class="section-heading">
@@ -1028,5 +1140,6 @@
     <script src="assets/console.js"></script>
     <script src="assets/control.js"></script>
     <script src="assets/interactive.js"></script>
+    <script src="assets/teaching.js"></script>
   </body>
 </html>

@@ -2,6 +2,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -9,6 +10,7 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument("hardware_type", default_value="real", choices=["real", "mock"]),
             DeclareLaunchArgument("calibration_file", default_value=""),
+            DeclareLaunchArgument("points_file", default_value=""),
             Node(
                 package="pi_arm_websocket",
                 executable="pi_arm_websocket",
@@ -16,7 +18,7 @@ def generate_launch_description() -> LaunchDescription:
                 output="screen",
                 parameters=[
                     {
-                        "port": 8765,
+                        "port": 8765, "points_file": ParameterValue(LaunchConfiguration("points_file"), value_type=str),
                         "hardware_type": LaunchConfiguration("hardware_type"),
                         "calibration_file": LaunchConfiguration("calibration_file"),
                         "state_push_interval_ms": 100,

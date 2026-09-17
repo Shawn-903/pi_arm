@@ -1732,3 +1732,111 @@ body[data-view="commissioning"] .workspace-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* Teaching and base-frame feedback */
+.teaching-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.teaching-grid fieldset {
+  min-width: 0;
+}
+.point-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.teaching-grid label {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.teaching-grid input,
+.teaching-grid select {
+  width: 100%;
+  min-width: 0;
+}
+.point-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+.point-list {
+  display: grid;
+  gap: 12px;
+  max-height: 640px;
+  overflow: auto;
+}
+.point-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.point-card strong {
+  display: block;
+  font-size: 15px;
+  color: var(--text);
+}
+.point-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.point-card p,
+.teaching-grid p,
+.base-frame-panel p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.point-vector {
+  font-variant-numeric: tabular-nums;
+  color: #147e70 !important;
+}
+.point-empty {
+  padding: 30px 12px;
+  text-align: center;
+}
+.base-frame-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.base-frame-panel summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.base-frame-panel .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.base-frame-panel table {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.loaded-point {
+  border-left: 3px solid #168a7a;
+  padding: 12px;
+  background: #edf8f5;
+  font-size: 13px;
+}
+@media (max-width: 1100px) {
+  .teaching-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .point-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

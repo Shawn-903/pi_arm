@@ -2,6 +2,7 @@
 (() => {
   const titles = {
     workbench: "操作工作台",
+    points: "点位示教",
     records: "运行记录",
     diagnostics: "开发诊断",
     commissioning: "方向测试",

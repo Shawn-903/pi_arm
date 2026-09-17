@@ -7,6 +7,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 
@@ -152,6 +153,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_manager", default_value="true"),
             DeclareLaunchArgument("use_websocket", default_value="true"),
             DeclareLaunchArgument("websocket_port", default_value="8765"),
+            DeclareLaunchArgument("points_file", default_value=""),
             DeclareLaunchArgument("manager_config", default_value=PathJoinSubstitution(
                 [FindPackageShare("pi_arm_bringup"), "config", "manager.yaml"])),
             Node(
@@ -236,7 +238,7 @@ def generate_launch_description():
                 name="pi_arm_websocket",
                 output="screen",
                 parameters=[{"hardware_type": hardware_type, "calibration_file": calibration_file,
-                             "port": LaunchConfiguration("websocket_port")}],
+                             "points_file": ParameterValue(LaunchConfiguration("points_file"), value_type=str), "port": LaunchConfiguration("websocket_port")}],
                 condition=IfCondition(use_websocket),
             ),
             rviz,

@@ -6,19 +6,22 @@
 ## 前端开发分支
 
 三维显示已通过操作者实机只读确认，存档为 **v0.2.0-viewer-baseline**（`85974a2`）。
-当前分支 `feature/motion-accuracy-and-interactive-preview` 按 [交互计划](docs/frontend/INTERACTIVE_PLAN.md) 继续开发。
+交互开发基线见 [交互计划](docs/frontend/INTERACTIVE_PLAN.md)；当前分支 `feature/teaching-points-and-base-frames` 实现 [点位示教计划](docs/frontend/TEACHING_PLAN.md)。
 到位判定已增加每轴 0.2° 容差、连续稳定检查及停止后复核，见 [修复记录](docs/releases/arrival-accuracy.md)。
 阶段一控制基线保留在标签 `v0.1.0-stage1`。
 新界面说明见 [Web README](web/README.md)，截图及测试见 [前端验收](docs/frontend/REVIEW.md)。
 三维模型实现见 [三维验收](docs/frontend/VIEWER_REVIEW.md)。
 新增滑块、模型关节拖动、输出轴反解 / 笛卡尔 IK、路径及回放，软件验收与实机切换见 [交互验收](docs/frontend/INTERACTIVE_REVIEW.md)。
 网页增加选定电机的清错与重启，FAULT 下可使用原始静止反馈恢复，见 [电机故障恢复](docs/frontend/MOTOR_RECOVERY.md)。
+当前新增持久化点位库、独立关节/笛卡尔表单及 base 下各关节位姿，见 [点位示教说明](docs/frontend/TEACHING_REVIEW.md)。
 
 ## 已完成
 
 | 功能 | 当前实现 |
 | --- | --- |
 | 网页诊断 | 故障时也可连接；六电机协议反馈、关节反解、标定、错误、任务结果及 JSON 导出 |
+| 点位示教 | 手动 / 实机反馈 / 模型预览录入，树莓派持久化、加载、删除及 JSON 导出 |
+| base 位姿 | 六主动关节子坐标系及 tool0 的 XYZ/RPY，由同一帧反馈与 URDF 计算 |
 | 三维显示 | URDF 实时姿态、三个随动关节、base_link/tool0 坐标轴、关节目标叠加；断线保留最后姿态并标灰 |
 | 交互预览 | 滑块 / 关节模型拖动、输出轴反解、IK、关节插值与 LIN 路径、回放；松手执行须显式开启 |
 | 到位核验 | 每轴默认 0.2°、稳定 0.5 s、收敛等待 10 s，停止后复核，网页显示目标与误差 |

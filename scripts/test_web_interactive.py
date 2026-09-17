@@ -131,7 +131,7 @@ def main():
         page.locator('#multiMoveBtn').click(); task_done(old)
         assert page.evaluate('PiArmViewer.snapshot().pathPointCount') == 0
         page.locator('#outputSpeedLimit').fill('1')
-        page.locator('input[name="motionMode"][value="line"]').check()
+        page.locator('[data-tab="cartesian"]').click()
         for name,q in zip(['X','Y','Z','Rx','Ry','Rz'],[100,-200,950,45,45,-45]):
             page.locator(f'#target{name}').fill(str(q))
         preview('#previewIK')

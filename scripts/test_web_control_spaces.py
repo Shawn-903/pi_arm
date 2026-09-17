@@ -52,7 +52,7 @@ def main():
 
         # All Cartesian execution in this test is initiated via webpage clicks.
         page.locator('[data-tab="multi"]').click()
-        page.locator('input[name="motionMode"][value="line"]').check()
+        page.locator('[data-tab="cartesian"]').click()
         page.wait_for_timeout(300)
         for target, source in [('targetX','endX'),('targetY','endY'),('targetZ','endZ'),
                                ('targetRx','endRx'),('targetRy','endRy'),('targetRz','endRz')]:
@@ -62,7 +62,7 @@ def main():
         page.locator('#endSpeed').fill('1')
         page.locator('#outputSpeedLimit').fill('1')
         previous = page.evaluate('lastState.task.task_id')
-        page.locator('#multiMoveBtn').click()
+        page.locator('#cartesianMoveBtn').click()
         finish(previous)
         print('PASS virtual Cartesian LIN via webpage, base_link/tool0', flush=True)
         assert not errors, errors

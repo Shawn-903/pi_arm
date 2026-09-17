@@ -14,7 +14,9 @@ CODE_STATE_UNAVAILABLE = 2001
 CODE_COMMAND_FAILED = 2002
 CODE_MOTION_BUSY = 2003
 
-COMMANDS = {
+POINT_COMMANDS = {'point_list', 'point_save', 'point_delete'}
+
+COMMANDS = POINT_COMMANDS | {
     "preview_motion",
     "output_move",
     "move_preset",

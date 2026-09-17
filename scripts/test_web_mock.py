@@ -100,10 +100,10 @@ def main():
 
         page.wait_for_function('lastState.robot_state === "READY"')
         page.locator('[data-tab="multi"]').click()
-        page.locator('input[name="motionMode"][value="line"]').check()
+        page.locator('[data-tab="cartesian"]').click()
         page.locator("#targetX").fill("100000")
         before = previous_task()
-        page.locator("#multiMoveBtn").click()
+        page.locator("#cartesianMoveBtn").click()
         wait_task_after(before, (4,))
         assert "失败" in page.locator("#taskState").inner_text()
         print("PASS accepted action reports final planning failure on page", flush=True)

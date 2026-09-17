@@ -50,7 +50,7 @@ def main():
         for width,height in [(1440,1000),(1024,768),(390,844)]:
             page.set_viewport_size(dict(width=width,height=height))
             page.locator('#viewRole').select_option('developer')
-            for view in ('workbench','records','diagnostics','commissioning'):
+            for view in ('workbench','points','records','diagnostics','commissioning'):
                 page.locator(f'[data-view-target="{view}"]').click()
                 assert page.locator(f'[data-view-panel="{view}"]').is_visible()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (width,view)
@@ -61,7 +61,7 @@ def main():
             assert page.locator('[data-view-target="diagnostics"]').is_hidden()
         assert sent==[], 'Navigation must not emit robot commands'
         page.set_viewport_size(dict(width=1440,height=1000))
-        for tab in ('single','multi','outputControlCard'):
+        for tab in ('single','multi','cartesian','outputControlCard'):
             page.locator(f'[data-tab="{tab}"]').click()
             assert page.locator('#'+tab).is_visible()
             assert page.locator(f'[data-tab="{tab}"]').get_attribute('aria-selected')=='true'

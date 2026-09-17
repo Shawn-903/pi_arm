@@ -125,16 +125,12 @@ function refreshControlGate() {
     .forEach((button) => {
       button.disabled = !permitted;
     });
-  const lineMode = document.querySelector(
-    "input[name='motionMode'][value='line']",
-  );
-  lineMode.disabled =
-    !fresh || !lastState.supported_motion_commands?.includes("movel");
-  if (lineMode.disabled && lineMode.checked) {
-    document.querySelector("input[name='motionMode'][value='joint']").checked =
-      true;
-    updateMotionMode();
-  }
+  document.getElementById("cartesianMoveBtn").disabled =
+    !permitted || !lastState?.supported_motion_commands?.includes("movel");
+  document.getElementById("copyCartesianTarget").disabled =
+    !fresh || !lastState?.base_frames?.valid;
+  document.getElementById("copyJointTargets").disabled =
+    !fresh || !lastState?.kinematics_valid;
   document.getElementById("copyCurrentBtn").disabled =
     !fresh || !lastState.kinematics_valid;
   document.getElementById("copyOutputTargets").disabled =
@@ -192,6 +188,11 @@ function refreshControlGate() {
       ? "正在连接…"
       : "未连接 / 禁止运动";
   window.PiArmInteractive?.refresh(lastState, {
+    fresh,
+    permitted,
+    connectionState,
+  });
+  window.PiArmTeaching?.refresh(lastState, {
     fresh,
     permitted,
     connectionState,
@@ -444,9 +445,9 @@ function handleMessage(data) {
         : `恢复失败：${data.ms}`;
       text.className = ok ? "status-ok" : "status-error";
     }
-    if (item?.cmd === "preview_motion") {
+    if (item?.resolve) {
       if (ok) item.resolve(data.data);
-      else item.reject(new Error(data.ms || "预览失败"));
+      else item.reject(new Error(data.ms || "请求失败"));
       refreshControlGate();
       return;
     }
@@ -951,10 +952,6 @@ function bindTabs() {
 }
 
 function bindCommands() {
-  document.querySelectorAll("input[name='motionMode']").forEach((radio) => {
-    radio.addEventListener("change", updateMotionMode);
-  });
-
   document.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
@@ -998,14 +995,6 @@ function bindCommands() {
     .getElementById("copyCurrentBtn")
     .addEventListener("click", copyCurrentTargets);
   els.disconnectBtn.addEventListener("click", () => ws?.close());
-}
-
-function updateMotionMode() {
-  const mode =
-    document.querySelector("input[name='motionMode']:checked")?.value ??
-    "joint";
-  els.jointParamCard.hidden = mode !== "joint";
-  els.lineParamCard.hidden = mode !== "line";
 }
 
 function readNumber(id) {
@@ -1059,36 +1048,25 @@ function moveSingleTargets() {
 
 function moveAllMotors() {
   try {
-    const mode =
-      document.querySelector("input[name='motionMode']:checked")?.value ??
-      "joint";
-    if (mode === "line") {
-      const target = [
-        readNumber("targetX"),
-        readNumber("targetY"),
-        readNumber("targetZ"),
-        readNumber("targetRx"),
-        readNumber("targetRy"),
-        readNumber("targetRz"),
-      ];
-      const linear_vel = readPositiveFloat("endSpeed");
-      const linear_acc = readPositiveFloat("lineAccel");
-      const angular_vel = readPositiveFloat("angularSpeed");
-      const angular_acc = readPositiveFloat("angularAccel");
-      sendCommand("movel", {
-        target,
-        linear_vel,
-        linear_acc,
-        angular_vel,
-        angular_acc,
-      });
-      return;
-    }
-    const target = motorIds.map((motorId) =>
-      readNumber(`multiJoint${motorId}`),
-    );
-    const max_speed = readPositiveFloat("multiSpeed");
-    sendCommand("move", { targets: target, max_speed });
+    sendCommand("move", {
+      targets: motorIds.map((id) => readNumber(`multiJoint${id}`)),
+      max_speed: readPositiveFloat("multiSpeed"),
+    });
+  } catch (error) {
+    log("参数错误", { message: error.message });
+  }
+}
+function moveCartesian() {
+  try {
+    sendCommand("movel", {
+      target: ["X", "Y", "Z", "Rx", "Ry", "Rz"].map((axis) =>
+        readNumber(`target${axis}`),
+      ),
+      linear_vel: readPositiveFloat("endSpeed"),
+      linear_acc: readPositiveFloat("lineAccel"),
+      angular_vel: readPositiveFloat("angularSpeed"),
+      angular_acc: readPositiveFloat("angularAccel"),
+    });
   } catch (error) {
     log("参数错误", { message: error.message });
   }
@@ -1144,7 +1122,24 @@ function init() {
         sendCommand("move_preset", { preset: button.dataset.preset }),
       ),
     );
-  updateMotionMode();
+  document
+    .getElementById("cartesianMoveBtn")
+    .addEventListener("click", moveCartesian);
+  document
+    .getElementById("copyJointTargets")
+    .addEventListener("click", copyCurrentTargets);
+  document
+    .getElementById("copyCartesianTarget")
+    .addEventListener("click", () => {
+      if (!lastState?.base_frames?.valid || Date.now() - lastStateAt >= 1500)
+        return;
+      ["X", "Y", "Z", "Rx", "Ry", "Rz"].forEach((axis) => {
+        document.getElementById(`target${axis}`).value = String(
+          lastState.pose[axis.toLowerCase()],
+        );
+      });
+      window.PiArmInteractive?.cancelActions("已读取当前末端位姿，请重新预览");
+    });
   setConnectionState("closed");
   setInterval(refreshControlGate, 300);
   log("页面初始化完成", { motor_count: MOTOR_COUNT, ws_url: els.wsUrl.value });
@@ -1154,6 +1149,47 @@ init();
 
 // Single transport and the same motion gate for all interactive UI controls.
 window.PiArmControl = {
+  loadPointTarget(kind, values) {
+    if (
+      !["joint", "cartesian"].includes(kind) ||
+      values?.length !== 6 ||
+      !values.every(Number.isFinite)
+    )
+      throw new Error("点位目标无效");
+    window.PiArmInteractive?.cancelActions(
+      "已加载点位，松手执行已关闭，请检查目标并重新预览",
+    );
+    if (kind === "joint") {
+      values.forEach((v, i) => {
+        document.getElementById(`multiJoint${i + 1}`).value = String(v);
+      });
+      // A later first valid feedback sample must not silently replace the loaded goal.
+      targetsInitialized = true;
+    } else
+      ["X", "Y", "Z", "Rx", "Ry", "Rz"].forEach((axis, i) => {
+        document.getElementById(`target${axis}`).value = String(values[i]);
+      });
+  },
+  library(cmd, params = {}) {
+    return new Promise((resolve, reject) => {
+      if (
+        !["point_list", "point_save", "point_delete"].includes(cmd) ||
+        !ws ||
+        ws.readyState !== WebSocket.OPEN ||
+        !lastState?.points_available
+      ) {
+        reject(new Error("请连接提供点位库的新版服务"));
+        return;
+      }
+      const id = msgId++;
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error("点位请求超时，结果未知；刷新列表核实后再操作"));
+      }, 10000);
+      pending.set(id, { cmd, timer, resolve, reject });
+      ws.send(JSON.stringify({ type: "req", msg_id: id, cmd, params }));
+    });
+  },
   moveJoint(index, angle) {
     try {
       return sendCommand("motor_move", {

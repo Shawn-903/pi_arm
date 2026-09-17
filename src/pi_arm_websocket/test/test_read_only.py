@@ -5,7 +5,7 @@ import pytest
 
 from pi_arm_interfaces.msg import HardwareState, RobotState
 from pi_arm_websocket.gateway import CommandGateway, WebSocketGateway, monitor_state
-from pi_arm_websocket.protocol import COMMANDS, ProtocolError, Request
+from pi_arm_websocket.protocol import COMMANDS, POINT_COMMANDS, ProtocolError, Request
 
 
 def fault_hardware():
@@ -50,7 +50,7 @@ def test_fault_still_publishes_raw_feedback_and_complete_diagnostics():
     assert data["supported_motion_commands"] == []
 
 
-@pytest.mark.parametrize("command", sorted(COMMANDS))
+@pytest.mark.parametrize("command", sorted(COMMANDS - POINT_COMMANDS))
 def test_read_only_rejects_every_control_command_without_ros_clients(command):
     with pytest.raises(ProtocolError, match="只读排查"):
         asyncio.run(CommandGateway(ReadOnlyBridge()).dispatch(Request(1, command, {})))

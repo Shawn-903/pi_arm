@@ -12,6 +12,7 @@
 - `assets/console.js`：导航、使用者/开发者视图、实时概览、状态与任务展示；不负责发运动指令。
 - `assets/viewer.js`：本地 Three.js / URDF 三维显示、随动关节、路径、关节拖动和状态降级；不创建独立连接。
 - `assets/interactive.js`：滑块 / 模型手势、后端反解 / IK / 路径预览和回放；通过 control.js 门禁提交有限目标。
+- `assets/teaching.js`：点位录入/加载/导出与 base 坐标显示；加载只填写目标，不发运动。
 - `vendor/`：固定版本的本地三维依赖及许可证；普通启动无需下载，维护构建见其 README。
 - `model/`：启动/构建自动生成的显示 URDF、清单和 gzip STL，已加入 gitignore，来源为 `src/pi_arm_description`。
 
@@ -20,7 +21,8 @@
 
 ## 页面
 
-操作工作台提供六关节概览、使能/停止、关节/输出轴目标、多关节页内的笛卡尔直线与预设姿态。
+操作工作台提供六关节概览、使能/停止、关节/输出轴目标、独立笛卡尔页签与预设姿态。
+「点位示教」保存手动、反馈或模型目标，持久化到树莓派；base 位姿显示及使用说明见 [点位示教验收](../docs/frontend/TEACHING_REVIEW.md)。
 输出轴限速仍由页面输入，下一条运动生效。顶部软件停止在滚动时保持可达。
 运行记录显示原始请求与终态；开发诊断显示原始 CAN/坐标链和标定；方向测试需独立 commissioning 服务。
 工作台的「电机故障恢复」提供选定 CAN 电机的清错（0x9B）与重启（0x07），FAULT 下也可操作。
@@ -54,6 +56,8 @@ python3 scripts/test_web_viewer.py
 ROS_DOMAIN_ID=81 PI_ARM_WEB_PORT=8001 bash scripts/start_web.sh hardware_type:=mock websocket_port:=8766
 python3 scripts/test_web_mock.py --url 'http://127.0.0.1:8001/control.html?ws=ws://127.0.0.1:8766'
 python3 scripts/test_web_recovery.py --ws ws://127.0.0.1:8766 # 仅 mock：选定电机重启/清错
+# 新启动且电机关闭的 mock；建议启动时指定临时 points_file：
+python3 scripts/test_web_teaching.py --ws ws://127.0.0.1:8766
 # 在刚启动、初始零位的独立 mock 实例执行：
 python3 scripts/test_web_interactive.py --url 'http://127.0.0.1:8001/control.html?ws=ws://127.0.0.1:8766'
 python3 scripts/test_web_viewer.py --mock-url 'http://127.0.0.1:8001/control.html?ws=ws://127.0.0.1:8766'

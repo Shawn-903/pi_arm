@@ -53,16 +53,20 @@ def dispatch(bridge, preset, **extra):
 
 
 @pytest.mark.parametrize('preset', ['packing', 'zero'])
-def test_presets_use_backend_joint_targets_and_slow_speed(presets, preset):
+@pytest.mark.parametrize('configured_speed', [1.0, 3.0])
+def test_presets_use_backend_joint_targets_and_slow_speed(presets, preset, configured_speed, monkeypatch):
+    # Check the configured speed and units, independently of an operator's local setting.
+    monkeypatch.setattr('pi_arm_websocket.presets.PRESET_JOINT_SPEED_DEG_S', configured_speed)
+    monkeypatch.setattr('pi_arm_websocket.gateway.PRESET_JOINT_SPEED_DEG_S', configured_speed)
     bridge = Bridge(presets)
     result = dispatch(bridge, preset)
     assert result['task_id'] == 42
     action, goal = bridge.goals[0]
     assert action == 'direct' and goal.joint_names == JOINT_NAMES
     assert list(goal.positions) == pytest.approx([0, .15, -.3, 0, 0, .05] if preset == 'packing' else [0]*6)
-    assert goal.max_velocity == pytest.approx(math.radians(1.0))
-    assert result['joint_speed_deg_s'] == 1.0
-    assert presets.status(bridge, bridge.state)[preset]['joint_speed_deg_s'] == 1.0
+    assert goal.max_velocity == pytest.approx(math.radians(configured_speed))
+    assert result['joint_speed_deg_s'] == configured_speed
+    assert presets.status(bridge, bridge.state)[preset]['joint_speed_deg_s'] == configured_speed
 
 
 @pytest.mark.parametrize('condition', ['readonly', 'commissioning', 'unapproved', 'invalid_kinematics',

@@ -5,6 +5,8 @@ import json
 import math
 import threading
 import time
+from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
 from itertools import count
 from typing import Any
 
@@ -22,6 +24,8 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import websockets
 from websockets.exceptions import ConnectionClosed
 from .presets import PosePresets, JOINT_NAMES, PRESET_JOINT_SPEED_DEG_S
+from .frames import FrameModel
+from .points import PointStore, dispatch_points
 
 from .protocol import (
     CODE_COMMAND_FAILED,
@@ -29,6 +33,7 @@ from .protocol import (
     CODE_MOTION_BUSY,
     CODE_STATE_UNAVAILABLE,
     ProtocolError,
+    POINT_COMMANDS,
     Request,
     integer_param,
     parse_request,
@@ -59,6 +64,11 @@ class RosBridge(Node):
             ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"],
         )
         self.hardware_type = str(self.get_parameter("hardware_type").value)
+        self.declare_parameter('points_file', '')
+        self.declare_parameter('frame_model_file', str(Path(get_package_share_directory('pi_arm_description')) / 'urdf/pi_arm.urdf.xacro'))
+        self.points = PointStore(str(self.get_parameter('points_file').value) or str(Path.home() / '.local/share/pi_arm' / f'points-{self.hardware_type}.json'))
+        self.frame_model = FrameModel(str(self.get_parameter('frame_model_file').value),
+                                      list(self.get_parameter('joint_names').value))
         self.read_only = bool(self.get_parameter("read_only").value)
         self.commissioning = bool(self.get_parameter("commissioning").value)
         self.presets = PosePresets(str(self.get_parameter("calibration_file").value), self.hardware_type)
@@ -292,9 +302,12 @@ class CommandGateway:
                 f"params={self._params_for_log(request.params)}"
             )
             data = await self.dispatch(request)
+            summary = ({'revision': data.get('revision'), 'point_count': len(data.get('points', []))}
+                       if request.command in POINT_COMMANDS else
+                       data.get('message') if request.command == 'preview_motion' else data)
             self.bridge.get_logger().info(
                 f"WS 响应成功: msg_id={msg_id} cmd={request.command} "
-                f"data={data if request.command != 'preview_motion' else data.get('message')}"
+                f"data={summary}"
             )
             return response(msg_id, 0, "ok", data)
         except ProtocolError as exc:
@@ -309,6 +322,8 @@ class CommandGateway:
 
     async def dispatch(self, request: Request) -> dict[str, Any]:
         command, params = request.command, request.params
+        if command in POINT_COMMANDS:
+            return await asyncio.to_thread(dispatch_points, self.bridge, command, params)
         if self.bridge.read_only:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "只读排查模式：仅查看反馈，不提供控制服务")
         if command == "preview_motion":
@@ -733,7 +748,7 @@ class WebSocketGateway:
                     "error_joint_angles_deg": [v * RAD_TO_DEG for v in getattr(state.task, "position_errors", [])],
                 },
             }
-        body["pose"] = self._pose() if state is not None else {}
+        body["pose"] = self._pose() if state is not None and not getattr(self.bridge, 'frame_model', None) else {}
         body["hardware_type"] = self.bridge.hardware_type
         preview = getattr(self.bridge, "service_clients", {}).get("preview_motion")
         reboot = getattr(self.bridge, "service_clients", {}).get("reboot_motor")
@@ -767,6 +782,13 @@ class WebSocketGateway:
         body["supported_motion_commands"] = ["move", "motor_move", "output_move", "movej", "movejs", "movel"]
         if self.bridge.read_only or self.bridge.commissioning:
             body["supported_motion_commands"] = []
+        model = getattr(self.bridge, 'frame_model', None)
+        body['base_frames'] = model.feedback(hardware) if model else {'valid': False, 'joints': [], 'tool': None}
+        body['points_available'] = hasattr(self.bridge, 'points') and model is not None
+        if model:
+            tip = body['base_frames'].get('tool')
+            # Use the exact same feedback snapshot as joint/base-frame display and capture.
+            body['pose'] = dict(zip(('x','y','z','rx','ry','rz'), tip['position_mm'] + tip['rpy_deg'])) if tip else {}
         return json.dumps(
             json_safe({"type": "state", "msg_id": next(self.counter), **body}),
             allow_nan=False,

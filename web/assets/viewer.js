@@ -339,6 +339,7 @@
       pathPointCount: pathLine?.geometry.attributes.position.count || 0,
       angles: lastAngles?.slice(),
       previewVisible: Boolean(ghost?.visible),
+      previewTargetAngles: externalPreview?.target?.slice() || null,
       joints: Object.fromEntries(
         Object.entries(robot.joints).map(([n, j]) => [n, j.jointValue.slice()]),
       ),
