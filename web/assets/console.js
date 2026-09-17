@@ -25,6 +25,7 @@
     .join("");
   function showView(view) {
     if (!(view in titles)) return;
+    window.PiArmViewer?.setView(view);
     if (
       ["diagnostics", "commissioning"].includes(view) &&
       role.value !== "developer"
@@ -73,6 +74,7 @@
   const number = (value) => typeof value === "number" && Number.isFinite(value);
   function refresh(state, { fresh, permitted, connectionState }) {
     fresh = Boolean(fresh && state?.state_available !== false);
+    window.PiArmViewer?.refresh(state, { fresh, connectionState });
     const connected = connectionState === "connected";
     const valid = Boolean(fresh && state?.kinematics_valid);
     const mode = !fresh

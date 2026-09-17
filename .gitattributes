@@ -1,0 +1,2 @@
+# Generated vendor bundle contains upstream multiline GLSL shader strings.
+web/vendor/viewer-libs.js linguist-generated=true -whitespace

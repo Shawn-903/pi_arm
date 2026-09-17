@@ -131,6 +131,102 @@
         <div class="workspace-grid">
           <div class="primary-content">
             <section class="view-panel" data-view-panel="workbench">
+              <div id="viewerWorkbenchSlot">
+                <section
+                  class="card robot-viewer"
+                  id="robotViewer"
+                  aria-label="机械臂三维视图"
+                >
+                  <div class="section-heading">
+                    <div>
+                      <span class="eyebrow">ROBOT / DIGITAL VIEW</span>
+                      <h2>三维机械臂</h2>
+                    </div>
+                    <span class="pill" id="viewerStatus" role="status"
+                      >正在加载模型</span
+                    >
+                  </div>
+                  <div class="viewer-toolbar" aria-label="模型视角">
+                    <div class="viewer-views">
+                      <button data-camera-view="iso" aria-label="三维等轴视角">
+                        三维
+                      </button>
+                      <button data-camera-view="front">正视</button>
+                      <button data-camera-view="side">侧视</button>
+                      <button data-camera-view="top">俯视</button>
+                      <button id="viewerFit">居中</button>
+                    </div>
+                    <div class="viewer-toggles">
+                      <label
+                        ><input
+                          type="checkbox"
+                          id="viewerAxes"
+                          checked
+                        />坐标轴</label
+                      >
+                      <label
+                        ><input
+                          type="checkbox"
+                          id="viewerGrid"
+                          checked
+                        />网格</label
+                      >
+                    </div>
+                  </div>
+                  <div class="viewer-stage" id="viewerStage">
+                    <div
+                      id="viewerCanvas"
+                      aria-label="拖动旋转，滚轮缩放，右键平移；点击连杆选择关节"
+                    ></div>
+                    <div class="viewer-stamp">
+                      <span id="viewerSource">URDF / 等待加载</span
+                      ><small>Z ↑ · base_link · m</small>
+                    </div>
+                    <div
+                      class="viewer-loading"
+                      id="viewerLoading"
+                      role="status"
+                    >
+                      正在准备三维资源…
+                    </div>
+                    <div class="viewer-legend">
+                      <span class="legend-feedback">模型反馈</span
+                      ><span class="legend-target">目标预览</span
+                      ><span>X 红 / Y 绿 / Z 蓝</span>
+                    </div>
+                  </div>
+                  <div
+                    class="viewer-joints"
+                    id="viewerJoints"
+                    aria-label="选择显示关节"
+                  ></div>
+                  <div class="viewer-detail">
+                    <span id="viewerSelection">点击连杆或 J1–J6 查看关节</span
+                    ><button id="viewerLocate" class="text-button" disabled>
+                      定位控制面板 ↗
+                    </button>
+                  </div>
+                  <div class="viewer-preview">
+                    <label for="viewerPreview">叠加预览</label>
+                    <select id="viewerPreview">
+                      <option value="none">不显示目标</option>
+                      <option value="single">六轴目标 · 单关节面板</option>
+                      <option value="multi">六轴目标 · 多关节面板</option>
+                      <option value="zero">零位姿态</option>
+                      <option value="packing">打包姿态 · 当前标定</option>
+                    </select>
+                    <span id="viewerPreviewStatus">预览不下发运动</span>
+                  </div>
+                  <div class="viewer-footer">
+                    <span id="viewerTcp">模型 tool0：--</span
+                    ><span>仅关节姿态预览，不代表路径或碰撞检查</span>
+                  </div>
+                  <p class="viewer-note" id="viewerNote">
+                    模型由编码器经绳索运动学推算，请与实机姿态对照。拖动旋转 ·
+                    滚轮缩放 · 右键平移。
+                  </p>
+                </section>
+              </div>
               <section aria-label="实时关节概览" class="joint-overview card">
                 <div class="section-heading">
                   <div>
@@ -577,6 +673,7 @@
               data-view-panel="commissioning"
               hidden=""
             >
+              <div id="viewerCommissioningSlot"></div>
               <div class="section-heading">
                 <div>
                   <span class="eyebrow">COMMISSIONING</span>
@@ -820,6 +917,8 @@
         ><span id="lastFeedbackTime">尚未收到状态</span>
       </footer>
     </div>
+    <script src="vendor/viewer-libs.js"></script>
+    <script src="assets/viewer.js"></script>
     <script src="assets/console.js"></script>
     <script src="assets/control.js"></script>
   </body>

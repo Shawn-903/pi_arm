@@ -1393,3 +1393,234 @@ body[data-view="commissioning"] .workspace-grid {
 .motor-card {
   min-width: 0;
 }
+
+/* The 3D panel is a read-only view of the existing state stream. */
+.robot-viewer {
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.robot-viewer .section-heading {
+  margin-bottom: 14px;
+}
+.viewer-toolbar,
+.viewer-views,
+.viewer-toggles,
+.viewer-detail,
+.viewer-preview,
+.viewer-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.viewer-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.viewer-views button {
+  padding: 6px 12px;
+  min-height: 34px;
+}
+.viewer-views button[aria-pressed="true"] {
+  color: #245bd0;
+  background: #eaf1ff;
+  border-color: #96b5f3;
+}
+.viewer-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+.viewer-toggles input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+.viewer-stage {
+  position: relative;
+  height: 430px;
+  border: 1px solid #d9e2ed;
+  border-radius: 12px;
+  background: #edf2f7;
+  overflow: hidden;
+}
+#viewerCanvas {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+#viewerCanvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline-offset: -3px;
+}
+.viewer-stamp {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  display: grid;
+  gap: 5px;
+  pointer-events: none;
+  font-size: 12px;
+  color: #364b68;
+}
+.viewer-stamp span {
+  font-weight: 650;
+}
+.viewer-stamp small {
+  color: #6a7d94;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+}
+.viewer-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  padding: 30px;
+  color: #465b74;
+  background: #edf2f7ed;
+  font-size: 13px;
+}
+.viewer-loading[hidden] {
+  display: none;
+}
+.viewer-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: #52637b;
+  font-size: 10px;
+  pointer-events: none;
+}
+.legend-feedback::before,
+.legend-target::before {
+  content: "";
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  background: #9aaabd;
+}
+.robot-viewer[data-state="live"] .legend-feedback::before {
+  background: #6086b3;
+}
+.legend-target::before {
+  background: #07a797;
+}
+.viewer-joints {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 12px;
+}
+.viewer-joints button {
+  padding: 9px 3px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  background: #f7f9fc;
+  border: 1px solid #e0e7ef;
+  font-size: 12px;
+}
+.viewer-joints small {
+  font-size: 11px;
+  font-weight: 400;
+  color: #63758c;
+}
+.viewer-joints button[aria-pressed="true"] {
+  border-color: #3973dc;
+  background: #edf3ff;
+  color: #2354ae;
+}
+.viewer-joints button.viewer-warning {
+  border-color: #d89a30;
+  background: #fff5df;
+}
+.viewer-joints button.viewer-fault {
+  border-color: #d85b5b;
+  background: #ffeded;
+}
+.viewer-detail {
+  justify-content: space-between;
+  min-height: 38px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #57677e;
+}
+.viewer-detail span {
+  overflow-wrap: anywhere;
+}
+.viewer-preview {
+  padding: 12px 0;
+  border-top: 1px solid #e4eaf2;
+  font-size: 12px;
+}
+.viewer-preview label {
+  white-space: nowrap;
+}
+.viewer-preview select {
+  max-width: 100%;
+  min-width: 0;
+  width: 210px;
+  font-size: 12px;
+}
+#viewerPreviewStatus {
+  flex: 1;
+  min-width: 150px;
+  color: #167b72;
+}
+#viewerPreviewStatus.error {
+  color: #bc4141;
+}
+.viewer-footer {
+  justify-content: space-between;
+  font-size: 10px;
+  color: #6b7c92;
+  line-height: 1.8;
+}
+.robot-viewer .viewer-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #6b7c92;
+  line-height: 1.7;
+}
+.motor-card.viewer-selected {
+  outline: 2px solid #6694ee;
+  outline-offset: 3px;
+}
+@media (max-width: 640px) {
+  .viewer-stage {
+    height: 330px;
+  }
+  .viewer-toolbar {
+    gap: 10px;
+  }
+  .viewer-views button {
+    padding: 5px 9px;
+  }
+  .viewer-joints {
+    gap: 4px;
+  }
+  .viewer-joints small {
+    font-size: 10px;
+  }
+  .viewer-preview select {
+    flex: 1;
+  }
+  .viewer-detail {
+    align-items: flex-start;
+  }
+  .viewer-legend {
+    gap: 8px;
+    font-size: 9px;
+  }
+}

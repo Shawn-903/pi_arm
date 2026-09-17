@@ -6,3 +6,5 @@ build/
 install/
 log/
 *.o
+# Generated from src/pi_arm_description by export_web_model.py.
+web/model/

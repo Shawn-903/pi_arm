@@ -9,6 +9,8 @@ fi
 source /opt/ros/jazzy/setup.bash
 source "$workspace_root/install/setup.bash"
 set -u
+# Refresh display assets from the same source model before starting any services.
+python3 "$workspace_root/scripts/export_web_model.py"
 web_port="${PI_ARM_WEB_PORT:-8000}"
 launch_file="bringup.launch.py"
 launch_args=(use_rviz:=false)
