@@ -13,7 +13,7 @@ cable_kinematics:
     motor_02: 1
     motor_03: -1
     motor_04: -1
-    motor_05: 1
+    motor_05: -1
     motor_06: -1
 
   validation:

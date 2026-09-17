@@ -150,7 +150,13 @@
     text("operatorHint", hint);
     text(
       "consoleCalibration",
-      fresh ? state.calibration_id || "未加载" : "等待新鲜状态",
+      !fresh
+        ? "等待新鲜状态"
+        : state.calibrated
+          ? state.calibration_id || "已校验"
+          : state.kinematics_error?.code === "CALIBRATION_INVALID"
+            ? `标定校验失败：${state.kinematics_error.message || "请查看详细诊断"}`
+            : "标定未通过，请查看详细诊断",
     );
     text(
       "overviewState",
