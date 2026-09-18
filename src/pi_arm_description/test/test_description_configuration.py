@@ -127,7 +127,7 @@ class DescriptionConfigurationTest(unittest.TestCase):
             self.assertAlmostEqual(
                 axes[joint_name]["joint_radius_mm"]
                 / axes[joint_name]["motor_radius_mm"],
-                33.94 / 16.25,
+                67.88 / 16.25,
             )
             self.assertAlmostEqual(
                 axes[joint_name]["joint2_guide_radius_mm"]
@@ -155,8 +155,8 @@ class DescriptionConfigurationTest(unittest.TestCase):
         )
 
         self.assertAlmostEqual(small["joint2_guide_radius_mm"], 20.25)
-        self.assertAlmostEqual(axes["joint_05"]["joint_radius_mm"], 33.94)
-        self.assertAlmostEqual(axes["joint_06"]["joint_radius_mm"], 33.94)
+        self.assertAlmostEqual(axes["joint_05"]["joint_radius_mm"], 67.88)
+        self.assertAlmostEqual(axes["joint_06"]["joint_radius_mm"], 67.88)
 
         output_limits = cable["output_limits"]
         self.assertEqual(output_limits["coordinate"], "reducer_output_shaft")
@@ -165,7 +165,7 @@ class DescriptionConfigurationTest(unittest.TestCase):
             [name for name in output_limits if name.startswith("motor_")],
             [f"motor_{index:02d}" for index in range(1, 7)],
         )
-        expected_upper = [3.819, 1.758, 7.841, 4.892, 4.127, 6.047]
+        expected_upper = [3.819, 1.758, 7.841, 6.701, 5.172, 6.047]
         for index, upper in enumerate(expected_upper, start=1):
             limit = output_limits[f"motor_{index:02d}"]
             self.assertAlmostEqual(limit["lower_position_rad"], -upper)

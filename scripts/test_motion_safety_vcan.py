@@ -166,6 +166,9 @@ def main():
         signs = [directions[f'motor_{i:02d}'] for i in range(1, 7)]
         swapped = yaml.safe_load(cable_file.read_text())['cable_kinematics'].get('swap_wrist_channels', False)
         j4_motor = 5 if swapped else 4
+        axes = yaml.safe_load(cable_file.read_text())['cable_kinematics']['axes']
+        wrist_gains = {motor: axes[name]['joint_radius_mm'] / axes[name]['motor_radius_mm']
+                       for motor, name in ((4, 'joint_05'), (5, 'joint_06'))}
         candidate = runpy.run_path(str(ROOT/'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
         mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36 if i <= 3 else 6,
                         motor_direction=direction)
@@ -239,7 +242,7 @@ def main():
                         assert len(emulator.frames_for(0xa4)) == sent
 
             print('CASE: joint feedback limit inhibits normal control')
-            outside = -signs[j4_motor-1]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(35))
+            outside = -signs[j4_motor-1]*6*180/math.pi*(wrist_gains[j4_motor])*math.sin(math.radians(35))
             angles = [0]*6
             angles[j4_motor-1] = outside
             emulator.reset(angles)
@@ -326,7 +329,7 @@ def main():
                 emulator.assert_stopped([4])
 
             print('CASE: near-limit coupled test rejected before any A4')
-            near = -signs[j4_motor-1]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(29.99))
+            near = -signs[j4_motor-1]*6*180/math.pi*(wrist_gains[j4_motor])*math.sin(math.radians(29.99))
             angles = [0]*6
             angles[j4_motor-1] = near
             emulator.reset(angles)
@@ -445,7 +448,7 @@ def main():
                     sent = dict(emulator.frames_for(0xa4))
                     motor = j4_motor if axis == 4 else axis
                     protocol = struct.unpack('<i', sent[motor][4:])[0]/100
-                    base = 51.75/16.25 if axis == 3 else 33.94/16.25*math.sin(math.radians(1))*180/math.pi
+                    base = 51.75/16.25 if axis == 3 else wrist_gains[j4_motor]*math.sin(math.radians(1))*180/math.pi
                     expected = -signs[motor-1]*base*(36 if axis == 3 else 6)
                     assert abs(protocol-expected) <= .011, (axis, protocol, expected)
                     emulator.inject(motor, protocol)
@@ -551,7 +554,7 @@ def main():
                     settle(p)
                     frames=emulator.frames_for(0xa4)
                     assert {i for i,_ in frames} == {motor}
-                    cap=math.floor(.2*6*(33.94/16.25)*math.cos(math.radians(.1))+1e-9)
+                    cap=math.floor(.2*6*(wrist_gains[motor])*math.cos(math.radians(.1))+1e-9)
                     assert all(1 <= struct.unpack('<H',data[2:4])[0] <= cap for _,data in frames)
             print('PASS: 27 production-backend virtual CAN safety scenarios')
         finally:

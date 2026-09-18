@@ -1,0 +1,96 @@
+cable_kinematics:
+  model_version: 3
+  angle_unit: rad
+  length_unit: mm
+
+  # Physical cable rows: CAN4 -> J5 (joint_06), CAN5 -> J4 (joint_05).
+  # Encoder IDs/signs and J2 compensation stay with their physical motor.
+  swap_wrist_channels: true
+
+  # Cable equation -> physical reducer output-shaft direction, +1 or -1.
+  # Multiplies the ENTIRE equation (self motion AND J2 compensation).
+  # This is NOT motor_direction (protocol encoder -> output shaft, in URDF).
+  # ROS vector order remains joint_01, joint_02, joint_04, joint_05, joint_06, joint_09.
+  # swap_wrist_channels changes only the two wrist cable-to-joint assignments.
+  # After editing, rebind the packing calibration to this model and restart.
+  output_directions:
+    motor_01: 1
+    motor_02: 1
+    motor_03: -1
+    motor_04: -1
+    motor_05: 1
+    motor_06: -1
+
+  validation:
+    asin_domain_tolerance: 1.0e-12
+    cosine_singularity_threshold: 1.0e-6
+    # Axis 6 uses the average of its two manufactured branch ratios. The
+    # measured mismatch is about 5.37e-4, so 1e-3 accepts the real geometry.
+    compatibility_tolerance: 1.0e-3
+    output_limit_tolerance_rad: 1.0e-6
+
+  # Reducer output-shaft positions, relative to the whole-arm zero operation.
+  # These are theoretical envelopes derived from the URDF joint limits and the
+  # cable model; live hardware still requires low-speed acceptance testing.
+  # Joint 2: +/-100.7 deg; joint 4: +/-85.6 deg. Envelopes are rounded
+  # outward to 0.001 rad; this is numerical enclosure, not mechanical clearance.
+  output_limits:
+    coordinate: reducer_output_shaft
+    unit: rad
+    motor_01: {lower_position_rad: -3.819, upper_position_rad: 3.819}
+    motor_02: {lower_position_rad: -1.758, upper_position_rad: 1.758}
+    motor_03: {lower_position_rad: -7.841, upper_position_rad: 7.841}
+    motor_04: {lower_position_rad: -6.701, upper_position_rad: 6.701}
+    motor_05: {lower_position_rad: -5.172, upper_position_rad: 5.172}
+    motor_06: {lower_position_rad: -6.047, upper_position_rad: 6.047}
+
+  # Legacy geometry keys identify cable rows; joint_05/joint_06 geometry
+  # stays with motor_04/motor_05 respectively, even when assignments swap.
+  # R09 onsite trial: wrist effective cable length doubled (2 * 33.94 mm).
+  # This is an effective coefficient, not a measured change to physical geometry.
+  # Both command/feedback and velocity/Jacobian use this same gain.
+  axes:
+    joint_01:
+      model: linear
+      motor_radius_mm: 16.25
+      joint_radius_mm: 19.75
+
+    joint_02:
+      model: linear
+      motor_radius_mm: 16.0
+      joint_radius_mm: 16.0
+
+    joint_04:
+      model: synchronized_pair_coupled
+      motor_radius_mm: 16.25
+      joint3_radius_mm: 28.5
+      joint4_radius_mm: 23.25
+      joint2_guide_radius_mm: 28.5
+      coupling_sign: -1
+
+    joint_05:
+      model: chord_coupled
+      motor_radius_mm: 16.25
+      joint_radius_mm: 67.88
+      joint2_guide_radius_mm: 28.5
+      coupling_sign: 1
+
+    joint_06:
+      model: chord_coupled
+      motor_radius_mm: 16.25
+      joint_radius_mm: 67.88
+      joint2_guide_radius_mm: 28.5
+      coupling_sign: 1
+
+    joint_09:
+      model: dual_branch_coupled
+      branch_a:
+        motor_radius_mm: 12.25
+        joint_radius_mm: 12.25
+        joint2_guide_radius_mm: 20.25
+        coupling_sign: 1
+      branch_b:
+        motor_radius_mm: 17.25
+        joint_radius_mm: 17.25
+        joint2_guide_radius_mm: 28.5
+        coupling_sign: 1
