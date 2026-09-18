@@ -33,6 +33,8 @@ def main():
         assert '100.700' in page.locator('#packingPoseStatus').inner_text()
         page.locator('#target2').fill('12')  # Named pose must not use editable joint targets.
         previous = page.evaluate('lastState.task.task_id')
+        assert page.locator('#presetSpeed').input_value() == '5'
+        page.locator('#presetSpeed').fill('10')
         page.locator('#movePackingPose').click()
         page.wait_for_function('id => lastState.task.task_id > id && lastState.task.status === 1', arg=previous)
         assert page.locator('#movePackingPose').is_disabled()
@@ -45,12 +47,14 @@ def main():
         packing = [r for r in responses if r.get('data', {}).get('preset') == 'packing'][-1]
         assert packing['code'] == 0
         assert packing['data']['target_joint_angles_deg'] == [0, 100.7, -85.6, 0, 0, 0]
-        assert packing['data']['joint_speed_deg_s'] == 1.0
+        assert packing['data']['joint_speed_deg_s'] == 10.0
         previous = page.evaluate('lastState.task.task_id')
+        page.locator('#presetSpeed').fill('5')
         page.locator('#moveZeroPose').click()
         page.wait_for_function('id => lastState.task.task_id > id && lastState.task.status === 2', arg=previous, timeout=120000)
         assert all(abs(q) < .01 for q in page.evaluate('lastState.current_joint_angles'))
         zero = [r for r in responses if r.get('data', {}).get('preset') == 'zero'][-1]
+        assert zero['data']['joint_speed_deg_s'] == 5.0
         assert zero['code'] == 0 and zero['data']['target_joint_angles_deg'] == [0]*6
         page.evaluate('lastStateAt = Date.now()-2000; refreshControlGate()')
         assert page.locator('#movePackingPose').is_disabled()

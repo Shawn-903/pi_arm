@@ -12,10 +12,10 @@ constexpr double kRad = 3.14159265358979323846 / 180.0;
 // Raw motor tests use reducer-output degrees, before direction/cable mapping.
 constexpr double kMotorStepLimitDeg = 5.0;
 constexpr double kMotorSessionLimitDeg = 30.0;
-constexpr double kMotorSpeedLimitDegS = 1.0;
+constexpr double kMotorSpeedLimitDegS = 10.0;
 constexpr double kJointStepLimitDeg = 0.5;
 constexpr double kJointSessionLimitDeg = 2.0;
-constexpr double kJointSpeedLimitDegS = 0.5;
+constexpr double kJointSpeedLimitDegS = 10.0;
 }
 
 bool RealBackend::axis_test_raw_ready(const bool require_still) const
@@ -55,8 +55,8 @@ ManagementResult RealBackend::start_axis_test(
     !std::isfinite(speed_deg_s) || speed_deg_s < 0.05 || speed_deg_s > speed_limit)
   {
     return {false, 1004, motor_test ?
-      "motor output step must be +/-0.01..5 deg; output speed 0.05..1 deg/s; CAN ID 1..6" :
-      "joint step must be +/-0.01..0.5 deg; speed 0.05..0.5 deg/s; axis 1..6"};
+      "motor output step must be +/-0.01..5 deg; output speed 0.05..10 deg/s; CAN ID 1..6" :
+      "joint step must be +/-0.01..0.5 deg; speed 0.05..10 deg/s; axis 1..6"};
   }
   const auto joint_index = static_cast<size_t>(axis_id - 1);
   const auto selected_motor_index = kinematics_.parameters().swap_wrist_channels &&

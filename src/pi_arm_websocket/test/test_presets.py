@@ -53,8 +53,8 @@ def dispatch(bridge, preset, **extra):
 
 
 @pytest.mark.parametrize('preset', ['packing', 'zero'])
-@pytest.mark.parametrize('configured_speed', [1.0, 3.0])
-def test_presets_use_backend_joint_targets_and_slow_speed(presets, preset, configured_speed, monkeypatch):
+@pytest.mark.parametrize('configured_speed', [5.0])
+def test_presets_use_backend_joint_targets_and_default_speed(presets, preset, configured_speed, monkeypatch):
     # Check the configured speed and units, independently of an operator's local setting.
     monkeypatch.setattr('pi_arm_websocket.presets.PRESET_JOINT_SPEED_DEG_S', configured_speed)
     monkeypatch.setattr('pi_arm_websocket.gateway.PRESET_JOINT_SPEED_DEG_S', configured_speed)
@@ -104,7 +104,6 @@ def test_unknown_pose_or_client_target_override_rejected(presets):
     b = Bridge(presets)
     with pytest.raises(ProtocolError): dispatch(b, 'unknown')
     with pytest.raises(ProtocolError): dispatch(b, 'packing', targets=[0]*6)
-    with pytest.raises(ProtocolError): dispatch(b, 'zero', max_speed=10)
     assert not b.goals
 
 
@@ -126,3 +125,20 @@ def test_unapproved_file_keeps_target_visible_but_disabled(tmp_path):
     status = presets.status(b, b.state)['packing']
     assert status['target_joint_angles_deg'][1] == pytest.approx(math.degrees(.1))
     assert not status['available'] and '尚未确认' in status['reason']
+
+
+@pytest.mark.parametrize('preset', ['packing', 'zero'])
+@pytest.mark.parametrize('speed', [0.5, 5.0, 10.0])
+def test_preset_speed_is_adjustable_without_changing_target(presets, preset, speed):
+    b = Bridge(presets)
+    reply = dispatch(b, preset, max_speed=speed, output_speed_limit=10)
+    assert b.goals[0][1].max_velocity == pytest.approx(math.radians(speed))
+    assert b.goals[0][1].max_output_velocity == pytest.approx(math.radians(10))
+    assert reply['joint_speed_deg_s'] == speed
+
+
+@pytest.mark.parametrize('speed', [0, -1, 10.001, float('nan'), float('inf')])
+def test_invalid_preset_speed_never_sends_motion(presets, speed):
+    b = Bridge(presets)
+    with pytest.raises(ProtocolError): dispatch(b, 'zero', max_speed=speed)
+    assert not b.goals

@@ -54,7 +54,7 @@ namespace
 // pi_arm_moveit_config/config/pilz_cartesian_limits.yaml used by move_group Pilz.
 constexpr double kMaxTransVelMps = 0.1;              // 100 mm/s
 constexpr double kMaxTransAccMps2 = 0.2;             // 200 mm/s²
-constexpr double kMaxRotVelRadps = 0.174532925;      // 10 deg/s
+constexpr double kMaxRotVelRadps = 0.17453292519943295;      // 10 deg/s
 // Pilz-style derived rotational acceleration for goal validation / logging only.
 constexpr double kMaxRotAccRadps2 = kMaxTransAccMps2 / kMaxTransVelMps * kMaxRotVelRadps;
 
@@ -255,7 +255,7 @@ private:
 
   static bool valid_output_speed(double speed)
   {
-    return std::isfinite(speed) && (speed == 0.0 || speed >= 0.002908882086657216);
+    return std::isfinite(speed) && (speed == 0.0 || (speed >= 0.002908882086657216 && speed <= kMaxRotVelRadps));
   }
 
   static double resolved_output_speed(double speed)

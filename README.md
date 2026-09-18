@@ -29,8 +29,8 @@
 | 输出轴目标 | 六轴模型输出角目标，绳索反解及关节限位检查后进入轨迹控制 |
 | 关节空间 | 单关节与整臂目标，共用任务、取消及停止链路 |
 | 笛卡尔空间 | base_link 坐标系、tool0 法兰中心，MoveIt/Pilz LIN 规划 |
-| 预设姿态 | 打包及零位，共同关节速度上限 **1°/s** |
-| 输出轴限速 | 网页可调整，默认 **5°/s**；下一条运动生效，落实到轨迹时长和 CAN 编码 |
+| 预设姿态 | 打包及零位，关节速度网页可调，默认 **5°/s**、最高 **10°/s** |
+| 输出轴限速 | 网页可调整，默认 **5°/s**、最高 **10°/s**；下一条运动生效，落实到轨迹时长和 CAN 编码 |
 | 单轴测试 | 独立 commissioning 模式：协议方向电机点动、绳索模型关节点动 |
 | 停止和限位 | 停止撤销写入许可并检查停止应答；J2/J3 反馈允许 3° 容差，指令使用标准限位 |
 
@@ -106,7 +106,7 @@ p 是协议角，φ 是物理输出轴相对模型零位的角，q 是关节角�
 | --- | --- |
 | 绳索方向、几何、J2 耦合 | `src/pi_arm_description/config/cable_kinematics.yaml` |
 | 安装方向、减速比、关节限位和反馈容差 | `src/pi_arm_description/urdf/pi_arm.urdf.xacro` |
-| 打包/零位共同关节限速 | `src/pi_arm_websocket/pi_arm_websocket/presets.py`：`PRESET_JOINT_SPEED_DEG_S = 1.0` |
+| 打包/零位共同关节限速 | 网页「预设姿态」速度框；默认 / 上限见 `src/pi_arm_websocket/pi_arm_websocket/motion_limits.py`（5 / 10 °/s） |
 | 单次输出轴限速 | 网页输入框 / API 的 `output_speed_limit`，单位 °/s |
 | 轨迹控制器 | `src/pi_arm_bringup/config/controllers.yaml` |
 | 到位容差、稳定时间、收敛等待 | `src/pi_arm_bringup/config/manager.yaml`（默认 0.2° / 0.5 s / 10 s） |

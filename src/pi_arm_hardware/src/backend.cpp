@@ -619,8 +619,9 @@ MotionArmResult RealBackend::set_motion_armed(
     return {false, false, "CAN driver is not available for motion arming"};
   }
   const double speed_limit = max_output_velocity == 0.0 ? 0.08726646259971647 : max_output_velocity;
-  if (!std::isfinite(speed_limit) || speed_limit < 0.002908882086657216) {
-    return {false, false, "output speed limit must be finite and at least 1/6 deg/s"};
+  if (!std::isfinite(speed_limit) || speed_limit < 0.002908882086657216 ||
+    speed_limit > 0.17453292519943295) {
+    return {false, false, "output speed limit must be finite and within 1/6..10 deg/s"};
   }
   if (motion_write_gate_.armed()) {
     return {false, true, "motion lease already armed"};
@@ -1244,7 +1245,9 @@ MotionArmResult MockBackend::set_motion_armed(
   if (armed && lease_id == 0U) {
     return {false, false, "invalid mock motion lease"};
   }
-  if (armed && (!std::isfinite(max_output_velocity) || max_output_velocity < 0.0)) {
+  if (armed && (!std::isfinite(max_output_velocity) ||
+    (max_output_velocity != 0.0 && (max_output_velocity < 0.002908882086657216 ||
+    max_output_velocity > 0.17453292519943295)))) {
     return {false, false, "invalid output speed limit"};
   }
   if (armed) {hold_mock_current_ = false;}

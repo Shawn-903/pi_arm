@@ -47,7 +47,7 @@ def test_angle_preview_units_and_no_action(mode):
     data = dispatch(bridge, mode=mode, targets=[30]*6, max_speed=2, output_speed_limit=1)
     req = bridge.requests[0]
     assert list(req.positions) == pytest.approx([math.pi / 6]*6)
-    assert req.max_velocity == pytest.approx(math.radians(1 if mode == 'output' else 2))
+    assert req.max_velocity == pytest.approx(math.radians(10 if mode == 'output' else 2))
     assert req.max_output_velocity == pytest.approx(math.radians(1))
     assert data['target_joint_angles_deg'] == pytest.approx([30]*6)
     assert data['target_output_angles_deg'] == pytest.approx([60]*6)

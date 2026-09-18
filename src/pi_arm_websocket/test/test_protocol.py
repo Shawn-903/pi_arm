@@ -147,7 +147,7 @@ def test_output_targets_keep_model_output_coordinates_until_manager_inverse():
     assert result['output_speed_limit'] == pytest.approx(3)
 
 
-@pytest.mark.parametrize('speed', [0, -.1, .1, float('inf'), float('nan')])
+@pytest.mark.parametrize('speed', [0, -.1, .1, 10.001, float('inf'), float('nan')])
 def test_invalid_output_speed_never_submits_goal(speed):
     bridge = _CommandBridge()
     with pytest.raises(ProtocolError):
@@ -171,3 +171,25 @@ def test_axis_test_requires_dedicated_commissioning_mode():
         asyncio.run(CommandGateway(_CommandBridge()).dispatch(parse_request(
             '{"cmd":"axis_test","params":{"space":"motor","axis_id":1,"delta_deg":0.1,"speed_deg_s":0.2}}'
         )))
+
+
+@pytest.mark.parametrize('speed', [None, 10.0, 10.001])
+@pytest.mark.parametrize('command,params,key,attribute', [
+    ('motor_move', {'joint_id':1,'target_angle':1}, 'max_speed', 'max_velocity'),
+    ('move', {'targets':[0]*6}, 'max_speed', 'max_velocity'),
+    ('movej', {'target':[0]*6,'acc':1}, 'vel', 'max_velocity'),
+    ('movel', {'target':[0]*6,'linear_vel':5,'linear_acc':10,'angular_acc':2}, 'angular_vel', 'max_angular_velocity'),
+    ('output_move', {'targets':[0]*6}, 'output_speed_limit', 'max_output_velocity'),
+])
+def test_angular_speed_defaults_and_boundary(command, params, key, attribute, speed):
+    import math
+    bridge = _CommandBridge()
+    params = dict(params)
+    if speed is not None: params[key] = speed
+    request = parse_request(json.dumps({'cmd':command,'params':params}))
+    if speed is not None and speed > 10:
+        with pytest.raises(ProtocolError): asyncio.run(CommandGateway(bridge).dispatch(request))
+        assert not bridge.goals
+    else:
+        asyncio.run(CommandGateway(bridge).dispatch(request))
+        assert getattr(bridge.goals[0][1],attribute) == pytest.approx(math.radians(5 if speed is None else speed))

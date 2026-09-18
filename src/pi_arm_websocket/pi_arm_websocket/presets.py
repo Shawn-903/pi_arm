@@ -3,12 +3,13 @@ from pathlib import Path
 import math
 
 import yaml
+from .motion_limits import DEFAULT_ANGULAR_SPEED_DEG_S, MAX_ANGULAR_SPEED_DEG_S
 
 JOINT_NAMES = ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"]
 MOCK_PACKING_DEG = [0.0, 100.7, -85.6, 0.0, 0.0, 0.0]
-# Shared joint-speed ceiling for packing/zero pose buttons (degrees/second).
+# Default adjustable joint speed for packing/zero pose buttons (degrees/second).
 # The per-request output-shaft speed limit is enforced independently.
-PRESET_JOINT_SPEED_DEG_S = 1.0
+PRESET_JOINT_SPEED_DEG_S = DEFAULT_ANGULAR_SPEED_DEG_S
 
 
 class PosePresets:
@@ -74,5 +75,6 @@ class PosePresets:
                     denied.append("网页目标与硬件加载的标定 ID 不一致")
             result[name] = {"label": label, "target_joint_angles_deg": target,
                             "available": not denied, "reason": "；".join(denied),
-                            "joint_speed_deg_s": PRESET_JOINT_SPEED_DEG_S}
+                            "joint_speed_deg_s": PRESET_JOINT_SPEED_DEG_S,
+                            "max_joint_speed_deg_s": MAX_ANGULAR_SPEED_DEG_S}
         return result

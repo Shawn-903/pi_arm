@@ -184,7 +184,7 @@ def main():
         emulator = Emulator()
         try:
             print('CASE: normal wire speed ceiling, low-speed fallback and tolerant start projection')
-            for cap in (5.0, .2, 1.5):
+            for cap in (5.0, 10.0, .2, 1.5):
                 emulator.reset()
                 with backend(executable, calibration) as p:
                     command(p, f'write_speed {cap}')
@@ -195,6 +195,11 @@ def main():
                         speed = struct.unpack('<H', data[2:4])[0]
                         assert 1 <= speed <= math.floor(cap*(36 if motor <= 3 else 6)+1e-9)
                     command(p, 'disarm')
+
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'write_speed 10.001', ok=False)
+                assert not emulator.frames_for(0xa4), 'over-limit request emitted A4'
 
             print('CASE: feedback allowance preserves measured angles, command bounds stay strict')
             def protocol_from_joint_degrees(q2, q3):
@@ -393,11 +398,11 @@ def main():
                 print(f'CASE: CAN {motor} output step 5 deg at 1 deg/s, ratio {ratio}')
                 emulator.reset(dynamic=True)
                 with backend(executable, calibration, True) as p:
-                    for delta, speed in [(5.01, 1), (-5.01, 1), (5, 1.01)]:
+                    for delta, speed in [(5.01, 1), (-5.01, 1), (5, 10.01)]:
                         command(p, f'motor {motor} {delta} {speed}', ok=False)
                     # Enlarging raw motor tests does not enlarge joint requests.
                     command(p, 'joint 1 .51 .2', ok=False)
-                    command(p, 'joint 1 .1 .51', ok=False)
+                    command(p, 'joint 1 .1 10.01', ok=False)
                     assert not emulator.frames_for(0xa4)
                     command(p, f'motor {motor} {sign*5} 1')
                     settle(p, attempts=80)  # Heartbeat stays alive during the 5-second move.
@@ -410,6 +415,18 @@ def main():
                         assert abs(emulator.positions[motor]/ratio-sign*5) < .001
                         assert all(abs(value) < .001 for i, value in emulator.positions.items() if i != motor)
                     emulator.assert_stopped([motor])
+
+            # Both commissioning spaces accept the default and upper boundary.
+            for space, axis in [('motor', 4), ('joint', 1)]:
+                for speed in (5, 10):
+                    emulator.reset(dynamic=True)
+                    with backend(executable, calibration, True) as p:
+                        command(p, f'{space} {axis} .1 {speed}')
+                        settle(p)
+                        frames = emulator.frames_for(0xa4)
+                        assert frames
+                        assert all(1 <= struct.unpack('<H', data[2:4])[0] <= 10*(36 if motor <= 3 else 6)
+                                   for motor, data in frames)
 
             for sign in (1, -1):
                 print(f'CASE: signed session boundary {sign*30} output deg from nonzero origin')

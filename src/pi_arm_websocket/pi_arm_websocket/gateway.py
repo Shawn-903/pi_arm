@@ -24,6 +24,7 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import websockets
 from websockets.exceptions import ConnectionClosed
 from .presets import PosePresets, JOINT_NAMES, PRESET_JOINT_SPEED_DEG_S
+from .motion_limits import DEFAULT_ANGULAR_SPEED_DEG_S, MAX_ANGULAR_SPEED_DEG_S
 from .frames import FrameModel
 from .points import PointStore, dispatch_points
 
@@ -339,18 +340,19 @@ class CommandGateway:
             name = params.get("preset")
             if name not in ("packing", "zero"):
                 raise ProtocolError(CODE_INVALID_PARAMS, "preset 必须为 packing 或 zero")
-            if set(params) - {"preset", "output_speed_limit"}:
-                raise ProtocolError(CODE_INVALID_PARAMS, "仅接受 preset 和 output_speed_limit 参数")
+            if set(params) - {"preset", "output_speed_limit", "max_speed"}:
+                raise ProtocolError(CODE_INVALID_PARAMS, "仅接受 preset、max_speed 和 output_speed_limit 参数")
             state = self.bridge.state_snapshot()
             catalog = getattr(self.bridge, "presets", PosePresets()).status(self.bridge, state)
             preset = catalog[name]
             if not preset["available"]:
                 raise ProtocolError(CODE_STATE_UNAVAILABLE, preset["reason"])
-            task_id = await self._direct(JOINT_NAMES, preset["target_joint_angles_deg"], PRESET_JOINT_SPEED_DEG_S,
+            speed = self._angular_speed(params, "max_speed", PRESET_JOINT_SPEED_DEG_S)
+            task_id = await self._direct(JOINT_NAMES, preset["target_joint_angles_deg"], speed,
                                          self._output_speed(params))
             return {"cmd": command, "preset": name, "task_id": task_id,
                     "target_joint_angles_deg": preset["target_joint_angles_deg"],
-                    "joint_speed_deg_s": PRESET_JOINT_SPEED_DEG_S}
+                    "joint_speed_deg_s": speed}
         if command.startswith("axis_test") or (
             self.bridge.commissioning and command in {"motor_stop", "stop_motion"}
         ):
@@ -363,7 +365,7 @@ class CommandGateway:
                 ros_request.space = str(params.get("space", ""))
                 ros_request.axis_id = integer_param(params, "axis_id")
                 ros_request.delta_deg = required_float(params, "delta_deg")
-                ros_request.speed_deg_s = required_float(params, "speed_deg_s", positive=True)
+                ros_request.speed_deg_s = self._angular_speed(params, "speed_deg_s")
             result = await self.bridge.call_service("axis_test", ros_request)
             return {"cmd": command, "axis_test_id": result.test_id, "message": result.message}
         if self.bridge.commissioning and command not in {"enable_motor", "disable_motor", "reset_motor", "reboot_motor"}:
@@ -400,13 +402,13 @@ class CommandGateway:
             return await self._movel(params)
         if command == "move":
             targets = self._joint_vector(params, "targets")
-            speed = required_float(params, "max_speed", positive=True)
+            speed = self._angular_speed(params, "max_speed")
             task_id = await self._direct(self._joint_names(), targets, speed, self._output_speed(params))
             return {"cmd": "move", "task_id": task_id}
         if command == "output_move":
             targets = required_vector(params, "targets", 6)
             speed = self._output_speed(params)
-            task_id = await self._direct(JOINT_NAMES, targets, 1.0, speed, output_space=True)
+            task_id = await self._direct(JOINT_NAMES, targets, MAX_ANGULAR_SPEED_DEG_S, speed, output_space=True)
             return {"cmd": command, "task_id": task_id, "target_output_deg": targets,
                     "output_speed_limit": speed * RAD_TO_DEG}
         if command == "motor_move":
@@ -426,8 +428,8 @@ class CommandGateway:
         request.max_output_velocity = self._output_speed(params)
         if mode in {"joint", "output"}:
             request.positions = [v * DEG_TO_RAD for v in required_vector(params, "targets", 6)]
-            request.max_velocity = (1.0 if mode == "output" else
-                required_float(params, "max_speed", positive=True)) * DEG_TO_RAD
+            request.max_velocity = (MAX_ANGULAR_SPEED_DEG_S if mode == "output" else
+                self._angular_speed(params, "max_speed")) * DEG_TO_RAD
         else:
             target = required_vector(params, "target", 6)
             request.target.position.x, request.target.position.y, request.target.position.z = [v / 1000.0 for v in target[:3]]
@@ -437,7 +439,7 @@ class CommandGateway:
             if mode == "lin":
                 request.max_linear_velocity = required_float(params, "linear_vel", positive=True) / 1000.0
                 request.max_linear_acceleration = required_float(params, "linear_acc", positive=True) / 1000.0
-                request.max_angular_velocity = required_float(params, "angular_vel", positive=True) * DEG_TO_RAD
+                request.max_angular_velocity = self._angular_speed(params, "angular_vel") * DEG_TO_RAD
         result = await self.bridge.call_service("preview_motion", request)
         pose = result.target_pose
         rpy = rpy_from_quaternion(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w)
@@ -464,7 +466,7 @@ class CommandGateway:
 
     async def _movej(self, params: dict[str, Any]) -> dict[str, Any]:
         target = self._joint_vector(params, "target")
-        velocity = required_float(params, "vel", positive=True)
+        velocity = self._angular_speed(params, "vel")
         acceleration = required_float(params, "acc", positive=True)
         goal = MoveJ.Goal()
         goal.max_output_velocity = self._output_speed(params)
@@ -507,7 +509,7 @@ class CommandGateway:
         target = required_vector(params, "target", 6)
         linear_velocity = required_float(params, "linear_vel", positive=True)
         linear_acceleration = required_float(params, "linear_acc", positive=True)
-        angular_velocity = required_float(params, "angular_vel", positive=True)
+        angular_velocity = self._angular_speed(params, "angular_vel")
         angular_acceleration = required_float(params, "angular_acc", positive=True)
         pose = PoseStamped()
         pose.header.frame_id = "base_link"
@@ -546,7 +548,7 @@ class CommandGateway:
 
     async def _direct(
         self, names: list[str], targets_deg: list[float], speed_deg_s: float,
-        output_speed: float = 5.0 * DEG_TO_RAD, *, output_space: bool = False
+        output_speed: float = DEFAULT_ANGULAR_SPEED_DEG_S * DEG_TO_RAD, *, output_space: bool = False
     ) -> int:
         goal = DirectMove.Goal()
         goal.joint_names = names
@@ -557,8 +559,16 @@ class CommandGateway:
         return await self.bridge.send_goal("direct", goal)
 
     @staticmethod
+    def _angular_speed(params: dict[str, Any], name: str,
+                       default: float = DEFAULT_ANGULAR_SPEED_DEG_S) -> float:
+        speed = required_float({name: params.get(name, default)}, name, positive=True)
+        if speed > MAX_ANGULAR_SPEED_DEG_S:
+            raise ProtocolError(CODE_INVALID_PARAMS, f"{name} 不得超过 {MAX_ANGULAR_SPEED_DEG_S:g} °/s")
+        return speed
+
+    @staticmethod
     def _output_speed(params: dict[str, Any]) -> float:
-        speed = required_float({"limit": params.get("output_speed_limit", 5.0)}, "limit", positive=True)
+        speed = CommandGateway._angular_speed(params, "output_speed_limit")
         if speed < 1.0 / 6.0:
             raise ProtocolError(CODE_INVALID_PARAMS, "输出轴限速不得低于协议分辨率 1/6 °/s")
         return speed * DEG_TO_RAD
@@ -572,7 +582,7 @@ class CommandGateway:
             # Stopping never creates a fresh movement goal or requires READY.
             await self.bridge.call_service("stop_motion", StopMotion.Request())
             return {"cmd": "motor_stop", "joint_id": joint_id}
-        speed = required_float({"max_speed": params.get("max_speed", 1)}, "max_speed", positive=True)
+        speed = self._angular_speed(params, "max_speed")
         angle = required_float(params, "target_angle")
         task_id = await self._direct([names[joint_id - 1]], [angle], speed, self._output_speed(params))
         return {

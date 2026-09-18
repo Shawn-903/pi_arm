@@ -373,6 +373,7 @@ function sendCommand(cmd, params = {}) {
       params = {
         ...params,
         output_speed_limit: readPositiveFloat("outputSpeedLimit"),
+        ...(cmd === "move_preset" ? { max_speed: readPositiveFloat("presetSpeed") } : {}),
       };
     } catch (error) {
       log("参数错误", { message: error.message });
@@ -899,7 +900,7 @@ function buildSingleMotorControls() {
             <div class="control-row">
               <span class="input-pair">
                 <label for="speed${motorId}">速度(°/s)</label>
-                <input id="speed${motorId}" type="number" min="0.01" max="10" step="any" value="1">
+                <input id="speed${motorId}" type="number" min="0.01" max="10" step="any" value="5">
               </span>
               <button class="btn-green" data-cmd="enable_motor" data-motor-id="${motorId}">CAN${motorId} 使能</button>
               <button class="btn-red" data-cmd="disable_motor" data-motor-id="${motorId}">CAN${motorId} 关闭</button>
