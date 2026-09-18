@@ -143,6 +143,8 @@ CableKinematics::CableKinematics(CableKinematicsParameters parameters)
     }
   }
 
+  if (parameters_.swap_wrist_channels) {motor4_joint_ = 4U; motor5_joint_ = 3U;}
+
   alpha1_ = parameters_.axis1.joint_radius_mm / parameters_.axis1.motor_radius_mm;
   alpha2_ = parameters_.axis2.joint_radius_mm / parameters_.axis2.motor_radius_mm;
   axis3_self_gain_ =
@@ -217,10 +219,10 @@ KinematicsStatus CableKinematics::joint_to_output_position(
     axis3_self_gain_ * joint_position_rad[2] +
     axis3_coupling_gain_ * joint_position_rad[1];
   output_position_rad[3] =
-    axis4_self_gain_ * std::sin(joint_position_rad[3]) +
+    axis4_self_gain_ * std::sin(joint_position_rad[motor4_joint_]) +
     axis4_coupling_gain_ * joint_position_rad[1];
   output_position_rad[4] =
-    axis5_self_gain_ * std::sin(joint_position_rad[4]) +
+    axis5_self_gain_ * std::sin(joint_position_rad[motor5_joint_]) +
     axis5_coupling_gain_ * joint_position_rad[1];
   output_position_rad[5] =
     alpha6_ * joint_position_rad[5] + axis6_coupling_gain_ * joint_position_rad[1];
@@ -249,7 +251,7 @@ KinematicsStatus CableKinematics::output_to_joint_position(
   if (!status) {
     return status;
   }
-  joint_position_rad[3] = std::asin(argument4);
+  joint_position_rad[motor4_joint_] = std::asin(argument4);
 
   double argument5 = 0.0;
   status = asin_argument(
@@ -259,7 +261,7 @@ KinematicsStatus CableKinematics::output_to_joint_position(
   if (!status) {
     return status;
   }
-  joint_position_rad[4] = std::asin(argument5);
+  joint_position_rad[motor5_joint_] = std::asin(argument5);
   joint_position_rad[5] =
     (output_position_rad[5] - axis6_coupling_gain_ * joint_position_rad[1]) / alpha6_;
   return require_finite_vector(joint_position_rad);
@@ -330,11 +332,11 @@ KinematicsStatus CableKinematics::jacobian(
   jacobian_value[2][1] = axis3_coupling_gain_;
   jacobian_value[2][2] = axis3_self_gain_;
   jacobian_value[3][1] = axis4_coupling_gain_;
-  jacobian_value[3][3] =
-    axis4_self_gain_ * std::cos(joint_position_rad[3]);
+  jacobian_value[3][motor4_joint_] =
+    axis4_self_gain_ * std::cos(joint_position_rad[motor4_joint_]);
   jacobian_value[4][1] = axis5_coupling_gain_;
-  jacobian_value[4][4] =
-    axis5_self_gain_ * std::cos(joint_position_rad[4]);
+  jacobian_value[4][motor5_joint_] =
+    axis5_self_gain_ * std::cos(joint_position_rad[motor5_joint_]);
   jacobian_value[5][1] = axis6_coupling_gain_;
   jacobian_value[5][5] = alpha6_;
   return KinematicsStatus::success();
@@ -377,13 +379,13 @@ KinematicsStatus CableKinematics::output_to_joint_velocity(
     return status;
   }
 
-  const double cosine4 = std::cos(joint_position_rad[3]);
-  const double cosine5 = std::cos(joint_position_rad[4]);
+  const double cosine4 = std::cos(joint_position_rad[motor4_joint_]);
+  const double cosine5 = std::cos(joint_position_rad[motor5_joint_]);
   if (std::abs(cosine4) <= parameters_.cosine_singularity_threshold) {
-    return {KinematicsError::VELOCITY_SINGULARITY, 4U, cosine4};
+    return {KinematicsError::VELOCITY_SINGULARITY, motor4_joint_ + 1U, cosine4};
   }
   if (std::abs(cosine5) <= parameters_.cosine_singularity_threshold) {
-    return {KinematicsError::VELOCITY_SINGULARITY, 5U, cosine5};
+    return {KinematicsError::VELOCITY_SINGULARITY, motor5_joint_ + 1U, cosine5};
   }
 
   joint_velocity_rad_s[0] = output_velocity_rad_s[0] / alpha1_;
@@ -391,10 +393,10 @@ KinematicsStatus CableKinematics::output_to_joint_velocity(
   joint_velocity_rad_s[2] =
     (output_velocity_rad_s[2] - axis3_coupling_gain_ * joint_velocity_rad_s[1]) /
     axis3_self_gain_;
-  joint_velocity_rad_s[3] =
+  joint_velocity_rad_s[motor4_joint_] =
     (output_velocity_rad_s[3] - axis4_coupling_gain_ * joint_velocity_rad_s[1]) /
     (axis4_self_gain_ * cosine4);
-  joint_velocity_rad_s[4] =
+  joint_velocity_rad_s[motor5_joint_] =
     (output_velocity_rad_s[4] - axis5_coupling_gain_ * joint_velocity_rad_s[1]) /
     (axis5_self_gain_ * cosine5);
   joint_velocity_rad_s[5] =

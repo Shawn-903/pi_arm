@@ -347,3 +347,36 @@ TEST(CableKinematics, Axis6BranchesCloseSimultaneously)
 }
 
 }  // namespace
+
+TEST(CableKinematics, WristSwapPermutesJointCoordinatesButPreservesPhysicalCableRows)
+{
+  auto config = parameters();
+  config.output_directions = {1, 1, -1, -1, 1, -1};
+  config.axis5.joint_radius_mm = 31.0;  // Unequal gains catch accidental row swapping.
+  const pi_arm_transmission::CableKinematics old(config);
+  config.swap_wrist_channels = true;
+  const pi_arm_transmission::CableKinematics model(config);
+  const pi_arm_transmission::Vector6 q{.1, .3, -.2, -.34, .45, -.1};
+  const pi_arm_transmission::Vector6 dq{.01, -.02, .03, -.04, .05, .06};
+  auto old_q=q, old_dq=dq;
+  std::swap(old_q[3],old_q[4]); std::swap(old_dq[3],old_dq[4]);
+  pi_arm_transmission::Vector6 expected{}, actual{}, expected_v{}, actual_v{}, recovered{}, recovered_v{};
+  ASSERT_TRUE(old.joint_to_output_position(old_q, expected));
+  ASSERT_TRUE(model.joint_to_output_position(q, actual));
+  ASSERT_TRUE(old.joint_to_output_velocity(old_q, old_dq, expected_v));
+  ASSERT_TRUE(model.joint_to_output_velocity(q, dq, actual_v));
+  ASSERT_TRUE(model.output_to_joint_position(actual, recovered));
+  ASSERT_TRUE(model.output_to_joint_velocity(q, actual_v, recovered_v));
+  pi_arm_transmission::Matrix6 jac{}; ASSERT_TRUE(model.jacobian(q,jac));
+  EXPECT_EQ(jac[3][3],0.0); EXPECT_EQ(jac[4][4],0.0);
+  EXPECT_LT(jac[3][4],0.0); EXPECT_GT(jac[4][3],0.0);
+  for (size_t i=0; i<6; ++i) {
+    EXPECT_NEAR(actual[i],expected[i],1e-12);
+    EXPECT_NEAR(actual_v[i],expected_v[i],1e-12);
+    EXPECT_NEAR(recovered[i],q[i],1e-12);
+    EXPECT_NEAR(recovered_v[i],dq[i],1e-12);
+    auto perturbed=q; perturbed[i]+=1e-7;
+    pi_arm_transmission::Vector6 shifted{}; ASSERT_TRUE(model.joint_to_output_position(perturbed,shifted));
+    for(size_t j=0;j<6;++j) {EXPECT_NEAR((shifted[j]-actual[j])/1e-7,jac[j][i],1e-6);}
+  }
+}

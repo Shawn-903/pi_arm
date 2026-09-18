@@ -131,7 +131,7 @@ std::vector<std::uint8_t> selected_motor_ids(
 }
 
 bool joint_depends_on_motor(
-  const std::size_t joint_index, const std::size_t motor_index) noexcept
+  const std::size_t joint_index, const std::size_t motor_index, const bool swap_wrist_channels) noexcept
 {
   if (joint_index == 0U) {
     return motor_index == 0U;
@@ -139,10 +139,12 @@ bool joint_depends_on_motor(
   if (joint_index == 1U) {
     return motor_index == 1U;
   }
-  return motor_index == 1U || motor_index == joint_index;
+  const auto own_motor = swap_wrist_channels && (joint_index == 3U || joint_index == 4U) ?
+    7U - joint_index : joint_index;
+  return motor_index == 1U || motor_index == own_motor;
 }
 
-void aggregate_mock_motor_state_to_joints(HardwareSample & sample)
+void aggregate_mock_motor_state_to_joints(HardwareSample & sample, const bool swap_wrist_channels)
 {
   if (sample.motor_enabled.size() != kAxisCount ||
     sample.motor_has_error.size() != kAxisCount ||
@@ -159,7 +161,7 @@ void aggregate_mock_motor_state_to_joints(HardwareSample & sample)
     std::int32_t error_code = 0;
     double age = 0.0;
     for (std::size_t motor_index = 0; motor_index < kAxisCount; ++motor_index) {
-      if (!joint_depends_on_motor(joint_index, motor_index)) {
+      if (!joint_depends_on_motor(joint_index, motor_index, swap_wrist_channels)) {
         continue;
       }
       enabled = enabled && sample.motor_enabled[motor_index];
@@ -446,7 +448,7 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       std::int32_t error_code = 0;
       double age = 0.0;
       for (std::size_t motor_index = 0; motor_index < kAxisCount; ++motor_index) {
-        if (!joint_depends_on_motor(joint_index, motor_index)) {
+        if (!joint_depends_on_motor(joint_index, motor_index, kinematics_.parameters().swap_wrist_channels)) {
           continue;
         }
         enabled = enabled && motor_enabled[motor_index];
@@ -973,7 +975,7 @@ MockBackend::MockBackend(BackendConfig config)
   sample_.software_output_offsets_rad.assign(kAxisCount, 0.0);
   sample_.model_output_positions_rad.assign(kAxisCount, 0.0);
   stationary_samples_.assign(kAxisCount, 0U);
-  aggregate_mock_motor_state_to_joints(sample_);
+  aggregate_mock_motor_state_to_joints(sample_, kinematics_.parameters().swap_wrist_channels);
   sample_.driver_mode = "OFFLINE";
 }
 
@@ -994,7 +996,7 @@ void MockBackend::activate()
   active_ = true;
   sample_.connected = true;
   std::fill(sample_.motor_fresh.begin(), sample_.motor_fresh.end(), true);
-  aggregate_mock_motor_state_to_joints(sample_);
+  aggregate_mock_motor_state_to_joints(sample_, kinematics_.parameters().swap_wrist_channels);
   const bool all_enabled = std::all_of(
     sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
   sample_.driver_mode = all_enabled ? "CONTROL" : "MONITORING";
@@ -1013,7 +1015,7 @@ void MockBackend::deactivate() noexcept
   std::fill(sample_.in_motion.begin(), sample_.in_motion.end(), false);
   std::fill(sample_.motor_in_motion.begin(), sample_.motor_in_motion.end(), false);
   std::fill(sample_.motor_fresh.begin(), sample_.motor_fresh.end(), false);
-  aggregate_mock_motor_state_to_joints(sample_);
+  aggregate_mock_motor_state_to_joints(sample_, kinematics_.parameters().swap_wrist_channels);
 }
 
 void MockBackend::cleanup() noexcept
@@ -1026,7 +1028,7 @@ void MockBackend::cleanup() noexcept
   sample_.driver_mode = "OFFLINE";
   std::fill(sample_.motor_enabled.begin(), sample_.motor_enabled.end(), false);
   std::fill(sample_.motor_fresh.begin(), sample_.motor_fresh.end(), false);
-  aggregate_mock_motor_state_to_joints(sample_);
+  aggregate_mock_motor_state_to_joints(sample_, kinematics_.parameters().swap_wrist_channels);
 }
 
 bool MockBackend::read(HardwareSample & sample) noexcept
@@ -1135,7 +1137,7 @@ bool MockBackend::write(
     sample_.motor_fresh[index] = true;
     sample_.motor_ages_sec[index] = 0.0;
   }
-  aggregate_mock_motor_state_to_joints(sample_);
+  aggregate_mock_motor_state_to_joints(sample_, kinematics_.parameters().swap_wrist_channels);
   return true;
 }
 
@@ -1201,7 +1203,7 @@ ManagementResult MockBackend::manage(
         return {false, 6, "ROM zero is unavailable through normal backend management"};
     }
   }
-  aggregate_mock_motor_state_to_joints(sample_);
+  aggregate_mock_motor_state_to_joints(sample_, kinematics_.parameters().swap_wrist_channels);
   if (active_) {
     const bool all_enabled = std::all_of(
       sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
@@ -1226,7 +1228,7 @@ ManagementResult MockBackend::set_teaching(const bool enabled) noexcept
   sample_.teaching_active = enabled;
   sample_.control_permitted = !enabled && std::all_of(sample_.motor_enabled.begin(), sample_.motor_enabled.end(),
     [](bool value) {return value;});
-  aggregate_mock_motor_state_to_joints(sample_);
+  aggregate_mock_motor_state_to_joints(sample_, kinematics_.parameters().swap_wrist_channels);
   return {true, 0, enabled ? "mock drag teaching active" : "mock holding current pose"};
 }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Rebind an accepted packing reference after ONLY cable output sign changes.
+"""Rebind accepted packing references after cable signs or an explicit wrist swap.
 
 Offline: no ROS node, CAN connection, encoder reset or motion. Explicit invocation
-accepts the edited signs for testing; it does not validate physical cable accuracy.
+accepts the selected mapping for testing; it does not validate physical cable accuracy.
 """
 import argparse
 import copy
@@ -30,6 +30,22 @@ def validate_direction_change(old, new):
         raise ValueError('only output_directions may change; geometry/limits require separate calibration review')
 
 
+def validate_wrist_swap(old, new, calibration):
+    old, new = copy.deepcopy(old), copy.deepcopy(new)
+    a, b = old['cable_kinematics'], new['cable_kinematics']
+    before, after = a.pop('swap_wrist_channels', False), b.pop('swap_wrist_channels', False)
+    if type(before) is not bool or type(after) is not bool or before == after:
+        raise ValueError('wrist rebind requires an explicit boolean toggle')
+    # Only valid for this accepted reference: both wrist coordinates are zero,
+    # so F(q_pack) is unchanged and no new physical angle measurement is invented.
+    if calibration['packing_pose_joint_rad'][3:5] != [0.0, 0.0]:
+        raise ValueError('wrist rebind requires both accepted packing wrist angles to be zero')
+    limits = b['output_limits']
+    limits['motor_04'], limits['motor_05'] = limits['motor_05'], limits['motor_04']
+    if old != new:
+        raise ValueError('wrist rebind only permits swapping assignment and its two output envelopes')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference', type=Path, required=True)
@@ -39,6 +55,7 @@ def main():
                         default=ROOT/'src/pi_arm_description/config/cable_kinematics.yaml')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--calibration-id', required=True)
+    parser.add_argument('--swap-wrist', action='store_true', help='validated wrist channel swap, retaining zero-wrist packing reference')
     args = parser.parse_args()
     old_model = args.reference_model or args.reference.with_suffix('.cable.yaml')
     snapshot = args.output.with_suffix('.cable.yaml')
@@ -50,8 +67,11 @@ def main():
         raise ValueError('reference must already be accepted')
     if calibration['calibration_id'] == args.calibration_id:
         raise ValueError('use a new calibration ID')
-    validate_direction_change(yaml.safe_load(old_model.read_text()),
-                              yaml.safe_load(args.model.read_text()))
+    old_document, new_document = yaml.safe_load(old_model.read_text()), yaml.safe_load(args.model.read_text())
+    if args.swap_wrist:
+        validate_wrist_swap(old_document, new_document, calibration)
+    else:
+        validate_direction_change(old_document, new_document)
     helper = runpy.run_path(str(ROOT/'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
     with tempfile.TemporaryDirectory() as directory:
         urdf = Path(directory)/'robot.urdf'
@@ -75,8 +95,9 @@ def main():
     with snapshot.open('xb') as stream:
         stream.write(args.model.read_bytes())
     with args.output.open('x') as stream:
-        stream.write(f'# Direction-only rebind of {args.reference.name}; original measurements retained.\n'
-                     '# Explicitly requested signs for onsite testing; not a new physical measurement.\n')
+        kind = 'Wrist-channel swap' if args.swap_wrist else 'Direction-only'
+        stream.write(f'# {kind} rebind of {args.reference.name}; original measurements retained.\n'
+                     '# Explicitly requested mapping for onsite testing; not a new physical measurement.\n')
         yaml.safe_dump(source, stream, sort_keys=False)
     print(f'Wrote {args.output}\nModel snapshot: {snapshot}')
     print('Restart using the new calibration_file. No CAN operation was performed.')

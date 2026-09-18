@@ -58,7 +58,7 @@ source install/setup.bash
 cd /home/cr/pi_arm
 bash scripts/start_web.sh \
   hardware_type:=real can_interface:=can0 allow_real_control:=true \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml
 ```
 
 打开 `http://树莓派IP:8000/control.html`，点击连接。WebSocket 默认端口 8765。
@@ -71,10 +71,10 @@ bash scripts/start_web.sh \
 bash scripts/start_web.sh hardware_type:=mock
 
 bash scripts/start_web.sh --monitor can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml
 
 bash scripts/start_web.sh --commissioning can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml
 ```
 
 HTTP 端口用 `PI_ARM_WEB_PORT=8001` 设置，WebSocket 可用 `websocket_port:=8766` 指定。
@@ -96,8 +96,8 @@ p 是协议角，φ 是物理输出轴相对模型零位的角，q 是关节角�
 
 - 打包实测关节角：`[0, 100.7, -85.6, 0, 0, 0]°`，打包时协议角接近 0。
 - 零位：关节角和模型输出角全 0，协议角通常不为 0。
-- 当前 R06 标定和 `.cable.yaml` 快照位于 `src/pi_arm_hardware/config/`。
-- R06 沿用 ROM 置零后接受的 R03 测量。R02～R05 见 [标定历史](docs/calibration-history/README.md)。
+- 当前 R08 标定和 `.cable.yaml` 快照位于 `src/pi_arm_hardware/config/`。
+- R08 在 R06 基础上交换腕部两路映射，保留原始打包测量；沿用 ROM 置零后接受的 R03 测量。R02～R05 见 [标定历史](docs/calibration-history/README.md)。
 - 阶段运动获操作者确认，不等同于完成全部绳索耦合、回差和定位精度计量。
 
 ## 配置位置
@@ -116,9 +116,9 @@ p 是协议角，φ 是物理输出轴相对模型零位的角，q 是关节角�
 ```bash
 source /opt/ros/jazzy/setup.bash
 python3 scripts/rebind_cable_directions.py \
-  --reference src/pi_arm_hardware/config/pack_reference_calibration.R06.recorded.yaml \
-  --output src/pi_arm_hardware/config/pack_reference_calibration.R07.recorded.yaml \
-  --calibration-id PIARM-R1-SN0001-PACKCAL-20260917-R07
+  --reference src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml \
+  --output src/pi_arm_hardware/config/pack_reference_calibration.R09.recorded.yaml \
+  --calibration-id PIARM-R1-SN0001-PACKCAL-20260918-R09
 ```
 
 脚本保留原始测量，不连接 CAN、不写 ROM；拒绝几何、耦合项、限位或安装映射变化。
@@ -153,3 +153,5 @@ python3 scripts/test_motion_safety_vcan.py
 `src/` ROS 控制与模型；`web/` 网页；`scripts/` 构建启动及正式回归；
 `docs/` 原理、阶段记录、标定历史；`build/ install/ log/` 是忽略提交的本机产物。
 历史审查见 [审查目录](docs/reviews/2026-09-17/README.md)，当前操作以本 README 为准。
+
+腕部通道对应：`cable_kinematics.swap_wrist_channels: true`，CAN4 → J5、CAN5 → J4。说明及回退见 [腕部映射](docs/frontend/WRIST_CHANNEL_SWAP.md)。

@@ -166,7 +166,7 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
   reject_unknown_keys(
     root,
     {"model_version", "angle_unit", "length_unit", "axes", "output_limits", "validation",
-      "output_directions"},
+      "output_directions", "swap_wrist_channels"},
     "cable_kinematics");
   const int model_version = require_value<int>(root, "model_version");
   if (model_version != 3) {
@@ -185,6 +185,7 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
     "axes");
 
   CableKinematicsParameters parameters;
+  parameters.swap_wrist_channels = optional_value<bool>(root, "swap_wrist_channels", false);
   if (root["output_directions"]) {
     const auto directions = require_map(root, "output_directions");
     reject_unknown_keys(directions,

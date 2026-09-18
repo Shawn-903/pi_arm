@@ -47,6 +47,8 @@ struct CableKinematicsParameters
   // Sign of each complete cable equation in the physical output-shaft frame.
   // Independent of encoder/reducer installation direction. Legacy default: +1.
   std::array<int, 6> output_directions{{1, 1, 1, 1, 1, 1}};
+  // CAN4 cable row drives J5; CAN5 cable row drives J4 when true.
+  bool swap_wrist_channels{false};
   LinearAxisParameters axis1;
   LinearAxisParameters axis2;
   CoupledAxis3Parameters axis3;

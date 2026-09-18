@@ -298,3 +298,23 @@ TEST(MockBackend, TeachingBlocksMotionAndExitsWithoutReplayingControllerTarget)
   b.read(s);
   EXPECT_NEAR(s.positions_rad[0], 0.1, 1e-10);
 }
+
+TEST(MockBackend, WristSwapRoutesMotorAvailabilityToCorrectJoint)
+{
+  const auto path=std::filesystem::temp_directory_path()/"pi_arm_test_swapped_wrist.yaml";
+  std::ifstream source(PI_ARM_TEST_CABLE_CONFIG);
+  std::string text((std::istreambuf_iterator<char>(source)),std::istreambuf_iterator<char>());
+  text.insert(text.find("cable_kinematics:")+std::string("cable_kinematics:").size(),
+    "\n  swap_wrist_channels: true");
+  {std::ofstream stream(path); stream<<text;}
+  auto config=make_config(); config.cable_kinematics_file=path.string();
+  pi_arm_hardware::MockBackend b(config); b.configure(); b.activate();
+  pi_arm_hardware::HardwareSample sample;
+  for(int i=0;i<3;++i) {b.read(sample);}
+  ASSERT_TRUE(b.manage(pi_arm_can::ManagementOperation::MOTOR_RUN,0).success);
+  ASSERT_TRUE(b.manage(pi_arm_can::ManagementOperation::MOTOR_OFF,4).success);
+  b.read(sample);
+  EXPECT_TRUE(sample.enabled[3]); EXPECT_FALSE(sample.enabled[4]);
+  EXPECT_FALSE(sample.motor_enabled[3]); EXPECT_TRUE(sample.motor_enabled[4]);
+  std::filesystem::remove(path);
+}

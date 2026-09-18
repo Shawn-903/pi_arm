@@ -206,3 +206,14 @@ TEST(ConfigLoader, RejectsInvalidOutputLimitOrder)
 }
 
 }  // namespace
+
+TEST(ConfigLoader, OptionalWristSwapDefaultsOffAndLoadsExplicitly)
+{
+  const auto old_path=write_config(valid_config(), "pi_arm_wrist_swap_old.yaml");
+  EXPECT_FALSE(pi_arm_transmission::load_cable_kinematics_config(old_path.string()).swap_wrist_channels);
+  auto text=std::string(valid_config());
+  text.insert(text.find("  model_version"),"  swap_wrist_channels: true\n");
+  const auto new_path=write_config(text,"pi_arm_wrist_swap_new.yaml");
+  EXPECT_TRUE(pi_arm_transmission::load_cable_kinematics_config(new_path.string()).swap_wrist_channels);
+  std::filesystem::remove(old_path); std::filesystem::remove(new_path);
+}

@@ -894,15 +894,15 @@ function buildSingleMotorControls() {
     .map(
       (motorId) => `
         <div class="motor-card">
-          <div class="motor-title">J${motorId} <small>${activeJointNames[motorId - 1]} · CAN ${motorId}</small></div>
+          <div class="motor-title">J${motorId} <small>${activeJointNames[motorId - 1]} · 关节空间</small></div>
           <div class="motor-controls">
             <div class="control-row">
               <span class="input-pair">
                 <label for="speed${motorId}">速度(°/s)</label>
                 <input id="speed${motorId}" type="number" min="0.01" max="10" step="any" value="1">
               </span>
-              <button class="btn-green" data-cmd="enable_motor" data-motor-id="${motorId}">使能</button>
-              <button class="btn-red" data-cmd="disable_motor" data-motor-id="${motorId}">关闭</button>
+              <button class="btn-green" data-cmd="enable_motor" data-motor-id="${motorId}">CAN${motorId} 使能</button>
+              <button class="btn-red" data-cmd="disable_motor" data-motor-id="${motorId}">CAN${motorId} 关闭</button>
             </div>
             <div class="control-row">
               <span class="input-pair">

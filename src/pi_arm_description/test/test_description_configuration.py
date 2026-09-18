@@ -165,7 +165,7 @@ class DescriptionConfigurationTest(unittest.TestCase):
             [name for name in output_limits if name.startswith("motor_")],
             [f"motor_{index:02d}" for index in range(1, 7)],
         )
-        expected_upper = [3.819, 1.758, 7.841, 4.127, 4.892, 6.047]
+        expected_upper = [3.819, 1.758, 7.841, 4.892, 4.127, 6.047]
         for index, upper in enumerate(expected_upper, start=1):
             limit = output_limits[f"motor_{index:02d}"]
             self.assertAlmostEqual(limit["lower_position_rad"], -upper)
@@ -226,6 +226,8 @@ class DescriptionConfigurationTest(unittest.TestCase):
         q4 = max_abs_limit("joint_05")
         q5 = max_abs_limit("joint_06")
         q6 = max_abs_limit("joint_09")
+        if cable.get("swap_wrist_channels", False):
+            q4, q5 = q5, q4
         coupling = axes["joint_04"]["joint2_guide_radius_mm"] / axes["joint_04"][
             "motor_radius_mm"
         ]

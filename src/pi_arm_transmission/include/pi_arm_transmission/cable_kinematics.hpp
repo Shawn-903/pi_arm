@@ -4,6 +4,7 @@
 #include "pi_arm_transmission/result.hpp"
 
 #include <array>
+#include <cstddef>
 
 namespace pi_arm_transmission
 {
@@ -68,6 +69,8 @@ public:
 
 private:
   CableKinematicsParameters parameters_;
+  std::size_t motor4_joint_{3U};
+  std::size_t motor5_joint_{4U};
   double alpha1_{0.0};
   double alpha2_{0.0};
   double axis3_self_gain_{0.0};

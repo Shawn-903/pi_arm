@@ -164,6 +164,8 @@ def main():
         directions = yaml.safe_load(cable_file.read_text())['cable_kinematics'].get(
             'output_directions', {f'motor_{i:02d}': 1 for i in range(1, 7)})
         signs = [directions[f'motor_{i:02d}'] for i in range(1, 7)]
+        swapped = yaml.safe_load(cable_file.read_text())['cable_kinematics'].get('swap_wrist_channels', False)
+        j4_motor = 5 if swapped else 4
         candidate = runpy.run_path(str(ROOT/'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
         mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36 if i <= 3 else 6,
                         motor_direction=direction)
@@ -237,8 +239,10 @@ def main():
                         assert len(emulator.frames_for(0xa4)) == sent
 
             print('CASE: joint feedback limit inhibits normal control')
-            outside = -signs[3]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(35))
-            emulator.reset([0, 0, 0, outside, 0, 0])
+            outside = -signs[j4_motor-1]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(35))
+            angles = [0]*6
+            angles[j4_motor-1] = outside
+            emulator.reset(angles)
             with backend(executable, calibration) as p:
                 values, _ = command(p, 'read')
                 assert values['kin'] == values['control'] == '0'
@@ -286,7 +290,7 @@ def main():
             with backend(executable, calibration) as p:
                 command(p, 'write')
                 emulator.drop_stop_ack = set(range(1, 7))
-                emulator.inject(4, outside)
+                emulator.inject(j4_motor, outside)
                 values, _ = command(p, 'read')
                 assert values['kin'] == values['control'] == '0'
                 assert int(values['read_us']) < 100000
@@ -322,8 +326,10 @@ def main():
                 emulator.assert_stopped([4])
 
             print('CASE: near-limit coupled test rejected before any A4')
-            near = -signs[3]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(29.99))
-            emulator.reset([0, 0, 0, near, 0, 0])
+            near = -signs[j4_motor-1]*6*180/math.pi*(33.94/16.25)*math.sin(math.radians(29.99))
+            angles = [0]*6
+            angles[j4_motor-1] = near
+            emulator.reset(angles)
             with backend(executable, calibration, True) as p:
                 _, line = command(p, 'joint 2 .1 .2', ok=False)
                 assert 'asynchronous' in line and not emulator.frames_for(0xa4)
@@ -352,7 +358,7 @@ def main():
             emulator.reset()
             with backend(executable, calibration, True) as p:
                 command(p, 'joint 2 .1 .2')
-                emulator.inject(4, outside)
+                emulator.inject(j4_motor, outside)
                 values, _ = command(p, 'update')
                 assert values['kin'] == values['active'] == '0'
                 assert values['error'] == 'JOINT_POSITION_LIMIT'
@@ -437,11 +443,12 @@ def main():
                     command(p, f'write_target {axis} 1')
                     time.sleep(.1)
                     sent = dict(emulator.frames_for(0xa4))
-                    protocol = struct.unpack('<i', sent[axis][4:])[0]/100
+                    motor = j4_motor if axis == 4 else axis
+                    protocol = struct.unpack('<i', sent[motor][4:])[0]/100
                     base = 51.75/16.25 if axis == 3 else 33.94/16.25*math.sin(math.radians(1))*180/math.pi
-                    expected = -signs[axis-1]*base*(36 if axis == 3 else 6)
+                    expected = -signs[motor-1]*base*(36 if axis == 3 else 6)
                     assert abs(protocol-expected) <= .011, (axis, protocol, expected)
-                    emulator.inject(axis, protocol)
+                    emulator.inject(motor, protocol)
                     values, _ = command(p, 'read')
                     assert abs(float(values['q3_deg' if axis == 3 else 'q5_deg'])-1) < .002
                     command(p, 'disarm')
@@ -536,7 +543,17 @@ def main():
                 assert values['teaching'] == '1' and values['control'] == '0'
                 assert {i for i,_ in emulator.frames_for(0x81)} == set(range(1,7))
                 assert not emulator.frames_for(0x80), 'failed hold must preserve multi-turn reference'
-            print('PASS: 26 production-backend virtual CAN safety scenarios')
+            print('CASE: swapped wrist joint tests route to correct CAN motor and speed ceiling')
+            for joint,motor in ((4,j4_motor),(5,4 if swapped else 5)):
+                emulator.reset(dynamic=True)
+                with backend(executable, calibration, True) as p:
+                    command(p, f'joint {joint} .1 .2')
+                    settle(p)
+                    frames=emulator.frames_for(0xa4)
+                    assert {i for i,_ in frames} == {motor}
+                    cap=math.floor(.2*6*(33.94/16.25)*math.cos(math.radians(.1))+1e-9)
+                    assert all(1 <= struct.unpack('<H',data[2:4])[0] <= cap for _,data in frames)
+            print('PASS: 27 production-backend virtual CAN safety scenarios')
         finally:
             emulator.close()
 

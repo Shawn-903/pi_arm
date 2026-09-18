@@ -58,6 +58,9 @@ ManagementResult RealBackend::start_axis_test(
       "motor output step must be +/-0.01..5 deg; output speed 0.05..1 deg/s; CAN ID 1..6" :
       "joint step must be +/-0.01..0.5 deg; speed 0.05..0.5 deg/s; axis 1..6"};
   }
+  const auto joint_index = static_cast<size_t>(axis_id - 1);
+  const auto selected_motor_index = kinematics_.parameters().swap_wrist_channels &&
+    (joint_index == 3U || joint_index == 4U) ? 7U - joint_index : joint_index;
   const auto snapshot = driver_->snapshot();
   std::vector<double> origin;
   for (const auto & actuator : config_.actuators) {
@@ -91,9 +94,9 @@ ManagementResult RealBackend::start_axis_test(
     const size_t selected = static_cast<size_t>(axis_id - 1);
     // The chord axes change their velocity gain along the path. Use the
     // smaller endpoint gain so the chosen joint's speed limit is not raised.
-    selected_protocol_speed_cap = speed_deg_s * config_.actuators[selected].protocol_angle_ratio *
-      std::min(std::abs(start_jacobian[selected][selected]),
-      std::abs(end_jacobian[selected][selected]));
+    selected_protocol_speed_cap = speed_deg_s * config_.actuators[selected_motor_index].protocol_angle_ratio *
+      std::min(std::abs(start_jacobian[selected_motor_index][selected]),
+      std::abs(end_jacobian[selected_motor_index][selected]));
     if (!kinematics_.joint_to_output_position(joints, outputs)) {
       return {false, 1004, "joint-to-output mapping failed"};
     }
@@ -128,8 +131,8 @@ ManagementResult RealBackend::start_axis_test(
       kinematics_.jacobian(recovered, encoded_jacobian);
       const size_t selected = static_cast<size_t>(axis_id - 1);
       selected_protocol_speed_cap = std::min(selected_protocol_speed_cap,
-        speed_deg_s * config_.actuators[selected].protocol_angle_ratio *
-        std::abs(encoded_jacobian[selected][selected]));
+        speed_deg_s * config_.actuators[selected_motor_index].protocol_angle_ratio *
+        std::abs(encoded_jacobian[selected_motor_index][selected]));
     }
   }
   const auto & session_origin = axis_test_session_origin_.empty() ? origin : axis_test_session_origin_;
@@ -157,7 +160,7 @@ ManagementResult RealBackend::start_axis_test(
       actuator.protocol_angle_ratio * speed_limit);
     if (space == "motor") {
       speed_cap = std::min(speed_cap, actuator.protocol_angle_ratio * speed_deg_s);
-    } else if (i == static_cast<size_t>(axis_id - 1)) {
+    } else if (i == selected_motor_index) {
       speed_cap = std::min(speed_cap, selected_protocol_speed_cap);
     }
     const double encoded_speed = std::floor(speed_cap);
