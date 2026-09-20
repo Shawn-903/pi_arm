@@ -40,15 +40,12 @@ cable_kinematics:
     motor_01: {lower_position_rad: -3.819, upper_position_rad: 3.819}
     motor_02: {lower_position_rad: -1.758, upper_position_rad: 1.758}
     motor_03: {lower_position_rad: -7.841, upper_position_rad: 7.841}
-    motor_04: {lower_position_rad: -6.701, upper_position_rad: 6.701}
-    motor_05: {lower_position_rad: -5.172, upper_position_rad: 5.172}
+    motor_04: {lower_position_rad: -4.892, upper_position_rad: 4.892}
+    motor_05: {lower_position_rad: -4.127, upper_position_rad: 4.127}
     motor_06: {lower_position_rad: -6.047, upper_position_rad: 6.047}
 
   # Legacy geometry keys identify cable rows; joint_05/joint_06 geometry
   # stays with motor_04/motor_05 respectively, even when assignments swap.
-  # R09 onsite trial: wrist effective cable length doubled (2 * 33.94 mm).
-  # This is an effective coefficient, not a measured change to physical geometry.
-  # Both command/feedback and velocity/Jacobian use this same gain.
   axes:
     joint_01:
       model: linear
@@ -71,14 +68,14 @@ cable_kinematics:
     joint_05:
       model: chord_coupled
       motor_radius_mm: 16.25
-      joint_radius_mm: 67.88
+      joint_radius_mm: 33.94
       joint2_guide_radius_mm: 28.5
       coupling_sign: 1
 
     joint_06:
       model: chord_coupled
       motor_radius_mm: 16.25
-      joint_radius_mm: 67.88
+      joint_radius_mm: 33.94
       joint2_guide_radius_mm: 28.5
       coupling_sign: 1
 
