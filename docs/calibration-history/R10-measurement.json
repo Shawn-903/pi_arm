@@ -1,0 +1,67 @@
+{
+  "sample_count": 40,
+  "sample_interval_ms": 50,
+  "raw_protocol_mean_deg": [
+    0.15450000000000014,
+    0.08000000000000004,
+    0.02000000000000001,
+    0,
+    0,
+    0.010000000000000005
+  ],
+  "raw_protocol_min_deg": [
+    0.15,
+    0.08,
+    0.02,
+    0,
+    0,
+    0.01
+  ],
+  "raw_protocol_max_deg": [
+    0.16,
+    0.08,
+    0.02,
+    0,
+    0,
+    0.01
+  ],
+  "all_fresh_error_free_stationary": true,
+  "near_zero_stable": true,
+  "captured_at_utc": "2026-09-20T12:03:34.360353+00:00",
+  "calibration_id": "PIARM-R1-SN0001-PACKCAL-20260920-R10",
+  "raw_output_at_packing_rad": [
+    7.490371373142338e-05,
+    3.87850944887629e-05,
+    -9.696273622190725e-06,
+    -0.0,
+    -0.0,
+    2.9088820866572174e-05
+  ],
+  "packing_pose_joint_deg": [
+    0,
+    100.7,
+    -85.6,
+    0,
+    0,
+    0
+  ],
+  "latest_rom_zero_ack_at_utc": "2026-09-20T12:02:01Z",
+  "successful_write_count": 3,
+  "configuration_fingerprint": "fnv1a64:7d99c13df4cb0c63",
+  "validation": {
+    "production_cpp_loader": "passed",
+    "packing_round_trip": "passed",
+    "live_state": "READY",
+    "kinematics_valid": true,
+    "control_permitted": true,
+    "live_joint_angles_deg": [
+      0.0,
+      100.7,
+      -85.6,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "note": "Encoder quantization at the packing boundary may produce JOINT_COMMAND_LIMIT_WARNING within the existing feedback tolerance; no motion commanded."
+  }
+}

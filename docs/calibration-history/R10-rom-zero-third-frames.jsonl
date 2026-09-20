@@ -1,0 +1,12 @@
+{"timestamp_utc": "2026-09-20T12:02:01.228611+00:00", "can_id": "0x141", "motor_id": 1, "data_hex": "1900000000000000", "locally_transmitted": true, "socket_flags": 4}
+{"timestamp_utc": "2026-09-20T12:02:01.228934+00:00", "can_id": "0x142", "motor_id": 2, "data_hex": "1900000000000000", "locally_transmitted": true, "socket_flags": 4}
+{"timestamp_utc": "2026-09-20T12:02:01.229815+00:00", "can_id": "0x143", "motor_id": 3, "data_hex": "1900000000000000", "locally_transmitted": true, "socket_flags": 4}
+{"timestamp_utc": "2026-09-20T12:02:01.230164+00:00", "can_id": "0x144", "motor_id": 4, "data_hex": "1900000000000000", "locally_transmitted": true, "socket_flags": 4}
+{"timestamp_utc": "2026-09-20T12:02:01.230712+00:00", "can_id": "0x145", "motor_id": 5, "data_hex": "1900000000000000", "locally_transmitted": true, "socket_flags": 4}
+{"timestamp_utc": "2026-09-20T12:02:01.231183+00:00", "can_id": "0x146", "motor_id": 6, "data_hex": "1900000000000000", "locally_transmitted": true, "socket_flags": 4}
+{"timestamp_utc": "2026-09-20T12:02:01.447861+00:00", "can_id": "0x146", "motor_id": 6, "data_hex": "1900000170a50000", "locally_transmitted": false, "socket_flags": 0}
+{"timestamp_utc": "2026-09-20T12:02:01.455489+00:00", "can_id": "0x142", "motor_id": 2, "data_hex": "190000019dcd0000", "locally_transmitted": false, "socket_flags": 0}
+{"timestamp_utc": "2026-09-20T12:02:01.458401+00:00", "can_id": "0x144", "motor_id": 4, "data_hex": "190000018a220000", "locally_transmitted": false, "socket_flags": 0}
+{"timestamp_utc": "2026-09-20T12:02:01.459481+00:00", "can_id": "0x141", "motor_id": 1, "data_hex": "19000001eddb0000", "locally_transmitted": false, "socket_flags": 0}
+{"timestamp_utc": "2026-09-20T12:02:01.468825+00:00", "can_id": "0x145", "motor_id": 5, "data_hex": "19000001cfd90000", "locally_transmitted": false, "socket_flags": 0}
+{"timestamp_utc": "2026-09-20T12:02:01.469566+00:00", "can_id": "0x143", "motor_id": 3, "data_hex": "19000001d8d70000", "locally_transmitted": false, "socket_flags": 0}

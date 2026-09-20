@@ -1,0 +1,5 @@
+{"timestamp_utc":"2026-09-20T11:51:59Z","interface":"can0","execute":false,"result":"dry-run-ok","message":"six motors healthy and stationary; no 0x19 sent"}
+{"timestamp_utc":"2026-09-20T11:52:18Z","interface":"can0","execute":true,"result":"executed","message":"six 0x19 acknowledgements received; power-cycle is required"}
+{"timestamp_utc":"2026-09-20T11:55:09Z","interface":"can0","execute":false,"result":"dry-run-ok","message":"six motors healthy and stationary; no 0x19 sent"}
+{"timestamp_utc":"2026-09-20T11:56:16Z","interface":"can0","execute":true,"result":"executed","message":"six 0x19 acknowledgements received; power-cycle is required"}
+{"timestamp_utc":"2026-09-20T12:02:01Z","interface":"can0","execute":true,"result":"executed","message":"six 0x19 acknowledgements received; power-cycle is required"}

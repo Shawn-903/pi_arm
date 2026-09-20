@@ -58,7 +58,7 @@ source install/setup.bash
 cd /home/cr/pi_arm
 bash scripts/start_web.sh \
   hardware_type:=real can_interface:=can0 allow_real_control:=true \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml
 ```
 
 打开 `http://树莓派IP:8000/control.html`，点击连接。WebSocket 默认端口 8765。
@@ -71,10 +71,10 @@ bash scripts/start_web.sh \
 bash scripts/start_web.sh hardware_type:=mock
 
 bash scripts/start_web.sh --monitor can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml
 
 bash scripts/start_web.sh --commissioning can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml
+  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml
 ```
 
 HTTP 端口用 `PI_ARM_WEB_PORT=8001` 设置，WebSocket 可用 `websocket_port:=8766` 指定。
@@ -96,8 +96,9 @@ p 是协议角，φ 是物理输出轴相对模型零位的角，q 是关节角�
 
 - 打包实测关节角：`[0, 100.7, -85.6, 0, 0, 0]°`，打包时协议角接近 0。
 - 零位：关节角和模型输出角全 0，协议角通常不为 0。
-- 当前 R08 标定和 `.cable.yaml` 快照位于 `src/pi_arm_hardware/config/`。
+- 当前 R10 标定和 `.cable.yaml` 快照位于 `src/pi_arm_hardware/config/`。
 - 2026-09-20 按现场反馈撤销 R09 腕部系数加倍试验，恢复 33.94 mm 与 R08 标定。R08 保留已确认的腕部通道交换，沿用 ROM 置零后接受的 R03 测量。R02～R05 见 [标定历史](docs/calibration-history/README.md)。
+- 2026-09-20 重新张紧绳索后，按操作者确认的打包姿态重新写入六轴 ROM 零点并重上电，采集生成 R10。原始协议角接近零，保留 33.94 mm 和已确认通道映射；旧 R08/R09 不得用于此次新零点。详见 [R10 测量记录](docs/calibration-history/R10-measurement.json)。
 - 阶段运动获操作者确认，不等同于完成全部绳索耦合、回差和定位精度计量。
 
 ## 配置位置
@@ -116,9 +117,9 @@ p 是协议角，φ 是物理输出轴相对模型零位的角，q 是关节角�
 ```bash
 source /opt/ros/jazzy/setup.bash
 python3 scripts/rebind_cable_directions.py \
-  --reference src/pi_arm_hardware/config/pack_reference_calibration.R08.recorded.yaml \
-  --output src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml \
-  --calibration-id PIARM-R1-SN0001-PACKCAL-20260918-R10
+  --reference src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml \
+  --output src/pi_arm_hardware/config/pack_reference_calibration.R11.recorded.yaml \
+  --calibration-id PIARM-R1-SN0001-PACKCAL-20260920-R11
 ```
 
 脚本保留原始测量，不连接 CAN、不写 ROM；拒绝几何、耦合项、限位或安装映射变化。
