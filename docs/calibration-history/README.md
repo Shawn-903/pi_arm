@@ -1,6 +1,7 @@
 # 标定历史
 
-当前运行标定为 `src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml`。
+当前运行标定为 [R10](../../src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml)，配套 [R10 模型快照](../../src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.cable.yaml)。
+当前配置/标零操作统一见 [硬件配置 README](../../src/pi_arm_hardware/config/README.md)，整体启动见 [根 README](../../README.md)。
 本目录保留测量、方向试验及快照，供追溯与回退，不作为运行时自动选择列表。
 
 | 版本 | 含义 |
@@ -20,3 +21,5 @@ R10 的候选、40 次采样统计、ROM 写入审计和第三次写入原始应
 
 approved 表示当时接受该参考用于测试，不能跨 ROM 零点、机械结构或方向配置复用。
 绑定必须匹配对应模型快照与当前执行器映射。原始测量和历史文件不随清理过程删除。
+
+历史候选与审计内容保持原样；其中引用的旧过程文档按 Git 恢复基线 `95b65be` 追溯，不据旧启动命令切换当前参考。

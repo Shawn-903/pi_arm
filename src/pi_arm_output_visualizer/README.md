@@ -1,74 +1,36 @@
-# Pi Arm Output-Shaft Visualizer
+# pi_arm_output_visualizer
 
-This package visualizes the arm pose from six **motor output-shaft angles** without
-opening SocketCAN or controlling hardware.
-
-The interactive path is:
+输出轴角驱动的离线 RViz 显示包。将六个**模型输出轴角**经生产绳索反解转换为主动关节状态，不打开 SocketCAN、不控制电机。
 
 ```text
-motor output-shaft sliders (rad)
-  -> /pi_arm/model_output_shaft_states
-  -> pi_arm_transmission::output_to_joint_position()
-  -> six active ROS joint positions
-  -> /joint_states
-  -> robot_state_publisher
-  -> RViz
+输出轴滑块 → /pi_arm/model_output_shaft_states
+           → pi_arm_transmission 反解
+           → /joint_states → robot_state_publisher → RViz
 ```
 
-Input names are fixed to:
+## 输入输出
 
-```text
-motor_01_output, motor_02_output, motor_03_output,
-motor_04_output, motor_05_output, motor_06_output
-```
+输入为 `sensor_msgs/JointState`，名称固定为 `motor_01_output` 到 `motor_06_output`，单位 rad。输出关节顺序为 `joint_01, joint_02, joint_04, joint_05, joint_06, joint_09`。
 
-Output active-joint order is fixed to:
+输入必须是加过软件偏移后的 model_output：`phi = raw_output + offset`。不能直接发布 ROM 相对角或协议角。滑块范围从 [cable_kinematics.yaml](../pi_arm_description/config/cable_kinematics.yaml) 生成，是理论输出包络而非实机独立轴可达保证。
 
-```text
-joint_01, joint_02, joint_04, joint_05, joint_06, joint_09
-```
+整组输入有轴超限或反解无效（如腕部 asin 定义域不满足）时拒绝整帧，保持最后有效 RViz 姿态；不独立裁剪某个电机来掩盖问题。
 
-Angles follow `sensor_msgs/JointState` conventions and are in radians. The input
-is explicitly **model_output**, i.e. the reducer-output coordinate used by the
-`model_version: 3` cable model. Do not publish ROM-relative feedback directly.
-ROM-relative values must first be converted with an approved, fingerprint-matched
-calibration using `model_output = rom_relative_output + software_offset`. The GUI
-slider ranges are generated from `pi_arm_description/config/cable_kinematics.yaml`.
-The mapper rejects a complete sample if any output shaft exceeds its configured
-range; it never clamps one motor independently.
+## 文件与使用
 
-The configured ranges are theoretical zero-relative envelopes derived from the
-joint limits and cable model. They are not a substitute for low-speed live
-acceptance testing of cable tension and actual travel.
+- [output_shaft_mapper.cpp](src/output_shaft_mapper.cpp)：名称/边界检查与反解。
+- [output_shaft_visualizer_node.cpp](src/output_shaft_visualizer_node.cpp)：ROS 订阅/发布。
+- [generate_output_shaft_urdf.py](scripts/generate_output_shaft_urdf.py)：按配置生成 GUI 用输出轴模型。
+- [output_shaft_visualizer.launch.py](launch/output_shaft_visualizer.launch.py)：GUI、映射、模型及 RViz。
 
-## Build and run on Ubuntu 24.04 / ROS 2 Jazzy
+加载构建环境后，在独立 ROS 域运行：
 
 ```bash
-cd ~/pi_arm
-source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install --packages-up-to pi_arm_output_visualizer
-source install/setup.bash
-
-ros2 launch pi_arm_output_visualizer output_shaft_visualizer.launch.py
+ROS_DOMAIN_ID=82 ros2 launch pi_arm_output_visualizer output_shaft_visualizer.launch.py
 ```
 
-Do not run `pi_arm_description/display.launch.py` at the same time because its
-GUI also publishes `/joint_states`.
+可设置 `use_gui:=false`，由外部只读仿真源发送完整六轴状态。不要与实机或 description/display GUI 在同一域同时发布 `/joint_states`。
 
-If a combination of output-shaft angles is outside the inverse model domain
-(notably the chord models for axes 4 and 5), the converter logs a warning and
-keeps the last valid RViz pose.
+## 验证
 
-The converter can also be driven without the GUI by publishing all six named
-positions to `/pi_arm/model_output_shaft_states`:
-
-```bash
-ros2 launch pi_arm_output_visualizer output_shaft_visualizer.launch.py use_gui:=false
-```
-
-In another sourced terminal, publish one complete output-shaft state in radians:
-
-```bash
-ros2 topic pub --once /pi_arm/model_output_shaft_states sensor_msgs/msg/JointState \
-  "{name: [motor_01_output, motor_02_output, motor_03_output, motor_04_output, motor_05_output, motor_06_output], position: [0.1, 0.0, 0.0, 0.0, 0.0, 0.0]}"
-```
+`test/test_output_shaft_mapper.cpp` 检查映射与拒绝行为，`test/test_visualizer_assets.py` 检查生成资源，运行见 [scripts](../../scripts/README.md)。这套显示用于核验软件映射，不证明实际方向、绳索张力或可动范围。
