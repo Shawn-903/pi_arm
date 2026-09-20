@@ -6,7 +6,7 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <meta content="light" name="color-scheme" />
     <title>Pi Arm · 机械臂工作台</title>
-    <link href="assets/console.css" rel="stylesheet" />
+    <link href="assets/console.css?v=20260920-repeat2" rel="stylesheet" />
   </head>
   <body data-role="operator" data-view="workbench">
     <a class="skip-link" href="#viewContent">跳至操作区</a>
@@ -750,6 +750,31 @@
                 手动录入、记录实机反馈，或保存模型预览目标。点位保存在树莓派；保存和加载都不会使机械臂运动。
               </p>
               <div class="teaching-grid">
+                <fieldset class="repeat-panel" id="repeatPanel">
+                  <legend>重复定位测试</legend>
+                  <p>每轮：起始点 → 到位等待 → 目标点 → 到位等待并记录。最后停在目标点保持。两点需为同一类型，笛卡尔点位使用直线运动。</p>
+                  <div class="repeat-grid">
+                    <label>起始点<select id="repeatStartPoint"><option value="">等待连接并加载点位…</option></select></label>
+                    <label>目标点<select id="repeatTargetPoint"><option value="">等待连接并加载点位…</option></select></label>
+                    <label>循环次数<input id="repeatCycles" type="number" min="1" max="1000" step="1" value="10" /></label>
+                    <label>每次到点等待（s）<input id="repeatDwell" type="number" min="0" max="3600" step="0.1" value="3" /></label>
+                    <label>关节 / 姿态速度（°/s）<input id="repeatSpeed" type="number" min="0.01" max="10" step="any" value="5" /></label>
+                    <label>输出轴速度上限（°/s）<input id="repeatOutputSpeed" type="number" min="0.16666666666666666" max="10" step="any" value="5" /></label>
+                    <label id="repeatLinearLabel" hidden>直线速度（mm/s）<input id="repeatLinearSpeed" type="number" min="0.01" max="100" step="any" value="5" /></label>
+                  </div>
+                  <p id="repeatSelection">请选择已保存的两个点位</p>
+                  <div class="point-actions">
+                    <button class="btn-primary" id="repeatStart" disabled>开始循环运动</button>
+                    <button class="btn-red" id="repeatStop" disabled>停止测试与运动</button>
+                    <button id="repeatExport" disabled>导出测试 JSON</button>
+                    <button id="repeatCsv" disabled>导出记录 CSV</button>
+                  </div>
+                  <progress id="repeatProgress" max="10" value="0" aria-label="完成循环数"></progress>
+                  <p id="repeatStatus" role="status" aria-live="polite">尚未开始</p>
+                  <p id="repeatSummary">目标点记录：0 次</p>
+                  <p>等待从后端确认到位且电机静止后计时，不是固定发令周期。测试使用此处速度，受输出轴限速约束。请保持此页面在前台；切换后台、关闭页面、断连或故障会中止循环，不自动续跑。断连时当前运动的停止结果可能未知。</p>
+                  <p>记录来自编码器与绳索模型，不能替代外部量具测得的末端重复定位精度。记录导出包含点位、标定编号、到位误差和时间，便于与实测对照；刷新页面或开始新测试前请导出。</p>
+                </fieldset>
                 <fieldset>
                   <legend>录入点位</legend>
                   <div class="point-meta">
@@ -1147,8 +1172,9 @@
     <script src="vendor/viewer-libs.js"></script>
     <script src="assets/viewer.js"></script>
     <script src="assets/console.js"></script>
-    <script src="assets/control.js"></script>
+    <script src="assets/control.js?v=20260920-repeat2"></script>
     <script src="assets/interactive.js"></script>
-    <script src="assets/teaching.js"></script>
+    <script src="assets/repeat.js?v=20260920-repeat2"></script>
+    <script src="assets/teaching.js?v=20260920-repeat2"></script>
   </body>
 </html>

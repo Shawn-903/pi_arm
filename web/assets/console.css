@@ -1734,6 +1734,12 @@ body[data-view="commissioning"] .workspace-grid {
 }
 
 /* Teaching and base-frame feedback */
+.repeat-panel { grid-column: 1 / -1; }
+.repeat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; }
+.repeat-panel progress { width: 100%; height: 12px; accent-color: #168a7a; }
+.repeat-panel #repeatStatus { font-size: 14px; font-weight: 650; color: var(--text); }
+.repeat-panel #repeatStatus.status-error { color: #b33c3c; }
+@media (max-width: 600px) { .repeat-grid { grid-template-columns: minmax(0, 1fr); } }
 .teaching-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

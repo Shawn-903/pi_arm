@@ -100,7 +100,7 @@ function refreshControlGate() {
   ) {
     acceptedTaskId = null;
   }
-  const permitted =
+  const motionReady =
     !lastState?.commissioning &&
     !lastState?.read_only &&
     !lastState?.teaching_active &&
@@ -114,6 +114,8 @@ function refreshControlGate() {
         motionCommands.has(item.cmd) ||
         ["preview_motion", "reset_motor", "reboot_motor", "set_teaching"].includes(item.cmd),
     );
+  const permitted = motionReady && !window.PiArmRepeat?.active;
+  window.PiArmRepeat?.refresh(lastState, { fresh, permitted: motionReady, connectionState });
   document
     .querySelectorAll(
       "button[data-cmd], #multiStopBtn, button[data-action='stop']",
@@ -315,7 +317,11 @@ function connect() {
   });
 }
 
-function sendCommand(cmd, params = {}) {
+function sendCommand(cmd, params = {}, options = {}) {
+  if (window.PiArmRepeat?.active && motionCommands.has(cmd) && !options.repeat) {
+    log("请先停止重复定位测试，再发送其他运动");
+    return false;
+  }
   if (
     [
       "stop_motion",
@@ -325,8 +331,10 @@ function sendCommand(cmd, params = {}) {
       "reset_motor",
       "reboot_motor",
     ].includes(cmd)
-  )
+  ) {
     window.PiArmInteractive?.cancelActions("停止或下使能请求，松手执行已关闭");
+    window.PiArmRepeat?.cancel("收到停止、示教或电机操作，循环已中止", false);
+  }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     log("发送失败：WebSocket 未连接", { cmd, params });
     return false;
@@ -372,7 +380,7 @@ function sendCommand(cmd, params = {}) {
     try {
       params = {
         ...params,
-        output_speed_limit: readPositiveFloat("outputSpeedLimit"),
+        output_speed_limit: options.repeat ? params.output_speed_limit : readPositiveFloat("outputSpeedLimit"),
         ...(cmd === "move_preset" ? { max_speed: readPositiveFloat("presetSpeed") } : {}),
       };
     } catch (error) {
@@ -401,6 +409,7 @@ function sendCommand(cmd, params = {}) {
   };
   const timer = setTimeout(() => {
     pending.delete(payload.msg_id);
+    options.reject?.(new Error("运动请求响应超时，结果未知"));
     if (["reset_motor", "reboot_motor"].includes(cmd))
       document.getElementById("recoveryResult").textContent =
         "恢复请求超时，结果未知；请查看原始反馈，禁止据此认为电机已恢复";
@@ -421,7 +430,7 @@ function sendCommand(cmd, params = {}) {
         }
       : null;
   if (record) axisTestRecords.push(record);
-  pending.set(payload.msg_id, { cmd, timer, record });
+  pending.set(payload.msg_id, { cmd, timer, record, resolve: options.resolve, reject: options.reject });
   ws.send(JSON.stringify(payload));
   refreshControlGate();
   if (cmd !== "axis_test_heartbeat") log("发送命令", payload);
@@ -465,6 +474,8 @@ function handleMessage(data) {
       text.className = ok ? "status-ok" : "status-error";
     }
     if (item?.resolve) {
+      if (ok && motionCommands.has(item.cmd) && data.data?.task_id !== undefined)
+        acceptedTaskId = data.data.task_id;
       if (ok) item.resolve(data.data);
       else item.reject(new Error(data.ms || "请求失败"));
       refreshControlGate();
@@ -1172,6 +1183,14 @@ init();
 
 // Single transport and the same motion gate for all interactive UI controls.
 window.PiArmControl = {
+  repeatMove(cmd, params) {
+    return new Promise((resolve, reject) => {
+      if (!["move", "movel"].includes(cmd) ||
+          !sendCommand(cmd, params, { repeat: true, resolve, reject }))
+        reject(new Error("运动未发送：请检查连接、使能和控制许可"));
+    });
+  },
+  stop: () => sendCommand("stop_motion"),
   loadPointTarget(kind, values) {
     if (
       !["joint", "cartesian"].includes(kind) ||

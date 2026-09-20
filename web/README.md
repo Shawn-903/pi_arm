@@ -3,6 +3,7 @@
 本分支对阶段一控制网页进行界面重构，静态资源无需 Node/npm 构建，随 `scripts/start_web.sh` 提供。
 也可以直接打开 `control.html`，手动输入 WebSocket 地址；不会自动连接或使能。
 **三维模型需要通过 HTTP 打开**；直接打开文件时，三维区给出启动提示，其余数值控制仍可使用。
+控制、点位和重复测试脚本及样式使用同一发布版本的 URL 参数。修改这些互相依赖的资源时，一并更新 `control.html` 的 `?v=`，避免浏览器混用旧点位脚本和新页面，造成列表有点但下拉框为空。
 
 ## 文件职责
 
@@ -13,6 +14,7 @@
 - `assets/viewer.js`：本地 Three.js / URDF 三维显示、随动关节、路径、关节拖动和状态降级；不创建独立连接。
 - `assets/interactive.js`：滑块 / 模型手势、后端反解 / IK / 路径预览和回放；通过 control.js 门禁提交有限目标。
 - `assets/teaching.js`：点位录入/加载/导出与 base 坐标显示；加载只填写目标，不发运动。
+- `assets/repeat.js`：点位库 A/B 重复定位循环、任务到位匹配、等待采样、中止与测试记录导出。
 - `vendor/`：固定版本的本地三维依赖及许可证；普通启动无需下载，维护构建见其 README。
 - `model/`：启动/构建自动生成的显示 URDF、清单和 gzip STL，已加入 gitignore，来源为 `src/pi_arm_description`。
 
@@ -24,6 +26,7 @@
 操作工作台提供六关节概览、使能/停止、关节/输出轴目标、独立笛卡尔页签与预设姿态。
 「点位示教」保存手动、反馈或模型目标，持久化到树莓派；base 位姿显示及使用说明见 [点位示教验收](../docs/frontend/TEACHING_REVIEW.md)。
 输出轴限速仍由页面输入，下一条运动生效。顶部软件停止在滚动时保持可达。
+「点位示教 → 重复定位测试」可选起始点/目标点、次数、到点等待和独立速度；详细流程与记录含义见 [重复定位测试](../docs/frontend/REPEATABILITY_TEST.md)。
 运行记录显示原始请求与终态；开发诊断显示原始 CAN/坐标链和标定；方向测试需独立 commissioning 服务。
 工作台的「电机故障恢复」提供选定 CAN 电机的清错（0x9B）与重启（0x07），FAULT 下也可操作。
 重启后保持关闭，失败或位置参考无法确认时继续禁止运动；详见 [恢复说明](../docs/frontend/MOTOR_RECOVERY.md)。
@@ -48,6 +51,8 @@ J1–J6 显示按名称映射的后端关节角；无新鲜有效反馈时为灰
 python3 scripts/test_web_console.py       # 离线：导航、尺寸、门禁、软件停止及故障恢复
 python3 scripts/test_web_diagnostics.py   # 离线：故障、诊断、导出
 python3 scripts/test_web_preview_races.py # 离线：预览失效、迟到响应和手势取消
+python3 scripts/test_web_repeat.py        # 离线：重复定位循环、到位/等待、停止/断连、导出；拦截所有 WebSocket
+python3 scripts/test_web_repeat_loading.py # 离线：复现旧脚本缓存、验证升级后两个下拉框与点位库同步
 # 无 ROS/CAN 的三维测试（需 NumPy，脚本自建临时本地 HTTP）：
 source /opt/ros/jazzy/setup.bash
 python3 scripts/export_web_model.py

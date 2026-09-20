@@ -58,6 +58,7 @@
     return "";
   }
   function render() {
+    window.PiArmRepeat?.setLibrary(library);
     $("pointCount").textContent =
       `${library.points.length} 个点位 · 版本 ${library.revision}`;
     $("pointList").replaceChildren();

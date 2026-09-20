@@ -5,8 +5,10 @@
 
 ## 前端开发分支
 
+重复定位测试阶段存档分支为 **`重复定位精度测试1.0`**，后续开发分支为 `feature/repeatability-test-next`。功能、验证范围及恢复步骤见 [1.0 存档记录](docs/releases/repeatability-test-1.0.md)。
+
 三维显示已通过操作者实机只读确认，存档为 **v0.2.0-viewer-baseline**（`85974a2`）。
-交互开发基线见 [交互计划](docs/frontend/INTERACTIVE_PLAN.md)；当前分支 `feature/teaching-points-and-base-frames` 实现 [点位示教计划](docs/frontend/TEACHING_PLAN.md)。
+交互开发基线见 [交互计划](docs/frontend/INTERACTIVE_PLAN.md)；点位示教开发来自 `feature/teaching-points-and-base-frames`，对应 [点位示教计划](docs/frontend/TEACHING_PLAN.md)。
 到位判定已增加每轴 0.2° 容差、连续稳定检查及停止后复核，见 [修复记录](docs/releases/arrival-accuracy.md)。
 阶段一控制基线保留在标签 `v0.1.0-stage1`。
 新界面说明见 [Web README](web/README.md)，截图及测试见 [前端验收](docs/frontend/REVIEW.md)。
@@ -22,6 +24,7 @@
 | --- | --- |
 | 网页诊断 | 故障时也可连接；六电机协议反馈、关节反解、标定、错误、任务结果及 JSON 导出 |
 | 点位示教 | 手动 / 实机反馈 / 模型预览录入，树莓派持久化、加载、删除及 JSON 导出 |
+| 重复定位测试 | 起始点/目标点循环、次数与到点等待、到位采样、JSON/CSV 导出；[使用说明](docs/frontend/REPEATABILITY_TEST.md) |
 | base 位姿 | 六主动关节子坐标系及 tool0 的 XYZ/RPY，由同一帧反馈与 URDF 计算 |
 | 三维显示 | URDF 实时姿态、三个随动关节、base_link/tool0 坐标轴、关节目标叠加；断线保留最后姿态并标灰 |
 | 交互预览 | 滑块 / 关节模型拖动、输出轴反解、IK、关节插值与 LIN 路径、回放；松手执行须显式开启 |
