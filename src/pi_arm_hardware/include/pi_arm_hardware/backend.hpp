@@ -4,6 +4,7 @@
 #include "pi_arm_hardware/actuator_coordinates.hpp"
 #include "pi_arm_hardware/calibration.hpp"
 #include "pi_arm_hardware/motion_write_gate.hpp"
+#include "pi_arm_hardware/motion_detector.hpp"
 #include "pi_arm_transmission/cable_kinematics.hpp"
 
 #include <array>
@@ -145,7 +146,7 @@ public:
   // Only the dedicated, single-threaded commissioning node may call these.
   ManagementResult start_axis_test(const std::string & space, int axis_id,
     double delta_deg, double speed_deg_s);
-  ManagementResult stop_axis_test(const std::string & reason);
+  ManagementResult stop_axis_test(const std::string & reason, bool hold_position = false);
   bool heartbeat_axis_test(std::uint64_t test_id);
   void update_axis_test(const HardwareSample & sample);
   bool axis_test_active() const {return axis_test_active_;}
@@ -153,7 +154,9 @@ public:
   std::string axis_test_status() const {return axis_test_status_;}
 
 private:
-  MotionArmResult disarm_motion(std::uint64_t lease_id, bool retry_stop = false) noexcept;
+  MotionArmResult stop_and_hold(const std::vector<std::uint8_t> & motor_ids) noexcept;
+  MotionArmResult disarm_motion(std::uint64_t lease_id, bool retry_stop = false,
+    std::uint64_t feedback_hold_epoch = 0U) noexcept;
   // Serialize the final command submission with lease changes. ACK waiting
   // happens after releasing this mutex, never in read()/write().
   std::mutex motion_mutex_;
@@ -161,6 +164,9 @@ private:
   pi_arm_transmission::Vector6 recovery_start_{};
   double output_speed_limit_rad_s_{0.08726646259971647};
   bool normal_motion_sent_{false};
+  std::atomic_bool stop_hold_active_{false};
+  std::atomic_bool stop_hold_failed_{false};
+  std::atomic_uint64_t stop_hold_epoch_{1U};
   bool axis_test_raw_ready(bool require_still) const;
   bool axis_test_active_{false};
   bool axis_test_stop_failed_{false};
@@ -175,6 +181,8 @@ private:
   std::chrono::steady_clock::time_point axis_test_heartbeat_{};
   double axis_test_timeout_sec_{0.0};
   BackendConfig config_;
+  std::array<MotionDetector, 6> motor_motion_detectors_;
+  std::array<MotionDetector, 6> joint_motion_detectors_;
   pi_arm_transmission::CableKinematics kinematics_;
   CalibrationResult calibration_;
   std::atomic_bool reboot_reference_uncertain_{false};

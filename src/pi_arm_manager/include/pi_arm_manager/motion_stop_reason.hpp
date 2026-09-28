@@ -29,6 +29,11 @@ struct MotionStopOutcome
   const char * message{"motion stopped"};
 };
 
+inline bool holds_position_on_stop(const MotionStopReason reason) noexcept
+{
+  return reason == MotionStopReason::ACTION_CANCEL || reason == MotionStopReason::STOP_SERVICE;
+}
+
 inline int motion_stop_priority(const MotionStopReason reason) noexcept
 {
   switch (reason) {

@@ -167,7 +167,7 @@ public:
           } else if (request->operation == "stop") {
             if (request->test_id != 0 && request->test_id != backend_->axis_test_id()) {
               result = {false, 2001, "test ID does not match"};
-            } else {result = backend_->stop_axis_test("stopped: operator request");}
+            } else {result = backend_->stop_axis_test("stopped: operator request", true);}
           } else {result = {false, 1004, "unknown axis-test operation"};}
           response->success = result.success;
           response->code = result.code;

@@ -393,6 +393,7 @@ class CommandGateway:
                 "cmd": command,
                 "stopped": result.message != "no active motion",
                 "task_id": task_id if result.message != "no active motion" else None,
+                "message": result.message,
             }
         if command == "movej":
             return await self._movej(params)

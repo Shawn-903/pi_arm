@@ -62,6 +62,27 @@ int main(int argc, char **argv) {
     if(op=="hold" || op=="hold_wrong") {
       auto r=b.set_motion_armed(false, op=="hold" ? lease : lease+100, 0.0, true);ok=r.success;detail=r.message;
     }
+    if(op=="stop_hold") {
+      auto r=b.set_motion_armed(false,0U,0.0,true);ok=r.success;detail=r.message;
+    }
+    if(op=="release_old") {
+      auto r=b.set_motion_armed(false,lease);ok=r.success;detail=r.message;
+    }
+    if(op=="axis_hold") {
+      auto r=b.stop_axis_test("operator stop",true);ok=r.success;detail=r.message;
+    }
+    if(op=="hold_race") {
+      std::atomic<bool> run{true};
+      std::thread reader([&]() {
+        while(run.load()) {pi_arm_hardware::HardwareSample feedback;b.read(feedback);std::this_thread::sleep_for(1ms);}
+      });
+      std::thread writer([&]() {
+        auto q=s.positions_rad;std::vector<double> v(6,0);q[0]+=.01;
+        while(run.load()) {b.write(q,v);std::this_thread::sleep_for(1ms);}
+      });
+      auto r=b.set_motion_armed(false,0U,0.0,true);ok=r.success;detail=r.message;
+      std::this_thread::sleep_for(100ms);run=false;reader.join();writer.join();
+    }
     if(op=="teach_on" || op=="teach_off") {auto r=b.set_teaching(op=="teach_on");ok=r.success;detail=r.message;}
     if(op=="enable") {auto r=b.manage(pi_arm_can::ManagementOperation::MOTOR_RUN,0);ok=r.success;detail=r.message;}
     if(op=="disarm") {auto r=b.set_motion_armed(false,0); b.write(std::vector<double>(6,0),std::vector<double>(6,0));ok=r.success;detail=r.message;}

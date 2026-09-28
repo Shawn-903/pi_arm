@@ -755,9 +755,24 @@ private:
   }
 
   bool set_motion_armed(
-    const bool armed, const std::uint64_t lease_id, const std::string & stage,
+    const bool armed, std::uint64_t lease_id, const std::string & stage,
     double max_output_velocity = 0.0, bool hold_position = false)
   {
+    // Serialize arm/release RPCs, including scope guards racing with Stop.
+    std::lock_guard<std::mutex> gate_lock(motion_gate_mutex_);
+    if (armed && stop_requested_.load()) {return false;}
+    if (!armed && stop_requested_.load()) {
+      if (holds_position_on_stop(stop_reason_.load()) && lease_id != 0U) {
+        lease_id = 0U;
+        hold_position = true;
+      } else if (!holds_position_on_stop(stop_reason_.load()) &&
+        stop_reason_.load() != MotionStopReason::NONE)
+      {
+        lease_id = 0U;
+        hold_position = false;
+      }
+    }
+    if (!armed && lease_id == 0U) {stop_hold_confirmed_.store(false);}
     if (!motion_arm_client_->wait_for_service(
         std::chrono::duration<double>(operation_timeout_)))
     {
@@ -789,6 +804,7 @@ private:
       get_logger(), "motion gate armed=%d lease=%llu at %s: %s",
       armed ? 1 : 0, static_cast<unsigned long long>(lease_id), stage.c_str(),
       response->message.c_str());
+    if (!armed && lease_id == 0U && hold_position) {stop_hold_confirmed_.store(true);}
     return true;
   }
 
@@ -921,6 +937,7 @@ private:
   void begin_task(const std::string & command)
   {
     stop_requested_.store(false);
+    stop_hold_confirmed_.store(false);
     stop_reason_.store(MotionStopReason::NONE);
     still_frames_.store(0);
     std::lock_guard<std::mutex> lock(state_mutex_);
@@ -1608,6 +1625,10 @@ private:
     goal.goal_time_tolerance = rclcpp::Duration::from_seconds(arrival_timeout_);
     const auto lease_id = active_task_id();
     if (!set_motion_armed(true, lease_id, command + "/accepted", output_speed)) {
+      if (stop_requested_.load() || handle->is_canceling()) {
+        complete_action<ActionT>(handle, true, command, "stopped before arming");
+        return;
+      }
       throw std::runtime_error("failed to arm motion");
     }
     // Release the lease even if a future or result handler throws.
@@ -1644,7 +1665,15 @@ private:
     RCLCPP_INFO(
       get_logger(), "%s follow: sending goal points=%zu",
       command.c_str(), goal.trajectory.points.size());
-    auto send_future = follow_client_->async_send_goal(goal);
+    rclcpp_action::Client<Follow>::SendGoalOptions send_options;
+    send_options.goal_response_callback = [this, lease_id](const auto & accepted) {
+        if (accepted && (stop_requested_.load() || !task_claimed_.load() ||
+          active_task_id() != lease_id))
+        {
+          follow_client_->async_cancel_goal(accepted);
+        }
+      };
+    auto send_future = follow_client_->async_send_goal(goal, send_options);
     if (wait_future_logged(send_future, operation_timeout_, command + "/send_goal") !=
       std::future_status::ready)
     {
@@ -1667,6 +1696,9 @@ private:
       std::lock_guard<std::mutex> lock(follow_mutex_);
       active_follow_goal_ = follow_handle;
     }
+    // The controller may accept after Stop already closed the hardware gate.
+    // Cancel that late goal too; never allow it to survive into the next task.
+    if (stop_requested_.load()) {follow_client_->async_cancel_goal(follow_handle);}
     auto result_future = follow_client_->async_get_result(follow_handle);
     const auto status = wait_future_logged(
       result_future, result_timeout, command + "/get_result");
@@ -1707,8 +1739,8 @@ private:
       backend_ok = false;
       detail = arrival_error("before stop");
     }
-    // Successful arrival retains A4 position control. Fault/cancel/timeout
-    // still stop immediately; complete_action verifies the held pose again.
+    // Successful arrival retains the final A4 target. User cancellation holds
+    // current encoder positions; faults/timeouts retain the fail-closed stop.
     if (!backend_ok || stop_requested_.load() || handle->is_canceling()) {
       disarm_direct("direct_move/follow_result");
     }
@@ -1733,7 +1765,16 @@ private:
         reason = handle->is_canceling() ? MotionStopReason::ACTION_CANCEL :
           MotionStopReason::STOP_SERVICE;
       }
-      const auto outcome = motion_stop_outcome(reason);
+      // Await/establish hold even when the action result wins the race with
+      // the service callback. Repeated holds are idempotent in the backend.
+      if (holds_position_on_stop(reason)) {
+        set_motion_armed(false, 0U, "canceled/current_position_hold", 0.0, true);
+      }
+      auto outcome = motion_stop_outcome(reason);
+      if (holds_position_on_stop(reason) && !stop_hold_confirmed_.load()) {
+        outcome = {false, 3006, pi_arm_interfaces::msg::TaskState::FAILED,
+          "HOLD UNCONFIRMED: stop position could not be held; check feedback and retry Stop"};
+      }
       result->success = outcome.success;
       result->code = outcome.code;
       result->message = outcome.message;
@@ -1784,6 +1825,9 @@ private:
       handle->abort(result);
       return false;
     }
+    if (stop_requested_.load() || handle->is_canceling()) {
+      return complete_action<ActionT>(handle, true, command, "motion stopped");
+    }
     RCLCPP_INFO(get_logger(), "%s succeeded; holding position", command.c_str());
     result->success = true;
     result->code = 0;
@@ -1809,18 +1853,17 @@ private:
     }
   }
 
-  void request_stop(const MotionStopReason reason)
+  bool request_stop(const MotionStopReason reason)
   {
+    // Block new claims until the hardware stop/hold and cancellation finish.
+    std::lock_guard<std::mutex> command_lock(command_mutex_);
+    if (!task_claimed_.load()) {stop_reason_.store(MotionStopReason::NONE);}
     record_stop_reason(reason);
     const bool already_stopping = stop_requested_.exchange(true);
-    // Force-release any lease before controller cancellation/hold handling.
-    // stop_motion remains a software stop, not an emergency stop.
-    if (already_stopping) {
-      return;
-    }
-    if (reason != MotionStopReason::STOP_SERVICE) {
-      set_motion_armed(false, 0U, "stop_or_cancel");
-    }
+    const bool hold = holds_position_on_stop(stop_reason_.load());
+    const bool stopped = set_motion_armed(false, 0U, "stop_or_cancel", 0.0, hold);
+    // A later hardware fault must override an earlier successful user hold.
+    if (already_stopping && task_claimed_.load()) {return stopped;}
     if (move_group_) {
       move_group_->stop();
     }
@@ -1836,47 +1879,34 @@ private:
       {
         RCLCPP_WARN(get_logger(), "Timed out waiting for trajectory cancellation");
       }
-      send_hold_trajectory();
     }
-  }
-
-  void send_hold_trajectory()
-  {
-    Follow::Goal hold;
-    trajectory_msgs::msg::JointTrajectoryPoint point;
-    {
-      std::lock_guard<std::mutex> lock(state_mutex_);
-      if (hardware_.joint_names.empty() ||
-        hardware_.positions.size() != hardware_.joint_names.size())
-      {
-        RCLCPP_WARN(get_logger(), "Cannot send hold trajectory: joint state unavailable");
-        return;
-      }
-      hold.trajectory.joint_names = hardware_.joint_names;
-      point.positions = hardware_.positions;
-    }
-    point.time_from_start = rclcpp::Duration::from_seconds(0.1);
-    hold.trajectory.points.push_back(point);
-    follow_client_->async_send_goal(hold);
+    return stopped;
   }
 
   void stop_callback(
     const std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Request>,
     std::shared_ptr<pi_arm_interfaces::srv::StopMotion::Response> response)
   {
-    const bool stopped = set_motion_armed(false, 0U, "stop_motion/service");
-    if (!task_claimed_.load()) {
-      RCLCPP_INFO(get_logger(), "stop_motion: no active motion");
-      response->success = stopped;
-      response->code = stopped ? 0 : 2002;
-      response->message = stopped ? "no active motion; stop confirmed" : "STOP UNCONFIRMED; retry Stop";
-      return;
-    }
-    RCLCPP_WARN(get_logger(), "stop_motion: requesting stop of active task");
-    request_stop(MotionStopReason::STOP_SERVICE);
+    const bool stopped = request_stop(MotionStopReason::STOP_SERVICE);
     response->success = stopped;
     response->code = stopped ? 0 : 2002;
-    response->message = stopped ? "stop requested; motor stop confirmed" : "STOP UNCONFIRMED; retry Stop";
+    response->message = "HOLD UNCONFIRMED: check feedback and retry Stop";
+    if (stopped) {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      if (hardware_.teaching_active) {
+        response->message = "drag teaching remains active; position loop released";
+      } else if (!hardware_.motor_enabled.empty() &&
+        std::none_of(hardware_.motor_enabled.begin(), hardware_.motor_enabled.end(), [](bool v) {return v;}))
+      {
+        response->message = "motors remain disabled; no position hold enabled";
+      } else if (stop_hold_confirmed_.load()) {
+        response->message = "motion stopped; current position hold confirmed";
+      } else {
+        response->success = false;
+        response->code = 2002;
+        response->message = "fault stop acknowledged; position hold NOT confirmed";
+      }
+    }
   }
 
   double hardware_timeout_;
@@ -1902,6 +1932,8 @@ private:
   std::mutex state_mutex_;
   std::mutex follow_mutex_;
   std::mutex command_mutex_;
+  std::mutex motion_gate_mutex_;
+  std::atomic_bool stop_hold_confirmed_{false};
   std::atomic_bool preview_active_{false};
   rclcpp::Service<pi_arm_interfaces::srv::PreviewMotion>::SharedPtr preview_service_;
   rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedPtr ik_client_;

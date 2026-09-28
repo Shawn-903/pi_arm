@@ -82,6 +82,11 @@ double age_seconds(
 
 void validate_backend_config(const BackendConfig & config)
 {
+  if (!std::isfinite(config.moving_speed_threshold_rad_s) ||
+    config.moving_speed_threshold_rad_s < 0.0)
+  {
+    throw std::invalid_argument("moving speed threshold must be finite and nonnegative");
+  }
   if (config.actuators.size() != kAxisCount) {
     throw std::invalid_argument("backend requires exactly six actuators");
   }
@@ -203,6 +208,8 @@ RealBackend::~RealBackend()
 
 void RealBackend::configure()
 {
+  for (auto & detector : motor_motion_detectors_) {detector.reset();}
+  for (auto & detector : joint_motion_detectors_) {detector.reset();}
   pi_arm_can::DriverConfig driver_config;
   driver_config.interface_name = config_.can_interface;
   driver_config.read_only = config_.read_only;
@@ -246,9 +253,13 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     return false;
   }
 
+  const auto feedback_hold_epoch = stop_hold_epoch_.load();
   try {
     const auto snapshot = driver_->snapshot();
     const auto now = std::chrono::steady_clock::now();
+    const auto seconds = [](const auto time) {
+        return std::chrono::duration<double>(time.time_since_epoch()).count();
+      };
     const double nan = std::numeric_limits<double>::quiet_NaN();
     sample.positions_rad.assign(kAxisCount, nan);
     sample.velocities_rad_s.assign(kAxisCount, nan);
@@ -286,6 +297,9 @@ bool RealBackend::read(HardwareSample & sample) noexcept
 
     pi_arm_transmission::Vector6 model_output_positions{};
     pi_arm_transmission::Vector6 output_velocities{};
+    pi_arm_transmission::Vector6 output_deadbands{};
+    pi_arm_transmission::Vector6 joint_deadbands{};
+    std::array<double, kAxisCount> angle_times{}, speed_times{};
     std::array<bool, kAxisCount> angle_valid{};
     std::array<bool, kAxisCount> velocity_valid{};
     std::array<bool, kAxisCount> motor_enabled{};
@@ -317,8 +331,6 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       if (state.status2_valid) {
         output_velocities[index] =
           protocol_velocity_to_output_rad_s(state.protocol_speed_dps, actuator);
-        motor_in_motion[index] =
-          std::abs(output_velocities[index]) > config_.moving_speed_threshold_rad_s;
       }
       if (state.status1_valid) {
         motor_enabled[index] = state.motor_state == 0x00U || state.motor_state == 0x30U;
@@ -332,6 +344,15 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       motor_fresh[index] =
         state.angle_valid && state.status1_valid && state.status2_valid &&
         motor_ages[index] <= config_.state_stale_timeout_sec;
+      // Two 0.01-degree protocol encoder ticks, converted with the actual
+      // reducer ratio. Do not round positions or filter the published speed.
+      output_deadbands[index] = std::abs(protocol_velocity_to_output_rad_s(0.02, actuator));
+      angle_times[index] = seconds(state.angle_update);
+      speed_times[index] = seconds(state.status2_update);
+      motor_in_motion[index] = motor_motion_detectors_[index].update(
+        sample.raw_output_positions_rad[index], angle_times[index],
+        output_velocities[index], speed_times[index], seconds(now), motor_fresh[index],
+        output_deadbands[index], config_.moving_speed_threshold_rad_s);
     }
     sample.motor_enabled.assign(motor_enabled.begin(), motor_enabled.end());
     sample.motor_has_error.assign(motor_error.begin(), motor_error.end());
@@ -437,6 +458,18 @@ bool RealBackend::read(HardwareSample & sample) noexcept
         sample.error_message = sample.kinematics_error_message;
       } else {
         sample.velocities_rad_s = to_vector(recovered_velocity);
+        // Propagate encoder resolution through the local inverse Jacobian,
+        // including wrist channel swaps and cross-axis coupling. Sum absolute
+        // contributions so opposite signs cannot cancel the noise allowance.
+        for (std::size_t motor = 0; motor < kAxisCount; ++motor) {
+          pi_arm_transmission::Vector6 basis{}, mapped{};
+          basis[motor] = output_deadbands[motor];
+          const auto resolution_status = kinematics_.output_to_joint_velocity(
+            last_joint_positions_rad_, basis, mapped);
+          for (std::size_t joint = 0; joint < kAxisCount; ++joint) {
+            joint_deadbands[joint] += resolution_status ? std::abs(mapped[joint]) : nan;
+          }
+        }
       }
     }
     position_initialized_ = sample.kinematics_valid;
@@ -447,6 +480,7 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       bool fresh = sample.kinematics_valid;
       std::int32_t error_code = 0;
       double age = 0.0;
+      double angle_time = seconds(now), speed_time = seconds(now);
       for (std::size_t motor_index = 0; motor_index < kAxisCount; ++motor_index) {
         if (!joint_depends_on_motor(joint_index, motor_index, kinematics_.parameters().swap_wrist_channels)) {
           continue;
@@ -456,16 +490,18 @@ bool RealBackend::read(HardwareSample & sample) noexcept
         fresh = fresh && motor_fresh[motor_index];
         error_code |= motor_error_codes[motor_index];
         age = std::max(age, motor_ages[motor_index]);
+        angle_time = std::min(angle_time, angle_times[motor_index]);
+        speed_time = std::min(speed_time, speed_times[motor_index]);
       }
       sample.enabled[joint_index] = enabled;
       sample.has_error[joint_index] = has_error;
       sample.fresh[joint_index] = fresh;
       sample.error_codes[joint_index] = error_code;
       sample.ages_sec[joint_index] = age;
-      sample.in_motion[joint_index] =
-        std::isfinite(sample.velocities_rad_s[joint_index]) &&
-        std::abs(sample.velocities_rad_s[joint_index]) >
-        config_.moving_speed_threshold_rad_s;
+      sample.in_motion[joint_index] = joint_motion_detectors_[joint_index].update(
+        sample.positions_rad[joint_index], angle_time, sample.velocities_rad_s[joint_index],
+        speed_time, seconds(now), fresh, joint_deadbands[joint_index],
+        config_.moving_speed_threshold_rad_s);
     }
 
     const bool all_enabled =
@@ -477,11 +513,13 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       std::any_of(motor_error.begin(), motor_error.end(), [](const bool value) {return value;});
     const auto stop_status = driver_->motion_stop_status();
     const bool stopping = stop_status == pi_arm_can::MotionStopStatus::PENDING;
-    const bool stop_failed = stop_status == pi_arm_can::MotionStopStatus::FAILED;
+    const bool stop_failed = stop_status == pi_arm_can::MotionStopStatus::FAILED || stop_hold_failed_.load();
     sample.motion_stop_pending = stopping;
     sample.motion_stop_failed = stop_failed;
     if (stop_failed) {
-      sample.error_message = "STOP UNCONFIRMED: retry Stop; motion is inhibited";
+      sample.error_message = stop_hold_failed_.load() ?
+        "HOLD UNCONFIRMED: position holding could not be verified; retry Stop; motion is inhibited" :
+        "STOP UNCONFIRMED: retry Stop; motion is inhibited";
       sample.has_error.assign(kAxisCount, true);
     } else if (stopping) {
       sample.error_message = "waiting for motor stop acknowledgements";
@@ -499,12 +537,18 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       all_enabled && all_fresh && !any_motor_error && !stopping && !stop_failed;
 
     control_permitted_.store(sample.control_permitted);
-    if (!sample.control_permitted && !axis_test_active_ &&
+    const bool commissioning_hold = config_.commissioning && stop_hold_active_.load() &&
+      all_fresh && !any_motor_error && !stop_failed &&
+      std::all_of(axis_test_commands_.begin(), axis_test_commands_.end(), [&](const auto & command) {
+        const auto & state = snapshot.at(command.motor_id);
+        return state.motor_state == 0x00U || state.motor_state == 0x30U;
+      });
+    if (!sample.control_permitted && !axis_test_active_ && !commissioning_hold &&
       !(sample.teaching_active && !motion_write_gate_.armed())) {
       // Feedback, calibration and kinematics validity are independent of an
       // accepted motion lease. Losing any prerequisite revokes the lease and
       // returns the CAN driver to read-only polling.
-      disarm_motion(0U);
+      disarm_motion(0U, false, feedback_hold_epoch);
     }
     sample.driver_mode = pi_arm_can::to_string(driver_->mode());
     sample.motor_test_permitted = config_.commissioning && !axis_test_active_ &&
@@ -514,19 +558,28 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     return true;
   } catch (const std::exception & error) {
     control_permitted_.store(false);
-    disarm_motion(0U);
+    disarm_motion(0U, false, feedback_hold_epoch);
     sample.error_message = error.what();
     return false;
   }
 }
 
 MotionArmResult RealBackend::disarm_motion(
-  const std::uint64_t lease_id, const bool retry_stop) noexcept
+  const std::uint64_t lease_id, const bool retry_stop, const std::uint64_t feedback_hold_epoch) noexcept
 {
   std::lock_guard<std::mutex> lock(motion_mutex_);
+  if (feedback_hold_epoch != 0U && feedback_hold_epoch != stop_hold_epoch_.load()) {
+    return {true, motion_write_gate_.armed(), "feedback predates stop/hold transition; recheck next sample"};
+  }
+  // An old action's scope-exit/cancel callback must not release a subsequent
+  // operator hold. Faults, teaching and shutdown use the explicit lease zero.
+  if (lease_id != 0U && stop_hold_active_.load() && !motion_write_gate_.armed()) {
+    return {true, false, "obsolete trajectory cleanup ignored; stop position remains held"};
+  }
   if (!motion_write_gate_.disarm(lease_id)) {
     return {false, true, "motion lease does not match the active lease"};
   }
+  stop_hold_active_.store(false);
   if (driver_ && (normal_motion_sent_ ||
     // Lease zero is an explicit force-stop, including after a process restart
     // when this backend cannot know what target the device last received.
@@ -549,9 +602,99 @@ MotionArmResult RealBackend::disarm_motion(
   return {true, false, "real position writes disarmed"};
 }
 
+MotionArmResult RealBackend::stop_and_hold(const std::vector<std::uint8_t> & motor_ids) noexcept
+{
+  std::unique_lock<std::mutex> lock(motion_mutex_);
+  if (!driver_ || config_.read_only || motor_ids.empty()) {
+    return {false, motion_write_gate_.armed(), "writable CAN feedback required for stop-and-hold"};
+  }
+  if (teaching_active_.load()) {
+    return {true, false, "drag teaching remains active; position loop intentionally released"};
+  }
+  ++stop_hold_epoch_;
+  const auto fail = [&](const std::string & message) {
+      stop_hold_failed_.store(true);
+      stop_hold_active_.store(false);
+      ++stop_hold_epoch_;
+      lock.unlock();
+      // On unavailable/faulty feedback a position target cannot be trusted.
+      // Fall back to the existing stop path and report failure, never success.
+      set_motion_armed(false, 0U);
+      return MotionArmResult{false, false, "HOLD UNCONFIRMED: " + message};
+    };
+  try {
+    motion_write_gate_.disarm(0U);
+    if (driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED ||
+      driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::PENDING)
+    {
+      if (!driver_->stop_motors(motor_ids)) {return fail("previous stop is unconfirmed");}
+    }
+    // Purge and fence old controller batches BEFORE capturing the hold target.
+    if (!driver_->set_mode(pi_arm_can::DriverMode::MONITORING)) {
+      return fail("cannot close the previous command stream");
+    }
+    const auto snapshot = driver_->snapshot();
+    const auto now = std::chrono::steady_clock::now();
+    const bool all_off = std::all_of(motor_ids.begin(), motor_ids.end(), [&](const auto id) {
+        const auto & state = snapshot.at(id);
+        return state.status1_valid && age_seconds(state.status1_update, now) <= config_.state_stale_timeout_sec &&
+               state.motor_state != 0x00U && state.motor_state != 0x30U;
+      });
+    if (all_off) {
+      // Stop is available even before enabling. Never enable an off motor via
+      // A4, or turn an ordinary Stop click into an unrecoverable hold fault.
+      if (!driver_->stop_motors(motor_ids)) {return fail("disabled motor stop ACK missing");}
+      normal_motion_sent_ = false;
+      stop_hold_active_.store(false);
+      stop_hold_failed_.store(false);
+      ++stop_hold_epoch_;
+      return {true, false, "motors remain disabled; no position hold enabled"};
+    }
+    if (!config_.commissioning && (!config_.allow_real_control || !calibration_.valid ||
+      !position_initialized_.load() || reboot_reference_uncertain_.load()))
+    {
+      return fail("normal control reference/kinematics unavailable");
+    }
+    std::vector<pi_arm_can::PositionCommand> commands;
+    for (const auto & actuator : config_.actuators) {
+      if (std::find(motor_ids.begin(), motor_ids.end(), actuator.motor_id) == motor_ids.end()) {continue;}
+      const auto & state = snapshot.at(actuator.motor_id);
+      if (!state.angle_valid || !state.status1_valid || !state.status2_valid ||
+        !std::isfinite(state.protocol_angle_deg) ||
+        age_seconds(state.angle_update, now) > 0.1 || age_seconds(state.status2_update, now) > 0.1 ||
+        age_seconds(state.status1_update, now) > config_.state_stale_timeout_sec ||
+        state.error_state != 0 || (state.motor_state != 0x00U && state.motor_state != 0x30U))
+      {
+        return fail("fresh enabled, error-free motor feedback required");
+      }
+      commands.push_back({actuator.motor_id, state.protocol_angle_deg,
+        std::max(1.0, std::floor(std::abs(output_velocity_to_protocol_dps(0.017453292519943295, actuator))))});
+    }
+    if (stop_hold_active_.load() && !stop_hold_failed_.load()) {
+      return {true, false, "stop position already held"};  // Do not recapture a drifting target.
+    }
+    // Direct A4 replacement preserves position control; no torque-release 0x81
+    // is sent on the healthy soft-stop path. ACK + fresh stationary feedback
+    // must confirm the captured targets before reporting success.
+    if (!driver_->hold_positions(commands)) {return fail("captured position hold was not acknowledged/settled");}
+    normal_motion_sent_ = true;
+    stop_hold_failed_.store(false);
+    stop_hold_active_.store(true);
+    ++stop_hold_epoch_;
+    return {true, false, "motion stopped; captured encoder positions held"};
+  } catch (const std::exception & error) {
+    return fail(error.what());
+  }
+}
+
 MotionArmResult RealBackend::set_motion_armed(
   const bool armed, const std::uint64_t lease_id, const double max_output_velocity, const bool hold_position) noexcept
 {
+  if (hold_position && !armed && lease_id == 0U) {
+    std::vector<std::uint8_t> ids;
+    for (const auto & actuator : config_.actuators) {ids.push_back(actuator.motor_id);}
+    return stop_and_hold(ids);
+  }
   if (hold_position) {
     std::lock_guard<std::mutex> lock(motion_mutex_);
     if (armed || lease_id == 0U || !motion_write_gate_.armed() ||
@@ -609,7 +752,7 @@ MotionArmResult RealBackend::set_motion_armed(
     return {false, false, "commissioning mode cannot arm normal controller writes"};
   }
   if (teaching_active_.load() || !config_.allow_real_control || !calibration_.valid || !control_permitted_.load() ||
-    reboot_reference_uncertain_.load()) {
+    reboot_reference_uncertain_.load() || stop_hold_failed_.load()) {
     return {false, false, "real-control prerequisites are not satisfied"};
   }
   if (!driver_ || !driver_->running() ||
@@ -633,6 +776,7 @@ MotionArmResult RealBackend::set_motion_armed(
       "invalid/conflicting motion lease or no finite idle command baseline"};
   }
   output_speed_limit_rad_s_ = speed_limit;
+  stop_hold_active_.store(false);
   {
     std::lock_guard<std::mutex> feedback_lock(feedback_mutex_);
     recovery_start_ = last_joint_positions_rad_;
@@ -1240,7 +1384,6 @@ MotionArmResult MockBackend::set_motion_armed(
   if (!configured_) {
     return {false, false, "mock backend is not configured"};
   }
-  (void)hold_position;
   if (armed && sample_.teaching_active) {return {false, false, "drag teaching active"};}
   if (armed && lease_id == 0U) {
     return {false, false, "invalid mock motion lease"};
@@ -1251,6 +1394,13 @@ MotionArmResult MockBackend::set_motion_armed(
     return {false, false, "invalid output speed limit"};
   }
   if (armed) {hold_mock_current_ = false;}
+  if (!armed && hold_position && lease_id == 0U) {
+    hold_mock_current_ = true;
+    output_velocities_rad_s_ = {};
+    std::fill(sample_.velocities_rad_s.begin(), sample_.velocities_rad_s.end(), 0.0);
+    std::fill(sample_.in_motion.begin(), sample_.in_motion.end(), false);
+    std::fill(sample_.motor_in_motion.begin(), sample_.motor_in_motion.end(), false);
+  }
   // Mock has no CAN write boundary; accept the manager handshake without
   // changing its existing deterministic command behavior.
   return {true, armed, armed ? "mock motion lease accepted" : "mock motion lease released"};

@@ -26,9 +26,9 @@ ROS 2 公共接口定义包，由 rosidl 生成 C++/Python 类型；自身不启
 | 定义 | 作用 |
 | --- | --- |
 | [ManageMotor](srv/ManageMotor.srv) | 按服务名使能/关闭/清错/重启；通常 ID 0 表示全部，但重启只接受 1–6 |
-| [SetMotionArmed](srv/SetMotionArmed.srv) | 硬件内部写入租约、输出轴限速，成功到位释放时可 `hold_position` |
+| [SetMotionArmed](srv/SetMotionArmed.srv) | 硬件内部写入租约、输出轴限速；`armed=false, hold_position=true` 时，非零 lease 保留到位目标，零 lease 停止并保持当前编码器位置 |
 | [SetTeaching](srv/SetTeaching.srv) | 显式进入拖拽示教或退出并保持当前位置 |
-| [StopMotion](srv/StopMotion.srv) | 停止当前运动并返回结果 |
+| [StopMotion](srv/StopMotion.srv) | 正常停止并保持当前位置，成功需确认保持；故障/失联不能保证保持 |
 | [AxisTest](srv/AxisTest.srv) | commissioning 专用 start/heartbeat/stop，步进与速度单位为 °、°/s |
 | [PreviewMotion](srv/PreviewMotion.srv) | joint/output/ik/lin 只读预览，不执行；返回轨迹仅供显示 |
 

@@ -1,5 +1,6 @@
 bool armed
-# Successful arrival only: revoke writes but retain motor position loop.
+# With armed=false: nonzero lease retains the successful final target;
+# lease_id=0 cancels writes and holds fresh current encoder positions (soft stop).
 bool hold_position
 uint64 lease_id
 # Per-lease output-shaft speed ceiling, rad/s; zero selects 5 deg/s.

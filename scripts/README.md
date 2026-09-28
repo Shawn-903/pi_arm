@@ -52,7 +52,7 @@ python -m playwright install chromium
 | [test_web_drag_teaching.py](test_web_drag_teaching.py) | 示教按钮、请求及保持状态 |
 | [test_web_preview_races.py](test_web_preview_races.py) | 迟到预览、手势取消与竞争 |
 | [test_web_speed_limits.py](test_web_speed_limits.py) | 默认 5/上限 10、预设速度和参数拒绝 |
-| [test_web_repeat.py](test_web_repeat.py) | A/B 循环、到位等待、异常中止、导出和布局 |
+| [test_web_repeat.py](test_web_repeat.py) | A/B 循环、五轮试跑、单调时钟周期统计（排除首轮/中止半轮）、到位等待、异常中止、导出和布局 |
 | [test_web_repeat_loading.py](test_web_repeat_loading.py) | 旧脚本缓存复现、升级后的点位下拉同步 |
 | [test_web_viewer.py](test_web_viewer.py) | 独立矩阵 FK、mimic、模型资源、显示降级；默认离线，`--mock-url` 另加 mock 只读对照 |
 
@@ -95,7 +95,18 @@ python3 scripts/test_rebind_cable_directions.py
 
 前两个脚本自己建立模拟器并调用生产 RealBackend，固定/核验 vcan0，不需要另启实机服务；应顺序运行，不能与其他驱动或模拟器争用 vcan0。方向重绑定测试是离线文件测试。
 
-[测试到位集成](test_arrival_integration.py) 在隔离 ROS 域 82 启动真实 manager 与合成硬件/控制器服务，不开 CAN、不执行真实 MoveIt 轨迹：`python3 scripts/test_arrival_integration.py`。不要让其他服务占用这个域。
+[运动反馈回归](test_motion_feedback_vcan.py) 使用单独的 `vcan_motion`，核验生产 RealBackend 的静止抖动、零速度读数下的缓慢位移、腕部通道映射、掉线恢复和无效运动学。它只产生虚拟查询/反馈帧，拒绝非 vcan 接口，并断言没有使能、位置或标零命令。source 要验证的 install（支持隔离 overlay），再执行：
+
+```bash
+sudo ip link add vcan_motion type vcan
+sudo ip link set vcan_motion up
+python3 scripts/test_motion_feedback_vcan.py
+sudo ip link delete vcan_motion
+```
+
+运行中的实机使用现有 `build/install` 时，可在 `/tmp` 指定独立 `colcon --log-base ... build --build-base ... --install-base ...` 编译测试硬件包；不要覆盖运行中的库。正式加载修复仍按根 README 停止、构建、重新启动。
+
+[测试到位与停止集成](test_arrival_integration.py) 在隔离 ROS 域 82 启动真实 manager 与合成硬件/控制器服务，不开 CAN、不执行真实 MoveIt 轨迹：`ROS_DOMAIN_ID=82 python3 scripts/test_arrival_integration.py`。覆盖到位复核、运动/等待停止、Action 取消、迟到响应、保持失败与故障优先级。不要让其他服务占用这个域。
 
 以下是需要预先配置对应 vcan 服务的专项入口，不是直接对当前实机运行的快捷命令：
 

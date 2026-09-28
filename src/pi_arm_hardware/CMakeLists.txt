@@ -78,6 +78,11 @@ install(
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_motion_detector test/test_motion_detector.cpp)
+  if(TARGET test_motion_detector)
+    target_include_directories(test_motion_detector PRIVATE include)
+    target_compile_options(test_motion_detector PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
   ament_add_gtest(test_backend test/test_backend.cpp)
   if(TARGET test_backend)
     target_link_libraries(test_backend pi_arm_hardware)

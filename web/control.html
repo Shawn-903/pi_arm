@@ -6,7 +6,7 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <meta content="light" name="color-scheme" />
     <title>Pi Arm · 机械臂工作台</title>
-    <link href="assets/console.css?v=20260920-repeat2" rel="stylesheet" />
+    <link href="assets/console.css?v=20260922-timing1" rel="stylesheet" />
   </head>
   <body data-role="operator" data-view="workbench">
     <a class="skip-link" href="#viewContent">跳至操作区</a>
@@ -765,6 +765,7 @@
                   <p id="repeatSelection">请选择已保存的两个点位</p>
                   <div class="point-actions">
                     <button class="btn-primary" id="repeatStart" disabled>开始循环运动</button>
+                    <button id="repeatTrial" disabled>试跑 5 轮并测周期</button>
                     <button class="btn-red" id="repeatStop" disabled>停止测试与运动</button>
                     <button id="repeatExport" disabled>导出测试 JSON</button>
                     <button id="repeatCsv" disabled>导出记录 CSV</button>
@@ -772,6 +773,19 @@
                   <progress id="repeatProgress" max="10" value="0" aria-label="完成循环数"></progress>
                   <p id="repeatStatus" role="status" aria-live="polite">尚未开始</p>
                   <p id="repeatSummary">目标点记录：0 次</p>
+                  <div class="repeat-timing">
+                    <h3>循环周期 · 秒</h3>
+                    <p id="repeatTimingSummary">周期统计：尚未开始。</p>
+                    <p>试跑会按所选点位、速度和等待时间实际运动 5 轮。首轮包含初始就位，5 轮得到 4 个完整的目标点记录间隔；普通循环也会统计。下表显示最近 10 轮，导出保留全部记录。</p>
+                    <div class="repeat-timing-scroll" tabindex="0" role="region" aria-label="循环计时记录">
+                      <table>
+                        <thead><tr><th scope="col">轮次</th><th scope="col">本轮耗时</th><th scope="col">目标点记录间隔</th><th scope="col">目标到位时刻*</th><th scope="col">目标记录时刻*</th></tr></thead>
+                        <tbody id="repeatTimingRows"></tbody>
+                      </table>
+                    </div>
+                    <p>* 相对本组测试开始的秒数；到位时刻为网页收到核验成功且静止反馈的时刻，记录在等待结束时进行。计时显示三位小数，不代表毫秒级同步精度。</p>
+                    <p>激光跟踪仪只采稳定点时，优先按其稳定条件触发，并确认每次停留只采一次、能够区分起始点与目标点。此页面未连接跟踪仪；平均周期仅供估计节拍，同周期独立采样仍会漂移。</p>
+                  </div>
                   <p>等待从后端确认到位且电机静止后计时，不是固定发令周期。测试使用此处速度，受输出轴限速约束。请保持此页面在前台；切换后台、关闭页面、断连或故障会中止循环，不自动续跑。断连时当前运动的停止结果可能未知。</p>
                   <p>记录来自编码器与绳索模型，不能替代外部量具测得的末端重复定位精度。记录导出包含点位、标定编号、到位误差和时间，便于与实测对照；刷新页面或开始新测试前请导出。</p>
                 </fieldset>
@@ -1174,7 +1188,7 @@
     <script src="assets/console.js"></script>
     <script src="assets/control.js?v=20260920-repeat2"></script>
     <script src="assets/interactive.js"></script>
-    <script src="assets/repeat.js?v=20260920-repeat2"></script>
+    <script src="assets/repeat.js?v=20260922-timing1"></script>
     <script src="assets/teaching.js?v=20260920-repeat2"></script>
   </body>
 </html>

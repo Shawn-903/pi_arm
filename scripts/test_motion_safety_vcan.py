@@ -18,6 +18,7 @@ import threading
 import time
 
 import yaml
+from ament_index_python.packages import get_package_prefix
 from vcan_motor_emulator import CAN_BASE, CAN_FRAME, Motor, response
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -179,7 +180,7 @@ def main():
         executable = work/'probe'
         subprocess.run(['g++', '-std=c++17', str(ROOT/'src/pi_arm_hardware/test/vcan_backend_probe.cpp'),
                         *['-I'+str(ROOT/'src'/p/'include') for p in packages],
-                        *['-L'+str(ROOT/'install'/p/'lib') for p in packages],
+                        *['-L'+str(Path(get_package_prefix(p))/'lib') for p in packages],
                         *['-l'+p for p in packages], '-pthread', '-o', str(executable)], check=True)
         emulator = Emulator()
         try:
@@ -258,7 +259,7 @@ def main():
                 assert float(values['q5_deg']) > 30
                 assert not emulator.frames_for(0xa4)
 
-            print('CASE: confirmed normal STOP, wrong lease and concurrent writer')
+            print('CASE: low-level release STOP, wrong lease and concurrent writer')
             emulator.reset()
             with backend(executable, calibration) as p:
                 command(p, 'disarm')  # Explicit Stop also covers targets from a previous process.
@@ -385,14 +386,96 @@ def main():
                 command(p, 'motor 3 .1 .2')
                 command(p, 'stop')
 
-            print('CASE: heartbeat loss still stops bounded test')
+            print('CASE: heartbeat loss stops and holds bounded test')
             emulator.reset()
             with backend(executable, calibration, True) as p:
                 command(p, 'motor 3 .1 .2')
                 time.sleep(.85)
                 values, line = command(p, 'noheartbeat')
                 assert values['active'] == '0' and 'heartbeat expired' in line
-                emulator.assert_stopped([3])
+                assert not emulator.frames_for(0x81), 'healthy heartbeat stop must hold'
+                assert [i for i, _ in emulator.frames_for(0xa4)] == [3, 3]
+
+            print('CASE: stop during dwell captures current position and is idempotent')
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'write')
+                command(p, 'hold')
+                command(p, 'stop_hold')
+                sent = len(emulator.frames_for(0xa4))
+                assert sent == 12 and not emulator.frames_for(0x81)
+                command(p, 'stop_hold')
+                command(p, 'release_old')
+                command(p, 'write_target 1 20')
+                command(p, 'read')
+                assert len(emulator.frames_for(0xa4)) == sent
+                assert not emulator.frames_for(0x81), 'old cleanup released hold'
+
+            print('CASE: Stop before enabling never sends A4 or latches a false hold fault')
+            emulator.reset()
+            with emulator.lock:
+                for motor in emulator.motors.values():motor.enabled = False
+            with backend(executable, calibration) as p:
+                command(p, 'stop_hold')
+                values, _ = command(p, 'read')
+                assert values['stop_failed'] == '0'
+                assert not emulator.frames_for(0xa4)
+
+            print('CASE: moving soft stop fences concurrent writes and holds measured position')
+            emulator.reset(dynamic=True)
+            with backend(executable, calibration) as p:
+                command(p, 'write')
+                command(p, 'write_target 1 10')
+                time.sleep(.15)
+                old_goal = emulator.targets[1]
+                command(p, 'hold_race')
+                held = dict(emulator.frames_for(0xa4)[-6:])
+                assert abs(struct.unpack('<i', held[1][4:])[0]/100 - old_goal) > 1
+                assert not emulator.frames_for(0x81)
+                command(p, 'release_old')
+                command(p, 'read')
+                assert not emulator.frames_for(0x81)
+                for motor, frame in held.items():
+                    assert abs(struct.unpack('<i', frame[4:])[0]/100 - emulator.positions[motor]) <= .11
+                command(p, 'disarm')  # Fault/shutdown release remains available.
+                assert {i for i, _ in emulator.frames_for(0x81)} == set(range(1, 7))
+
+            print('CASE: failed hold ACK inhibits motion; explicit retry survives read-loop races')
+            emulator.reset(dynamic=True)
+            with backend(executable, calibration) as p:
+                command(p, 'write')
+                emulator.drop_position_ack = {6}
+                command(p, 'stop_hold', ok=False)
+                values, _ = command(p, 'read')
+                assert values['stop_failed'] == '1' and values['control'] == '0'
+                command(p, 'arm', ok=False)
+                emulator.drop_position_ack = set()
+                releases = len(emulator.frames_for(0x81))
+                command(p, 'hold_race')
+                values, _ = command(p, 'read')
+                assert values['stop_failed'] == '0' and values['control'] == '1'
+                assert len(emulator.frames_for(0x81)) == releases, 'stale read released newly confirmed hold'
+
+            print('CASE: missing feedback cannot create a stop hold target')
+            emulator.reset()
+            with backend(executable, calibration) as p:
+                command(p, 'write')
+                emulator.drop_feedback = {6}
+                time.sleep(.25)
+                sent = len(emulator.frames_for(0xa4))
+                command(p, 'stop_hold', ok=False)
+                assert len(emulator.frames_for(0xa4)) == sent
+                assert emulator.frames_for(0x81)
+
+            print('CASE: commissioning operator stop holds tested motor across subsequent reads')
+            emulator.reset(dynamic=True)
+            with backend(executable, calibration, True) as p:
+                command(p, 'motor 4 5 1')
+                command(p, 'axis_hold')
+                command(p, 'read')
+                command(p, 'axis_hold')
+                assert not emulator.frames_for(0x81)
+                assert [i for i, _ in emulator.frames_for(0xa4)] == [4, 4]
 
             for motor, ratio, sign in [(1, 36, 1), (4, 6, -1)]:
                 print(f'CASE: CAN {motor} output step 5 deg at 1 deg/s, ratio {ratio}')
@@ -573,7 +656,7 @@ def main():
                     assert {i for i,_ in frames} == {motor}
                     cap=math.floor(.2*6*(wrist_gains[motor])*math.cos(math.radians(.1))+1e-9)
                     assert all(1 <= struct.unpack('<H',data[2:4])[0] <= cap for _,data in frames)
-            print('PASS: 27 production-backend virtual CAN safety scenarios')
+            print('PASS: production-backend virtual CAN safety and stop/hold scenarios')
         finally:
             emulator.close()
 

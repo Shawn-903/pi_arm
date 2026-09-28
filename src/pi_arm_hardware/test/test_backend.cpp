@@ -96,6 +96,30 @@ TEST(MockBackend, ClampsVelocityAboveLimit)
   EXPECT_TRUE(sample.in_motion[0]);
 }
 
+TEST(MockBackend, SoftStopHoldsCurrentPoseAgainstOldControllerWrites)
+{
+  pi_arm_hardware::MockBackend backend(make_config());
+  backend.configure();
+  backend.activate();
+  pi_arm_hardware::HardwareSample sample;
+  for (int i = 0; i < 3; ++i) {ASSERT_TRUE(backend.read(sample));}
+  ASSERT_TRUE(backend.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 0).success);
+  std::vector<double> q(6, 0.0), v(6, 0.0);
+  q[0] = .1; v[0] = .01;
+  ASSERT_TRUE(backend.write(q, v));
+  ASSERT_TRUE(backend.set_motion_armed(false, 0, 0.0, true).success);
+  q[0] = .2;
+  ASSERT_TRUE(backend.write(q, v));
+  ASSERT_TRUE(backend.read(sample));
+  EXPECT_DOUBLE_EQ(sample.positions_rad[0], .1);
+  EXPECT_DOUBLE_EQ(sample.velocities_rad_s[0], 0.0);
+  EXPECT_FALSE(sample.in_motion[0]);
+  ASSERT_TRUE(backend.set_motion_armed(true, 2).success);
+  ASSERT_TRUE(backend.write(q, v));
+  ASSERT_TRUE(backend.read(sample));
+  EXPECT_DOUBLE_EQ(sample.positions_rad[0], .2);
+}
+
 TEST(MockBackend, DeactivateClearsMotionAndDisconnects)
 {
   pi_arm_hardware::MockBackend backend(make_config());

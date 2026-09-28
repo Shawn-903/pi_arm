@@ -3,6 +3,8 @@
   const $ = (id) => document.getElementById(id);
   const clone = (value) => structuredClone(value);
   const vector = (value) => Array.isArray(value) && value.length === 6 && value.every(Number.isFinite);
+  const seconds = (value) => Number(value.toFixed(3));
+  const elapsed = () => (performance.now() - run.clock_origin_ms) / 1000;
   let points = [], state = null, gate = {}, run = null;
   const inputIds = ['repeatStartPoint', 'repeatTargetPoint', 'repeatCycles', 'repeatDwell',
     'repeatSpeed', 'repeatOutputSpeed', 'repeatLinearSpeed'];
@@ -43,6 +45,39 @@
     return state?.motor_fresh?.length === 6 && state.motor_fresh.every(Boolean) &&
       state?.motor_in_motion?.length === 6 && state.motor_in_motion.every(v => v === false);
   }
+  function timingStats() {
+    // First arrival includes arbitrary initial positioning. Only B-to-B intervals
+    // describe the recurring cycle; never mix the first round into this estimate.
+    const intervals = (run?.samples || []).map(s => s.target_interval_s).filter(Number.isFinite);
+    if (!intervals.length) return null;
+    const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    const min = Math.min(...intervals), max = Math.max(...intervals);
+    return { interval_count: intervals.length, mean_s: seconds(mean), min_s: min,
+      max_s: max, spread_s: seconds(max - min) };
+  }
+  function renderTiming() {
+    const stats = timingStats();
+    $('repeatTimingSummary').textContent = stats
+      ? `目标点记录间隔 · ${stats.interval_count} 个完整周期 · 平均 ${stats.mean_s.toFixed(3)} s · 最短 ${stats.min_s.toFixed(3)} s · 最长 ${stats.max_s.toFixed(3)} s · 极差 ${stats.spread_s.toFixed(3)} s`
+      : '周期统计：至少完成两轮后得到第一个目标点 → 目标点间隔。';
+    const body = $('repeatTimingRows');
+    // State arrives continuously; rebuild only when a completed sample is added.
+    const key = `${run?.started_at || ''}:${run?.samples.length || 0}`;
+    if (body.dataset.samples === key) return;
+    body.dataset.samples = key;
+    body.replaceChildren();
+    for (const sample of (run?.samples || []).slice(-10)) {
+      const row = document.createElement('tr');
+      const cells = [sample.cycle === 1 ? '1（初始就位）' : sample.cycle,
+        sample.cycle_duration_s.toFixed(3),
+        sample.target_interval_s === null ? '—' : sample.target_interval_s.toFixed(3),
+        sample.target_arrived_elapsed_s.toFixed(3), sample.captured_elapsed_s.toFixed(3)];
+      for (const value of cells) {
+        const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
+      }
+      body.append(row);
+    }
+  }
   function render() {
     const chosen = selection(), active = Boolean(run?.active);
     inputIds.forEach(id => { $(id).disabled = active; });
@@ -50,6 +85,7 @@
     $('repeatSelection').textContent = chosen.error ||
       `${chosen.start.name} → ${chosen.target.name} · ${chosen.start.kind === 'joint' ? '六关节运动' : '笛卡尔直线'} · ${state.calibration_id}`;
     $('repeatStart').disabled = active || !gate.permitted || !stationary() || Boolean(chosen.error);
+    $('repeatTrial').disabled = $('repeatStart').disabled;
     $('repeatStop').disabled = !active;
     $('repeatExport').disabled = !run;
     $('repeatCsv').disabled = !run?.samples.length;
@@ -65,6 +101,7 @@
       summary += ` · 解算位置极差 X / Y / Z：${range.join(' / ')} mm（非外部实测精度）`;
     }
     $('repeatSummary').textContent = summary;
+    renderTiming();
   }
   function cancel(reason, stop = true) {
     if (!run?.active) return;
@@ -87,6 +124,7 @@
       return;
     }
     const point = owner.config[owner.leg];
+    if (owner.leg === 'start') owner.round_started_elapsed_s = elapsed();
     owner.phase = 'sending';
     owner.task_id = null;
     owner.deadline = performance.now() + 30 * 60 * 1000;
@@ -111,18 +149,19 @@
       if (owner.active && run === owner) cancel(error.message);
     }
   }
-  function start() {
+  function start(trial = false) {
     try {
       if (run?.active) return;
       const chosen = selection();
       if (chosen.error) throw Error(chosen.error);
       if (!gate.permitted || !stationary() || document.hidden) throw Error('请保持页面在前台，等待静止、使能及新鲜反馈');
       const config = { start: clone(chosen.start), target: clone(chosen.target),
-        cycles: number('repeatCycles'), dwell: number('repeatDwell'),
+        cycles: trial ? 5 : number('repeatCycles'), dwell: number('repeatDwell'),
         speed: number('repeatSpeed'), output_speed: number('repeatOutputSpeed'),
         linear_speed: number('repeatLinearSpeed') };
       window.PiArmInteractive?.cancelActions('开始重复定位测试，松手执行已关闭');
       run = { active: true, result: 'running', started_at: new Date().toISOString(),
+        clock_origin_ms: performance.now(), mode: trial ? 'timing_trial' : 'repeatability',
         hardware_type: state.hardware_type, calibration_id: state.calibration_id,
         model_id: state.base_frames.model_id, config, samples: [], leg: 'start', phase: 'ready' };
       render();
@@ -136,13 +175,23 @@
         !vector(state.task.target_joint_angles_deg) || !vector(state.task.error_joint_angles_deg) ||
         !vector(state.raw_protocol_positions_deg))
       throw Error('到位记录不完整，停止测试');
+    const captured = elapsed(), previous = run.samples.at(-1);
     run.samples.push({ cycle: run.samples.length + 1, task_id: run.task_id,
+      round_started_elapsed_s: seconds(run.round_started_elapsed_s),
+      cycle_duration_s: seconds(captured - run.round_started_elapsed_s),
+      target_arrived_at: run.target_arrived_at,
+      target_arrived_elapsed_s: seconds(run.target_arrived_elapsed_s),
+      captured_elapsed_s: seconds(captured),
+      target_interval_s: previous ? seconds(captured - run.previous_capture_elapsed_s) : null,
+      arrival_interval_s: previous ? seconds(run.target_arrived_elapsed_s - run.previous_arrival_elapsed_s) : null,
       captured_at: new Date().toISOString(), joint_angles_deg: clone(state.current_joint_angles),
       pose_mm_deg: pose, raw_protocol_positions_deg: clone(state.raw_protocol_positions_deg),
       target_joint_angles_deg: clone(state.task.target_joint_angles_deg),
       sampled_error_joint_angles_deg: state.task.target_joint_angles_deg.map((v, i) => Number((v - state.current_joint_angles[i]).toFixed(3))),
       verification_error_joint_angles_deg: clone(state.task.error_joint_angles_deg),
       goal_tolerance_deg: state.task.goal_tolerance_deg, arrival_state: state.task.arrival_state });
+    run.previous_capture_elapsed_s = captured;
+    run.previous_arrival_elapsed_s = run.target_arrived_elapsed_s;
   }
   function tick() {
     if (!run?.active) return;
@@ -169,6 +218,10 @@
     }
     if (run.phase === 'moving') {
       run.phase = 'dwell';
+      if (run.leg === 'target') {
+        run.target_arrived_elapsed_s = elapsed();
+        run.target_arrived_at = new Date().toISOString();
+      }
       run.dwell_until = performance.now() + run.config.dwell * 1000;
       // The dwell setting may be longer than the motion timeout.
       run.deadline = run.dwell_until + 30000;
@@ -182,7 +235,7 @@
         run.active = false;
         run.result = 'completed';
         run.finished_at = new Date().toISOString();
-        status(`已完成 ${run.samples.length} 轮，停在目标点保持。请导出记录。`);
+        status(`已完成 ${run.samples.length} 轮${run.mode === 'timing_trial' ? '试跑' : ''}，停在目标点保持。请导出记录。`);
         render();
         return;
       }
@@ -192,17 +245,27 @@
   }
   function download(csv) {
     if (!run) return;
-    const report = { schema_version: 1, measurement_source: 'encoder_cable_model_not_external_metrology',
+    const report = { schema_version: 2, measurement_source: 'encoder_cable_model_not_external_metrology',
       base_frame: 'base_link', tool_frame: 'tool0', rpy_convention: 'Rz(yaw) Ry(pitch) Rx(roll)', ...clone(run) };
+    // Browser-local deadlines/origin are implementation details, not cross-device timestamps.
+    for (const key of ['clock_origin_ms', 'deadline', 'dwell_until', 'previous_capture_elapsed_s',
+      'previous_arrival_elapsed_s', 'round_started_elapsed_s', 'target_arrived_elapsed_s', 'target_arrived_at']) delete report[key];
+    report.timing = { source: 'browser_performance_now', unit: 'seconds',
+      interval_definition: 'previous_target_record_to_current_target_record',
+      first_round_excluded: true, externally_synchronized: false, statistics: timingStats() };
     let content = JSON.stringify(report, null, 2);
     if (csv) {
       const quote = value => '"' + String(value ?? '').replaceAll('"', '""') + '"';
       const headers = ['cycle', 'captured_at', 'task_id', 'calibration_id',
+        'cycle_duration_s', 'target_interval_s', 'arrival_interval_s', 'target_arrived_at',
+        'target_arrived_elapsed_s', 'captured_elapsed_s',
         ...Array.from({length: 6}, (_, i) => `J${i+1}_deg`), 'X_mm', 'Y_mm', 'Z_mm', 'Rx_deg', 'Ry_deg', 'Rz_deg',
         ...Array.from({length: 6}, (_, i) => `sampled_error_J${i+1}_deg`),
         ...Array.from({length: 6}, (_, i) => `verification_error_J${i+1}_deg`)];
       content = '\ufeff' + [headers, ...run.samples.map(s => [s.cycle, s.captured_at, s.task_id,
-        run.calibration_id, ...s.joint_angles_deg, ...s.pose_mm_deg,
+        run.calibration_id, s.cycle_duration_s, s.target_interval_s, s.arrival_interval_s,
+        s.target_arrived_at, s.target_arrived_elapsed_s, s.captured_elapsed_s,
+        ...s.joint_angles_deg, ...s.pose_mm_deg,
         ...s.sampled_error_joint_angles_deg, ...s.verification_error_joint_angles_deg])]
         .map(row => row.map(v => quote(typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(3) : v)).join(',')).join('\r\n');
     }
@@ -227,7 +290,8 @@
     refresh(next, nextGate) { state = next; gate = nextGate; tick(); render(); },
   };
   inputIds.forEach(id => $(id).addEventListener('change', render));
-  $('repeatStart').addEventListener('click', start);
+  $('repeatStart').addEventListener('click', () => start());
+  $('repeatTrial').addEventListener('click', () => start(true));
   $('repeatStop').addEventListener('click', () => cancel('用户停止测试'));
   $('repeatExport').addEventListener('click', () => download(false));
   $('repeatCsv').addEventListener('click', () => download(true));

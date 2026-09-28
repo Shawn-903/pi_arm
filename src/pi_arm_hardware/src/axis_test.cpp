@@ -185,6 +185,7 @@ ManagementResult RealBackend::start_axis_test(
   axis_test_started_ = axis_test_heartbeat_ = std::chrono::steady_clock::now();
   axis_test_timeout_sec_ = encoded_duration + 2.0;
   axis_test_active_ = true;
+  stop_hold_active_.store(false);
   ++axis_test_id_;
   axis_test_status_ = "running: " + space + " axis=" + std::to_string(axis_id) +
     " delta_deg=" + std::to_string(delta_deg);
@@ -202,11 +203,21 @@ bool RealBackend::heartbeat_axis_test(const std::uint64_t test_id)
   return true;
 }
 
-ManagementResult RealBackend::stop_axis_test(const std::string & reason)
+ManagementResult RealBackend::stop_axis_test(const std::string & reason, const bool hold_position)
 {
-  if (!axis_test_active_ && !axis_test_stop_failed_) {return {true, 0, "no active axis test"};}
+  if (!axis_test_active_ && !axis_test_stop_failed_ && !stop_hold_active_.load()) {
+    return {true, 0, "no active axis test"};
+  }
   std::vector<std::uint8_t> ids;
   for (const auto & command : axis_test_commands_) {ids.push_back(command.motor_id);}
+  if (hold_position) {
+    const auto result = stop_and_hold(ids);
+    axis_test_active_ = false;
+    axis_test_stop_failed_ = !result.success;
+    axis_test_status_ = reason + " (" + result.message + ")";
+    return {result.success, result.success ? 0 : 2002, axis_test_status_};
+  }
+  stop_hold_active_.store(false);
   const bool stopped = driver_ && driver_->stop_motors(ids);
   axis_test_active_ = false;
   axis_test_stop_failed_ = !stopped;
@@ -219,7 +230,7 @@ void RealBackend::update_axis_test(const HardwareSample & sample)
   if (!axis_test_active_) {return;}
   const auto now = std::chrono::steady_clock::now();
   if (std::chrono::duration<double>(now - axis_test_heartbeat_).count() > 0.8) {
-    stop_axis_test("stopped: browser heartbeat expired"); return;
+    stop_axis_test("stopped: browser heartbeat expired", true); return;
   }
   if (!axis_test_raw_ready(false) ||
     (axis_test_space_ == "joint" && (!sample.calibrated || !sample.kinematics_valid)))

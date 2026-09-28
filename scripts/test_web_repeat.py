@@ -81,6 +81,7 @@ def main():
                 raise AssertionError((n, moves(), page.locator('#repeatStatus').inner_text(), errors))
             configure(target='4')
             assert page.locator('#repeatStart').is_disabled()
+            assert page.locator('#repeatTrial').is_disabled()
             configure(target='2')
             assert page.locator('#repeatStart').is_disabled()
             configure(target='0')
@@ -113,9 +114,17 @@ def main():
             assert report['result'] == 'completed' and len(report['samples']) == 2
             assert [s['task_id'] for s in report['samples']] == [2, 4]
             assert report['config']['output_speed'] == 10
+            assert report['schema_version'] == 2 and report['mode'] == 'repeatability'
+            assert report['samples'][0]['target_interval_s'] is None
+            assert report['samples'][0]['arrival_interval_s'] is None
+            assert report['timing']['statistics']['interval_count'] == 1
+            assert report['timing']['statistics']['mean_s'] == report['samples'][1]['target_interval_s']
+            assert report['timing']['externally_synchronized'] is False
+            assert 'clock_origin_ms' not in report
             with page.expect_download() as item: page.locator('#repeatCsv').click()
             csv = Path(item.value.path()).read_text(encoding='utf-8-sig')
             assert len(csv.splitlines()) == 3 and '0.001' in csv
+            assert 'target_interval_s' in csv and 'target_arrived_at' in csv
             print('PASS point/model/calibration guards, finite A-B cycles, exact task matching, dwell, speed snapshot, records/exports', flush=True)
             # STOP during dwell cancels the future target and routes the real stop API.
             configure(dwell=10); page.locator('#repeatStart').click(); wait_moves(5)
@@ -170,8 +179,65 @@ def main():
             page.locator('#repeatStart').click(); wait_moves(14)
             page.evaluate('sendCommand("stop_motion")'); complete()
             page.wait_for_timeout(300); assert not page.evaluate('PiArmRepeat.active') and len(moves()) == 14
+            # Deterministic monotonic timing: a long first positioning leg must not
+            # bias the four B-to-B intervals of a five-round trial.
+            ready(); configure(cycles=9, dwell=2)
+            page.evaluate('''() => {
+              window.timingClock=10000;
+              Object.defineProperty(performance,'now',{configurable:true,value:()=>timingClock});
+            }''')
+            def advance(seconds):
+                page.evaluate('s=>{timingClock+=s*1000;handleMessage(fake)}', seconds)
+            before = len(moves())
+            page.locator('#repeatTrial').click(); wait_moves(before+1)
+            assert page.locator('#repeatTrial').is_disabled()
+            assert page.locator('#repeatCycles').input_value() == '9'
+            for i in range(5):
+                advance(100 if i == 0 else 1+2*i)
+                complete()  # A arrival
+                advance(1.9); page.wait_for_timeout(100)
+                assert len(moves()) == before+2*i+1
+                advance(.1); wait_moves(before+2*i+2)
+                advance(8 if i == 0 else 7)
+                complete()  # B arrival
+                advance(2)
+                if i < 4: wait_moves(before+2*i+3)
+            page.wait_for_function('!PiArmRepeat.active')
+            assert len(moves()) == before+10
+            with page.expect_download() as item: page.locator('#repeatExport').click()
+            timing_report = json.loads(Path(item.value.path()).read_text())
+            assert timing_report['mode'] == 'timing_trial'
+            assert timing_report['config']['cycles'] == 5
+            assert [s['cycle_duration_s'] for s in timing_report['samples']] == [112,14,16,18,20]
+            assert [s['target_interval_s'] for s in timing_report['samples']] == [None,14,16,18,20]
+            assert timing_report['timing']['statistics'] == dict(
+                interval_count=4, mean_s=17, min_s=14, max_s=20, spread_s=6)
+            for sample in timing_report['samples']:
+                assert sample['captured_elapsed_s']-sample['target_arrived_elapsed_s'] == 2
+            assert page.locator('#repeatTimingRows tr').count() == 5
+            assert '17.000' in page.locator('#repeatTimingSummary').inner_text()
+            assert '初始就位' in page.locator('#repeatTimingRows').inner_text()
+            with page.expect_download() as item: page.locator('#repeatCsv').click()
+            import csv as csv_module
+            rows = list(csv_module.DictReader(Path(item.value.path()).read_text(encoding='utf-8-sig').splitlines()))
+            assert len(rows) == 5 and rows[0]['target_interval_s'] == ''
+            assert float(rows[-1]['target_interval_s']) == 20
+            # New trial resets the statistics; interrupted rounds never become samples.
+            before = len(moves())
+            page.locator('#repeatTrial').click(); wait_moves(before+1)
+            assert page.locator('#repeatTimingRows tr').count() == 0
+            advance(1); complete(); advance(2); wait_moves(before+2)
+            advance(1); complete(); advance(2); wait_moves(before+3)
+            page.locator('#repeatStop').click(); complete()
+            with page.expect_download() as item: page.locator('#repeatExport').click()
+            interrupted = json.loads(Path(item.value.path()).read_text())
+            assert interrupted['result'] == 'interrupted' and len(interrupted['samples']) == 1
+            assert interrupted['timing']['statistics'] is None
+            page.evaluate('delete performance.now')
+            print('PASS five-round trial, first-round exclusion, monotonic timing, exact interval statistics, CSV, reset and partial-round exclusion', flush=True)
             # Closing the socket resets freshness and cannot restart the loop on reconnect.
-            page.locator('#repeatStart').click(); wait_moves(15)
+            before = len(moves())
+            page.locator('#repeatStart').click(); wait_moves(before+1)
             page.evaluate('ws.close()')
             page.wait_for_function('!PiArmRepeat.active')
             assert '停止指令未能发送' in page.locator('#repeatStatus').inner_text()
