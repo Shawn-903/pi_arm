@@ -41,6 +41,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | commissioning 电机测试界面、请求或模拟器冻结运动 | `test_web_axis.py` 普通与 `--stall` 场景，使用独立 commissioning/vcan 服务 |
 | 软件标零计算、持久化或任务入口 | 硬件 `test_backend` 中 `SoftwareZero.*` 及相关坐标测试；`test_software_zero_vcan.py` 验证生产后端；任务/网页变化选择客户端和网页专项入口 |
 | manager 到位、停止或取消 | [manager 测试目录](../src/pi_arm_manager/test/) 中对应单测；涉及编排、Action 或并发时加 `test_arrival_integration.py` |
+| manager 工作线程、租约或退出顺序 | `test_manager_shutdown.py` 的相关场景；共享动作收尾发生变化时加 `test_arrival_integration.py` |
 | 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
 | CAN 断线重连、接口迟到或重建 | `test_can_recovery_vcan.py`，验证反馈恢复、旧授权失效和停止未确认状态保留 |
 | 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
@@ -151,6 +152,8 @@ sudo ip link delete vcan_motion
 运行中的实机使用现有 `build/install` 时，可在 `/tmp` 指定独立 `colcon --log-base ... build --build-base ... --install-base ...` 编译测试硬件包；不要覆盖运行中的库。正式加载修复仍按根 README 停止、构建、重新启动。
 
 [测试到位与停止集成](test_arrival_integration.py) 在隔离 ROS 域 82 启动真实 manager 与合成硬件/控制器服务，不开 CAN、不执行真实 MoveIt 轨迹：`ROS_DOMAIN_ID=82 python3 scripts/test_arrival_integration.py`。覆盖到位复核、运动/等待停止、Action 取消、迟到响应、保持失败与故障优先级。不要让其他服务占用这个域。
+
+[manager 退出回归](test_manager_shutdown.py) 使用同类合成服务，在隔离 ROS 域 98 检查退出时的动作终态、租约释放、目标取消和进程退出码。加载待测工作区后，按改动选择 `--case`：`active`、`arming`、`late_accept`、`expired_accept`、`planning`、`preview`、`stop_failure` 或 `idle`。例如：`ROS_DOMAIN_ID=98 python3 scripts/test_manager_shutdown.py --case active --log-dir /tmp/manager-shutdown`。
 
 以下是需要预先配置对应 vcan 服务的专项入口，不是直接对当前实机运行的快捷命令：
 

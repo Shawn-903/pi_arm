@@ -67,5 +67,17 @@ TEST(MotionStopReason, HardwareReasonsOverrideUserRequests)
     motion_stop_priority(MotionStopReason::HARDWARE_DISCONNECTED));
 }
 
+TEST(MotionStopReason, ShutdownStopsWithoutHoldAndPreservesHardwareFaultPriority)
+{
+  const auto reason = MotionStopReason::NODE_SHUTDOWN;
+  const auto outcome = motion_stop_outcome(reason);
+  EXPECT_FALSE(holds_position_on_stop(reason));
+  EXPECT_FALSE(outcome.success);
+  EXPECT_EQ(outcome.code, 3104);
+  EXPECT_EQ(outcome.task_status, pi_arm_interfaces::msg::TaskState::FAILED);
+  EXPECT_GT(motion_stop_priority(reason), motion_stop_priority(MotionStopReason::STOP_SERVICE));
+  EXPECT_LT(motion_stop_priority(reason), motion_stop_priority(MotionStopReason::HARDWARE_DISABLED));
+}
+
 }  // namespace
 }  // namespace pi_arm_manager

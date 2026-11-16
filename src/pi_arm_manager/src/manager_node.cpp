@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -145,6 +146,9 @@ public:
       [this](const std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Request> request,
         std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Response> response) {
         std::lock_guard<std::mutex> command_lock(command_mutex_);
+        if (shutting_down_.load()) {
+          response->code = 2003; response->message = "manager shutting down"; return;
+        }
         pi_arm_interfaces::msg::HardwareState h;
         pi_arm_interfaces::msg::TaskState t;
         {std::lock_guard<std::mutex> lock(state_mutex_); h = hardware_; t = task_;
@@ -231,6 +235,67 @@ public:
       std::bind(&ManagerNode::accept_direct, this, std::placeholders::_1));
   }
 
+  // Runs in the context's pre-shutdown callback, while the executor and ROS
+  // clients can still deliver stop/cancel acknowledgements and action results.
+  void prepare_shutdown()
+  {
+    bool motion_active = false;
+    {
+      std::lock_guard<std::mutex> lock(command_mutex_);
+      if (shutting_down_.exchange(true)) {return;}
+      std::lock_guard<std::mutex> worker_lock(worker_mutex_);
+      motion_active = task_claimed_.load() || pending_workers_ != 0 ||
+        std::any_of(action_workers_.begin(), action_workers_.end(),
+          [](auto & worker) {return worker.wait_for(0s) != std::future_status::ready;});
+    }
+    RCLCPP_INFO(get_logger(), "manager shutdown: draining active motion=%d before ROS shutdown",
+      motion_active ? 1 : 0);
+    try {
+      // Idle/preview owns no motion lease. Do not introduce a hardware RPC on
+      // idle exit (the backend may already be shutting down with the launch).
+      if (motion_active && !request_stop(MotionStopReason::NODE_SHUTDOWN)) {
+        shutdown_failed_.store(true);
+      }
+    } catch (const std::exception & error) {
+      shutdown_failed_.store(true);
+      RCLCPP_ERROR(get_logger(), "shutdown stop failed: %s", error.what());
+    }
+    shutdown_stop_ready_.store(true);
+    std::vector<std::future<void>> workers;
+    {
+      std::unique_lock<std::mutex> lock(worker_mutex_);
+      // A goal can be claimed just before shutdown and reach its accepted
+      // callback afterwards. Include that worker before draining the list.
+      worker_ready_.wait(lock, [this] {return pending_workers_ == 0;});
+      workers.swap(action_workers_);
+    }
+    for (auto & worker : workers) {worker.get();}
+    while (preview_active_.load()) {std::this_thread::sleep_for(10ms);}
+    const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::duration<double>(operation_timeout_);
+    // A timed-out worker may already have exited while its goal acceptance is
+    // still in flight. Give that callback time to cancel the late goal too.
+    while (pending_goal_responses_.load() != 0 && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(10ms);
+    }
+    if (pending_goal_responses_.load() != 0) {
+      shutdown_failed_.store(true);
+      RCLCPP_ERROR(get_logger(), "shutdown goal acceptance still unconfirmed");
+    }
+    drain_cancellations();
+    RCLCPP_INFO(get_logger(), "manager shutdown: workers and requests drained, confirmed=%d",
+      shutdown_failed_.load() ? 0 : 1);
+  }
+
+  bool shutdown_confirmed() const {return !shutdown_failed_.load();}
+
+  void release_resources()
+  {
+    // MoveGroupInterface owns a shared node and its own callback thread.
+    // Break that ownership cycle only after action workers/executor callbacks exit.
+    move_group_.reset();
+  }
+
 private:
   enum class Operation {ENABLE, DISABLE, RESET, REBOOT};
 
@@ -292,6 +357,9 @@ private:
     // mutually exclusive. Do not hold command_mutex_ while waiting on MoveIt.
     {
       std::lock_guard<std::mutex> lock(command_mutex_);
+      if (shutting_down_.load()) {
+        response->code = 2003; response->message = "manager shutting down"; return;
+      }
       if (task_claimed_.load() || preview_active_.exchange(true)) {
         response->code = 2003;
         response->message = "motion or preview already active";
@@ -391,7 +459,7 @@ private:
               request->max_linear_acceleration / linear_acceleration_limit_));
           prepare_planning_start();
           moveit::planning_interface::MoveGroupInterface::Plan plan;
-          const auto code = move_group_->plan(plan);
+          const auto code = plan_motion(plan);
           move_group_->clearPoseTargets();
           if (code != moveit::core::MoveItErrorCode::SUCCESS) {
             throw std::runtime_error("LIN planning failed: " + std::to_string(code.val));
@@ -602,6 +670,9 @@ private:
         std::shared_ptr<pi_arm_interfaces::srv::ManageMotor::Response> response)
       {
         std::lock_guard<std::mutex> command_lock(command_mutex_);
+        if (shutting_down_.load()) {
+          response->code = 2003; response->message = "manager shutting down"; return;
+        }
         pi_arm_interfaces::msg::HardwareState hardware_snapshot;
         pi_arm_interfaces::msg::TaskState task_snapshot;
         {
@@ -710,7 +781,7 @@ private:
   {
     // Serialize arm/release RPCs, including scope guards racing with Stop.
     std::lock_guard<std::mutex> gate_lock(motion_gate_mutex_);
-    if (armed && stop_requested_.load()) {return false;}
+    if (armed && (stop_requested_.load() || shutting_down_.load())) {return false;}
     if (!armed && stop_requested_.load()) {
       if (holds_position_on_stop(stop_reason_.load()) && lease_id != 0U) {
         lease_id = 0U;
@@ -728,6 +799,7 @@ private:
     {
       RCLCPP_ERROR(
         get_logger(), "motion gate service unavailable at %s", stage.c_str());
+      if (shutting_down_.load()) {shutdown_failed_.store(true);}
       return false;
     }
     auto request = std::make_shared<pi_arm_interfaces::srv::SetMotionArmed::Request>();
@@ -740,6 +812,8 @@ private:
       std::future_status::ready)
     {
       RCLCPP_ERROR(get_logger(), "motion gate timeout at %s", stage.c_str());
+      motion_arm_client_->remove_pending_request(future);
+      if (shutting_down_.load()) {shutdown_failed_.store(true);}
       return false;
     }
     const auto response = future.get();
@@ -748,6 +822,7 @@ private:
         get_logger(), "motion gate rejected at %s: success=%d armed=%d message=%s",
         stage.c_str(), response->success ? 1 : 0, response->armed ? 1 : 0,
         response->message.c_str());
+      if (shutting_down_.load()) {shutdown_failed_.store(true);}
       return false;
     }
     RCLCPP_INFO(
@@ -854,6 +929,7 @@ private:
   bool claim_goal(const std::string & command)
   {
     std::lock_guard<std::mutex> command_lock(command_mutex_);
+    if (shutting_down_.load()) {return false;}
     if (preview_active_.load()) {
       RCLCPP_WARN(get_logger(), "motion rejected while read-only preview is calculating");
       return false;
@@ -881,6 +957,7 @@ private:
     RCLCPP_INFO(
       get_logger(), "%s ACCEPTED: task_id=%lu",
       command.c_str(), static_cast<unsigned long>(task_id));
+    {std::lock_guard<std::mutex> lock(worker_mutex_); ++pending_workers_;}
     return true;
   }
 
@@ -1259,15 +1336,26 @@ private:
     void (ManagerNode::*execute)(const std::shared_ptr<GoalHandleT>))
   {
     auto self = std::static_pointer_cast<ManagerNode>(shared_from_this());
-    std::thread(
+    std::lock_guard<std::mutex> lock(worker_mutex_);
+    action_workers_.erase(std::remove_if(action_workers_.begin(), action_workers_.end(),
+      [](auto & worker) {return worker.wait_for(0s) == std::future_status::ready;}),
+      action_workers_.end());
+    action_workers_.push_back(std::async(std::launch::async,
       [self, goal, command, execute]() {
         try {
-          (self.get()->*execute)(goal);
+          try {
+            (self.get()->*execute)(goal);
+          } catch (const std::exception & error) {
+            RCLCPP_ERROR(self->get_logger(), "%s exception: %s", command.c_str(), error.what());
+            self->complete_action<ActionT>(goal, false, command, error.what());
+          }
         } catch (const std::exception & error) {
-          RCLCPP_ERROR(self->get_logger(), "%s exception: %s", command.c_str(), error.what());
-          self->complete_action<ActionT>(goal, false, command, error.what());
+          self->shutdown_failed_.store(true);
+          RCLCPP_ERROR(self->get_logger(), "%s cleanup failed: %s", command.c_str(), error.what());
         }
-      }).detach();
+      }));
+    --pending_workers_;
+    worker_ready_.notify_all();
   }
   void accept_movej(const std::shared_ptr<GoalHandleMoveJ> goal)
   {
@@ -1308,7 +1396,7 @@ private:
     }
     prepare_planning_start();
     moveit::planning_interface::MoveGroupInterface::Plan plan;
-    if (move_group_->plan(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
+    if (plan_motion(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
       throw std::runtime_error("movej planning failed");
     }
     Follow::Goal follow;
@@ -1368,7 +1456,7 @@ private:
 
     moveit::planning_interface::MoveGroupInterface::Plan plan;
     prepare_planning_start();
-    const auto plan_code = move_group_->plan(plan);
+    const auto plan_code = plan_motion(plan);
     if (plan_code != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(
         get_logger(), "movel Pilz LIN plan failed: error_code=%d", plan_code.val);
@@ -1489,10 +1577,139 @@ private:
     handle->publish_feedback(feedback);
   }
 
+  using CancelFuture = std::shared_future<rclcpp_action::Client<Follow>::CancelResponse::SharedPtr>;
+
+  template<typename ActionT>
+  auto send_tracked_goal(
+    rclcpp_action::Client<ActionT> & client, const typename ActionT::Goal & goal,
+    typename rclcpp_action::Client<ActionT>::SendGoalOptions options)
+  {
+    const auto callback = std::move(options.goal_response_callback);
+    options.goal_response_callback = [this, callback](const auto & accepted) {
+        try {
+          if (callback) {callback(accepted);}
+        } catch (const std::exception & error) {
+          shutdown_failed_.store(true);
+          RCLCPP_ERROR(get_logger(), "goal response cleanup failed: %s", error.what());
+        }
+        --pending_goal_responses_;
+      };
+    ++pending_goal_responses_;
+    try {
+      return client.async_send_goal(goal, options);
+    } catch (...) {
+      --pending_goal_responses_;
+      throw;
+    }
+  }
+
+  template<typename ActionT>
+  CancelFuture cancel_goal(
+    rclcpp_action::Client<ActionT> & client,
+    const typename rclcpp_action::ClientGoalHandle<ActionT>::SharedPtr & goal)
+  {
+    // Shutdown closes the hardware gate before canceling either planner or JTC.
+    while (shutting_down_.load() && !shutdown_stop_ready_.load()) {
+      std::this_thread::sleep_for(10ms);
+    }
+    std::lock_guard<std::mutex> lock(cancel_mutex_);
+    if (cancellations_closed_) {return {};}
+    if (!shutting_down_.load()) {
+      cancellations_.erase(std::remove_if(cancellations_.begin(), cancellations_.end(),
+        [](auto & future) {return future.wait_for(0s) == std::future_status::ready;}),
+        cancellations_.end());
+    }
+    auto future = client.async_cancel_goal(goal);
+    cancellations_.push_back(future);
+    return future;
+  }
+
+  void drain_cancellations()
+  {
+    for (;;) {
+      std::vector<CancelFuture> pending;
+      {
+        std::lock_guard<std::mutex> lock(cancel_mutex_);
+        if (cancellations_.empty()) {cancellations_closed_ = true; return;}
+        pending.swap(cancellations_);
+      }
+      for (auto & future : pending) {
+        try {
+          if (future.wait_for(std::chrono::duration<double>(operation_timeout_)) !=
+            std::future_status::ready)
+          {
+            throw std::runtime_error("cancellation acknowledgement timed out");
+          }
+          const auto response = future.get();
+          if (response->return_code != response->ERROR_NONE &&
+            response->return_code != response->ERROR_GOAL_TERMINATED)
+          {
+            throw std::runtime_error("cancellation rejected: " +
+              std::to_string(response->return_code));
+          }
+        } catch (const std::exception & error) {
+          shutdown_failed_.store(true);
+          RCLCPP_ERROR(get_logger(), "shutdown %s", error.what());
+        }
+      }
+    }
+  }
+
+  moveit::core::MoveItErrorCode plan_motion(
+    moveit::planning_interface::MoveGroupInterface::Plan & plan)
+  {
+    // Keep MoveGroupInterface's request construction/options, but avoid its
+    // uninterruptible synchronous plan() wait when draining workers on exit.
+    using PlanAction = moveit_msgs::action::MoveGroup;
+    PlanAction::Goal goal;
+    move_group_->constructMotionPlanRequest(goal.request);
+    goal.planning_options.plan_only = true;
+    goal.planning_options.look_around = false;
+    goal.planning_options.replan = false;
+    goal.planning_options.planning_scene_diff.is_diff = true;
+    goal.planning_options.planning_scene_diff.robot_state.is_diff = true;
+    auto & client = move_group_->getMoveGroupClient();
+    auto abandoned = std::make_shared<std::atomic_bool>(false);
+    rclcpp_action::Client<PlanAction>::SendGoalOptions options;
+    options.goal_response_callback = [this, abandoned, &client](const auto & accepted) {
+        if (accepted && abandoned->load()) {cancel_goal<PlanAction>(client, accepted);}
+      };
+    auto sent = send_tracked_goal<PlanAction>(client, goal, options);
+    // Resolve an in-flight acceptance before leaving, so a late goal can still
+    // be canceled while the context and MoveGroup client are alive.
+    if (sent.wait_for(std::chrono::duration<double>(operation_timeout_)) !=
+      std::future_status::ready)
+    {
+      abandoned->store(true);
+      // The acceptance callback may have run between wait_for and abandoned.
+      if (sent.wait_for(0s) == std::future_status::ready) {
+        if (const auto accepted = sent.get()) {cancel_goal<PlanAction>(client, accepted);}
+      }
+      if (shutting_down_.load()) {shutdown_failed_.store(true);}
+      return moveit::core::MoveItErrorCode::TIMED_OUT;
+    }
+    const auto handle = sent.get();
+    if (!handle) {return moveit::core::MoveItErrorCode::FAILURE;}
+    auto result = client.async_get_result(handle);
+    if (wait_future_logged(result, motion_timeout_, "planning/result") !=
+      std::future_status::ready)
+    {
+      cancel_goal<PlanAction>(client, handle);
+      return moveit::core::MoveItErrorCode::PREEMPTED;
+    }
+    const auto wrapped = result.get();
+    if (!wrapped.result) {return moveit::core::MoveItErrorCode::FAILURE;}
+    plan.trajectory = wrapped.result->planned_trajectory;
+    plan.start_state = wrapped.result->trajectory_start;
+    plan.planning_time = wrapped.result->planning_time;
+    return wrapped.result->error_code;
+  }
+
   // Wait on an rclcpp future with periodic logs so a hang is visible in journal.
   template<typename FutureT>
   std::future_status wait_future_logged(
-    FutureT & future, double timeout_sec, const std::string & stage)
+    FutureT & future, double timeout_sec, const std::string & stage,
+    bool accepting_goal = false)
   {
     const auto deadline = std::chrono::steady_clock::now() +
       std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -1522,7 +1739,9 @@ private:
         RCLCPP_INFO(get_logger(), "follow wait READY at stage=%s", stage.c_str());
         return status;
       }
-      if (stop_requested_.load()) {
+      const bool interrupted = shutting_down_.load() ||
+        (stop_requested_.load() && task_claimed_.load());
+      if (interrupted && !(accepting_goal && shutting_down_.load())) {
         RCLCPP_WARN(get_logger(), "follow wait interrupted by stop at stage=%s", stage.c_str());
         return std::future_status::timeout;
       }
@@ -1602,13 +1821,14 @@ private:
         if (accepted && (stop_requested_.load() || !task_claimed_.load() ||
           active_task_id() != lease_id))
         {
-          follow_client_->async_cancel_goal(accepted);
+          cancel_goal<Follow>(*follow_client_, accepted);
         }
       };
-    auto send_future = follow_client_->async_send_goal(goal, send_options);
-    if (wait_future_logged(send_future, operation_timeout_, command + "/send_goal") !=
+    auto send_future = send_tracked_goal<Follow>(*follow_client_, goal, send_options);
+    if (wait_future_logged(send_future, operation_timeout_, command + "/send_goal", true) !=
       std::future_status::ready)
     {
+      if (shutting_down_.load()) {shutdown_failed_.store(true);}
       disarm_direct("direct_move/follow_goal_timeout");
       complete_action<ActionT>(handle, false, command, "trajectory goal timeout");
       return;
@@ -1630,7 +1850,7 @@ private:
     }
     // The controller may accept after Stop already closed the hardware gate.
     // Cancel that late goal too; never allow it to survive into the next task.
-    if (stop_requested_.load()) {follow_client_->async_cancel_goal(follow_handle);}
+    if (stop_requested_.load()) {cancel_goal<Follow>(*follow_client_, follow_handle);}
     auto result_future = follow_client_->async_get_result(follow_handle);
     const auto status = wait_future_logged(
       result_future, result_timeout, command + "/get_result");
@@ -1658,7 +1878,7 @@ private:
     } else {
       RCLCPP_ERROR(
         get_logger(), "%s follow: result TIMEOUT, canceling goal", command.c_str());
-      follow_client_->async_cancel_goal(follow_handle);
+      cancel_goal<Follow>(*follow_client_, follow_handle);
       detail = "trajectory result timeout";
     }
     {
@@ -1794,11 +2014,16 @@ private:
   {
     // Block new claims until the hardware stop/hold and cancellation finish.
     std::lock_guard<std::mutex> command_lock(command_mutex_);
+    if (shutting_down_.load() && reason != MotionStopReason::NODE_SHUTDOWN) {
+      record_stop_reason(reason);
+      return false;
+    }
     if (!task_claimed_.load()) {stop_reason_.store(MotionStopReason::NONE);}
     record_stop_reason(reason);
     const bool already_stopping = stop_requested_.exchange(true);
     const bool hold = holds_position_on_stop(stop_reason_.load());
     const bool stopped = set_motion_armed(false, 0U, "stop_or_cancel", 0.0, hold);
+    if (reason == MotionStopReason::NODE_SHUTDOWN) {shutdown_stop_ready_.store(true);}
     // A later hardware fault must override an earlier successful user hold.
     if (already_stopping && task_claimed_.load()) {return stopped;}
     if (move_group_) {
@@ -1810,7 +2035,7 @@ private:
       follow_goal = active_follow_goal_;
     }
     if (follow_goal) {
-      auto cancel_future = follow_client_->async_cancel_goal(follow_goal);
+      auto cancel_future = cancel_goal<Follow>(*follow_client_, follow_goal);
       if (cancel_future.wait_for(std::chrono::duration<double>(operation_timeout_)) !=
         std::future_status::ready)
       {
@@ -1870,6 +2095,17 @@ private:
   std::mutex follow_mutex_;
   std::mutex command_mutex_;
   std::mutex motion_gate_mutex_;
+  std::mutex worker_mutex_;
+  std::condition_variable worker_ready_;
+  size_t pending_workers_{0};
+  std::vector<std::future<void>> action_workers_;
+  std::mutex cancel_mutex_;
+  std::vector<CancelFuture> cancellations_;
+  std::atomic_size_t pending_goal_responses_{0};
+  bool cancellations_closed_{false};
+  std::atomic_bool shutting_down_{false};
+  std::atomic_bool shutdown_stop_ready_{false};
+  std::atomic_bool shutdown_failed_{false};
   std::atomic_bool stop_hold_confirmed_{false};
   std::atomic_bool preview_active_{false};
   rclcpp::Service<pi_arm_interfaces::srv::PreviewMotion>::SharedPtr preview_service_;
@@ -1922,13 +2158,24 @@ int main(int argc, char ** argv)
     node->initialize();
   } catch (const std::exception & error) {
     RCLCPP_FATAL(node->get_logger(), "Manager initialization failed: %s", error.what());
+    node->release_resources();
     rclcpp::shutdown();
     return 1;
   }
   rclcpp::executors::MultiThreadedExecutor executor(
     rclcpp::ExecutorOptions(), std::max(4U, std::thread::hardware_concurrency()));
   executor.add_node(node);
+  const auto context = node->get_node_base_interface()->get_context();
+  const auto shutdown_callback = context->add_pre_shutdown_callback(
+    [weak_node = std::weak_ptr<pi_arm_manager::ManagerNode>(node)] {
+      if (const auto manager = weak_node.lock()) {manager->prepare_shutdown();}
+    });
   executor.spin();
   rclcpp::shutdown();
-  return 0;
+  context->remove_pre_shutdown_callback(shutdown_callback);
+  const bool confirmed = node->shutdown_confirmed();
+  executor.remove_node(node);
+  node->release_resources();
+  node.reset();
+  return confirmed ? 0 : 1;
 }

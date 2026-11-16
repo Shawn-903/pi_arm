@@ -14,6 +14,8 @@
 
 `StopMotion` 在运动中和到点等待/空闲时都使用当前位置保持，覆盖关节、输出轴、预设姿态及笛卡尔路径。停止不再生成一条被已关闭写入门禁挡住的“保持轨迹”。取消、结果回调及作用域清理共享停止策略；迟到的控制器 goal 接受回包也会取消。停止处理期间禁止接收新任务。保持失败的动作结果为 3006，不把它报告为成功取消；硬件故障/断线/失能仍有更高优先级并保留故障停止。
 
+收到 SIGINT/SIGTERM 后，manager 拒绝新任务。有活动动作或尚未完成的清理时，先以故障停止方式释放运动租约，再取消目标、等待工作线程和取消响应，最后关闭 ROS 并销毁 MoveIt 资源。动作返回失败码 3104；已有硬件故障保留更高优先级。空闲和只读预览退出不额外调用硬件停止，预览会取消尚未结束的规划。若停止或取消未获确认，进程返回非零退出码；例如整套 launch 同时退出时，硬件服务可能先于 manager 关闭。
+
 ## 接口与文件
 
 - [manager_node.cpp](src/manager_node.cpp)：动作、管理/停止服务、MoveIt/JTC 客户端、预览和执行主逻辑。
@@ -30,3 +32,5 @@
 ## 验证
 
 本包 `test/` 覆盖到位、目标、状态聚合、管理门禁和停止原因。`scripts/test_arrival_integration.py` 在隔离 ROS 域 82 用合成反馈验证到位、保持复核、运动停止、动作取消、迟到响应、保持失败、硬件故障优先级和等待时重复停止；完整链路使用 mock/vcan，见 [scripts](../../scripts/README.md)。实机机械精度与保持力矩需独立测量。
+
+[test_manager_shutdown.py](../../scripts/test_manager_shutdown.py) 在隔离 ROS 域 98 检查运动中退出、租约申请中退出、迟到目标、规划/预览中退出、停止确认失败和空闲退出。先加载待测工作区，例如：`ROS_DOMAIN_ID=98 python3 scripts/test_manager_shutdown.py --case active --log-dir /tmp/manager-shutdown`。

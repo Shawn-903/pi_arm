@@ -19,6 +19,7 @@ enum class MotionStopReason : std::uint8_t
   HARDWARE_DISABLED,
   HARDWARE_DISCONNECTED,
   HARDWARE_FAULT,
+  NODE_SHUTDOWN,
 };
 
 struct MotionStopOutcome
@@ -40,9 +41,10 @@ inline int motion_stop_priority(const MotionStopReason reason) noexcept
     case MotionStopReason::NONE: return 0;
     case MotionStopReason::ACTION_CANCEL: return 1;
     case MotionStopReason::STOP_SERVICE: return 2;
-    case MotionStopReason::HARDWARE_DISABLED: return 3;
-    case MotionStopReason::HARDWARE_DISCONNECTED: return 4;
-    case MotionStopReason::HARDWARE_FAULT: return 5;
+    case MotionStopReason::NODE_SHUTDOWN: return 3;
+    case MotionStopReason::HARDWARE_DISABLED: return 4;
+    case MotionStopReason::HARDWARE_DISCONNECTED: return 5;
+    case MotionStopReason::HARDWARE_FAULT: return 6;
   }
   return 0;
 }
@@ -56,6 +58,7 @@ inline const char * motion_stop_reason_name(const MotionStopReason reason) noexc
     case MotionStopReason::HARDWARE_DISABLED: return "hardware_disabled";
     case MotionStopReason::HARDWARE_DISCONNECTED: return "hardware_disconnected";
     case MotionStopReason::HARDWARE_FAULT: return "hardware_fault";
+    case MotionStopReason::NODE_SHUTDOWN: return "node_shutdown";
   }
   return "unknown";
 }
@@ -97,6 +100,10 @@ inline MotionStopOutcome motion_stop_outcome(const MotionStopReason reason) noex
       return {
         false, 3102, pi_arm_interfaces::msg::TaskState::FAILED,
         "motion stopped: hardware fault"};
+    case MotionStopReason::NODE_SHUTDOWN:
+      return {
+        false, 3104, pi_arm_interfaces::msg::TaskState::FAILED,
+        "motion stopped: manager shutting down"};
     case MotionStopReason::NONE:
       break;
   }
