@@ -1253,57 +1253,37 @@ private:
     return cancel_common(goal);
   }
 
-  void accept_movej(const std::shared_ptr<GoalHandleMoveJ> goal)
+  template<typename ActionT, typename GoalHandleT>
+  void start_action_worker(
+    const std::shared_ptr<GoalHandleT> goal, const std::string & command,
+    void (ManagerNode::*execute)(const std::shared_ptr<GoalHandleT>))
   {
     auto self = std::static_pointer_cast<ManagerNode>(shared_from_this());
     std::thread(
-      [self, goal]() {
+      [self, goal, command, execute]() {
         try {
-          self->execute_movej(goal);
+          (self.get()->*execute)(goal);
         } catch (const std::exception & error) {
-          RCLCPP_ERROR(self->get_logger(), "movej exception: %s", error.what());
-          self->complete_action<MoveJ>(goal, false, "movej", error.what());
+          RCLCPP_ERROR(self->get_logger(), "%s exception: %s", command.c_str(), error.what());
+          self->complete_action<ActionT>(goal, false, command, error.what());
         }
       }).detach();
+  }
+  void accept_movej(const std::shared_ptr<GoalHandleMoveJ> goal)
+  {
+    start_action_worker<MoveJ>(goal, "movej", &ManagerNode::execute_movej);
   }
   void accept_movejs(const std::shared_ptr<GoalHandleMoveJs> goal)
   {
-    auto self = std::static_pointer_cast<ManagerNode>(shared_from_this());
-    std::thread(
-      [self, goal]() {
-        try {
-          self->execute_movejs(goal);
-        } catch (const std::exception & error) {
-          RCLCPP_ERROR(self->get_logger(), "movejs exception: %s", error.what());
-          self->complete_action<MoveJs>(goal, false, "movejs", error.what());
-        }
-      }).detach();
+    start_action_worker<MoveJs>(goal, "movejs", &ManagerNode::execute_movejs);
   }
   void accept_movel(const std::shared_ptr<GoalHandleMoveL> goal)
   {
-    auto self = std::static_pointer_cast<ManagerNode>(shared_from_this());
-    std::thread(
-      [self, goal]() {
-        try {
-          self->execute_movel(goal);
-        } catch (const std::exception & error) {
-          RCLCPP_ERROR(self->get_logger(), "movel exception: %s", error.what());
-          self->complete_action<MoveL>(goal, false, "movel", error.what());
-        }
-      }).detach();
+    start_action_worker<MoveL>(goal, "movel", &ManagerNode::execute_movel);
   }
   void accept_direct(const std::shared_ptr<GoalHandleDirect> goal)
   {
-    auto self = std::static_pointer_cast<ManagerNode>(shared_from_this());
-    std::thread(
-      [self, goal]() {
-        try {
-          self->execute_direct(goal);
-        } catch (const std::exception & error) {
-          RCLCPP_ERROR(self->get_logger(), "direct_move exception: %s", error.what());
-          self->complete_action<DirectMove>(goal, false, "direct_move", error.what());
-        }
-      }).detach();
+    start_action_worker<DirectMove>(goal, "direct_move", &ManagerNode::execute_direct);
   }
 
   void execute_movej(const std::shared_ptr<GoalHandleMoveJ> handle)
@@ -1582,6 +1562,8 @@ private:
       throw std::runtime_error("failed to arm motion");
     }
     // Release the lease even if a future or result handler throws.
+    // Failed paths keep this fallback after explicit disarm: set_motion_armed
+    // re-evaluates concurrent Stop/fault requests before issuing the final RPC.
     bool completed = false;
     const auto release = [this, lease_id, &completed](int *) {
       if (!completed) {set_motion_armed(false, lease_id, "trajectory/scope_exit");}
@@ -1698,6 +1680,17 @@ private:
     completed = complete_action<ActionT>(handle, backend_ok, command, detail);
   }
 
+  template<typename GoalHandleT, typename ResultT>
+  bool abort_failed_action(
+    const std::shared_ptr<GoalHandleT> & handle, const std::shared_ptr<ResultT> & result)
+  {
+    // Finish TaskState before replying to the action. Returning false keeps
+    // the enclosing trajectory lease guard active for hardware cleanup.
+    finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
+    handle->abort(result);
+    return false;
+  }
+
   template<typename ActionT, typename GoalHandleT>
   bool complete_action(
     const std::shared_ptr<GoalHandleT> handle, bool backend_ok,
@@ -1746,9 +1739,7 @@ private:
       RCLCPP_ERROR(
         get_logger(), "%s aborted: code=%d message=%s",
         command.c_str(), result->code, result->message.c_str());
-      finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
-      handle->abort(result);
-      return false;
+      return abort_failed_action(handle, result);
     }
     publish_feedback<ActionT>(handle, 0.9F, "verifying_position_hold");
     if (!wait_arrival("verifying_hold")) {
@@ -1763,17 +1754,13 @@ private:
       result->success = false;
       result->code = 3003;
       result->message = arrival_error("while holding");
-      finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
-      handle->abort(result);
-      return false;
+      return abort_failed_action(handle, result);
     }
     if (!set_motion_armed(false, active_task_id(), "trajectory/hold", 0.0, true)) {
       result->success = false;
       result->code = 3003;
       result->message = "failed to retain position hold";
-      finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
-      handle->abort(result);
-      return false;
+      return abort_failed_action(handle, result);
     }
     if (stop_requested_.load() || handle->is_canceling()) {
       return complete_action<ActionT>(handle, true, command, "motion stopped");

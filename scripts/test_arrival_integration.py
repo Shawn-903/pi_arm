@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adversarial end-to-end manager arrival test. Synthetic services only, domain 82.
+"""Manager arrival, termination and lease-order test. Synthetic services, domain 82.
 
 Source an isolated install; starts ONLY manager with fake feedback/controller/arm
 services. Never launches a CAN driver, opens CAN, or executes MoveIt trajectories.
@@ -20,10 +20,11 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory, get_package_prefix
+from action_msgs.msg import GoalStatus
 from control_msgs.action import FollowJointTrajectory
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from pi_arm_interfaces.action import DirectMove
-from pi_arm_interfaces.msg import HardwareState, RobotState
+from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState
 from pi_arm_interfaces.srv import SetMotionArmed, PreviewMotion, StopMotion
 from rclpy.qos import qos_profile_sensor_data
 import xacro
@@ -39,6 +40,7 @@ class Fixture(Node):
         self.positions=[0.]*6;self.mode='offset';self.goal=None;self.result_state=None
         self.sent_at=0.;self.disarmed_at=None;self.armed=False;self.stable_from=None
         self.arm_requests=[];self.follow_count=0;self.hold_failed=False;self.drifted=False;self.faulted=False
+        self.events=[]
         self.controller_requested=threading.Event();self.controller_canceled=threading.Event()
         self.pub=self.create_publisher(HardwareState,'/test/hardware_state',qos_profile_sensor_data)
         self.create_timer(.02,self.publish,callback_group=self.group)
@@ -46,7 +48,7 @@ class Fixture(Node):
         self.create_service(SetMotionArmed,'/pi_arm/hardware/set_motion_armed',self.arm,callback_group=self.group)
         self.server=ActionServer(self,FollowJointTrajectory,'/test/follow',execute_callback=self.follow,
                                 goal_callback=self.accept_follow,
-                                cancel_callback=lambda _: CancelResponse.ACCEPT,callback_group=self.group)
+                                cancel_callback=self.cancel_follow,callback_group=self.group)
         # MoveGroupInterface waits for these servers at construction; no planning
         # or execution call is used by DirectMove in this fixture.
         self.move_server=ActionServer(self,MoveGroup,'/move_action',execute_callback=lambda h: self.unexpected(h,MoveGroup),callback_group=self.group)
@@ -58,7 +60,12 @@ class Fixture(Node):
     def accept_follow(self, _request):
         self.controller_requested.set()
         if self.mode=='late_stop':time.sleep(.7)
+        if self.mode=='controller_reject':return GoalResponse.REJECT
         return GoalResponse.ACCEPT
+
+    def cancel_follow(self, _handle):
+        self.events.append(('controller_cancel',))
+        return CancelResponse.ACCEPT
 
     def unexpected(self,handle,action):
         handle.abort()
@@ -68,15 +75,18 @@ class Fixture(Node):
 
     def arm(self,request,response):
         self.arm_requests.append((request.armed,request.hold_position,request.lease_id))
-        if not request.armed and request.hold_position and self.mode=='hold_failure':
+        if request.armed and self.mode=='arm_failure':
+            response.success=False;response.armed=False;response.message='synthetic arm rejection'
+        elif not request.armed and request.hold_position and self.mode in ('hold_failure','retain_hold_failure'):
             self.hold_failed=True
             response.success=False;response.armed=False;response.message='synthetic hold ACK loss'
-            return response
-        response.success=True;response.armed=request.armed;response.message='synthetic arm service'
-        if request.armed:
-            self.armed=True;self.disarmed_at=None
-        elif self.armed:
-            self.armed=False;self.disarmed_at=time.monotonic()
+        else:
+            response.success=True;response.armed=request.armed;response.message='synthetic arm service'
+            if request.armed:
+                self.armed=True;self.disarmed_at=None
+            elif self.armed:
+                self.armed=False;self.disarmed_at=time.monotonic()
+        self.events.append(('arm_response',request.armed,request.hold_position,request.lease_id,response.success))
         return response
 
     def follow(self,handle):
@@ -160,8 +170,31 @@ def main():
             assert answer.success and not node.armed and node.goal is None, answer
             assert len(answer.trajectory.points)==201
             print('PASS preview is read-only: no lease, controller or MoveIt execution',flush=True)
+            # Cover exception handling before a lease exists, explicit disarm
+            # followed by the scope fallback, and failed final-position hold.
+            for mode,code,message,releases in (
+                    ('arm_failure',3001,'failed to arm motion',[]),
+                    ('controller_reject',3001,'trajectory goal rejected',[(False,False),(False,False)]),
+                    ('retain_hold_failure',3003,'failed to retain position hold',[(False,True),(False,False)])):
+                node.mode=mode;node.goal=None;node.positions=[0.]*6;node.armed=False;node.hold_failed=False
+                node.arm_requests.clear();node.events.clear()
+                time.sleep(.4)
+                goal=DirectMove.Goal();goal.joint_names=NAMES;goal.positions=[0.]*6
+                goal.max_velocity=math.radians(1);goal.max_output_velocity=math.radians(1)
+                handle=await_future(node.client.send_goal_async(goal));assert handle.accepted,mode
+                wrapped=await_future(handle.get_result_async(),10);result=wrapped.result
+                time.sleep(.15)  # Include the lease guard after the Action reply.
+                assert wrapped.status==GoalStatus.STATUS_ABORTED,(mode,wrapped)
+                assert not result.success and result.code==code and result.message==message,(mode,result)
+                assert node.result_state.task.status==TaskState.FAILED,(mode,node.result_state)
+                lease=node.arm_requests[0][2]
+                assert lease>0 and node.arm_requests==[(True,False,lease)]+[
+                    (armed,hold,lease) for armed,hold in releases],(mode,node.arm_requests)
+                print('PASS failure cleanup',mode,node.arm_requests,flush=True)
+
             for mode in ('offset','settle','drift'):
                 node.mode=mode;node.goal=None;node.positions=[0.]*6;node.sent_at=0;node.drifted=False
+                node.arm_requests.clear();node.events.clear()
                 deadline=time.monotonic()+5
                 while (node.result_state is None or node.result_state.state_name!='READY') and time.monotonic()<deadline:time.sleep(.05)
                 time.sleep(.15)
@@ -171,21 +204,28 @@ def main():
                     blocked=await_future(node.preview.call_async(preview))
                     assert not blocked.success and blocked.code==2003, blocked
                     print('PASS manager rejects preview during an active motion task',flush=True)
-                result=await_future(handle.get_result_async(),10).result
+                wrapped=await_future(handle.get_result_async(),10);result=wrapped.result
                 time.sleep(.15)
                 arrival=node.result_state.task.arrival_state
                 if mode=='settle':
                     assert result.success and arrival=='reached',(mode,result,arrival)
+                    assert wrapped.status==GoalStatus.STATUS_SUCCEEDED,wrapped
                     assert node.disarmed_at-node.sent_at>=.5, 'lease released before stable arrival'
                 else:
                     assert not result.success and arrival=='not_reached',(mode,result,arrival)
+                    assert wrapped.status==GoalStatus.STATUS_ABORTED,wrapped
                     assert 'GOAL_NOT_REACHED' in result.message,result.message
+                lease=node.arm_requests[0][2]
+                releases={'settle':[(False,True)],'offset':[(False,False),(False,False)],
+                          'drift':[(False,False)]}[mode]
+                assert lease>0 and node.arm_requests==[(True,False,lease)]+[
+                    (armed,hold,lease) for armed,hold in releases],(mode,node.arm_requests)
                 print('PASS',mode,'success=',result.success,'arrival=',arrival,flush=True)
 
             for mode in ('in_motion','action_cancel','late_stop','hold_failure','hardware_fault'):
                 node.mode='in_motion' if mode in ('action_cancel','hardware_fault') else mode
                 node.armed=False;node.goal=None;node.positions=[0.]*6;node.hold_failed=False
-                node.arm_requests.clear();node.controller_requested.clear();node.controller_canceled.clear()
+                node.arm_requests.clear();node.events.clear();node.controller_requested.clear();node.controller_canceled.clear()
                 time.sleep(.4)
                 goal=DirectMove.Goal();goal.joint_names=NAMES;goal.positions=[.1]*6
                 goal.max_velocity=math.radians(1);goal.max_output_velocity=math.radians(1)
@@ -197,11 +237,16 @@ def main():
                 else:
                     reply=await_future(node.stop.call_async(StopMotion.Request()))
                     assert reply.success == (mode!='hold_failure'),(mode,reply)
-                result=await_future(handle.get_result_async(),10).result
+                wrapped=await_future(handle.get_result_async(),10);result=wrapped.result
                 assert node.controller_canceled.wait(5), f'{mode}: controller survived Stop'
                 time.sleep(.3)  # Include late result handling and the scope guard.
                 holds=[r for r in node.arm_requests if not r[0]]
                 assert holds and all(r[1]==(mode!='hardware_fault') and r[2]==0 for r in holds),(mode,node.arm_requests)
+                cancel_index=node.events.index(('controller_cancel',))
+                assert ('arm_response',False,mode!='hardware_fault',0,mode!='hold_failure') in \
+                    node.events[:cancel_index],(mode,node.events)
+                assert wrapped.status==(GoalStatus.STATUS_CANCELED if mode=='action_cancel' else
+                                        GoalStatus.STATUS_ABORTED),(mode,wrapped)
                 if mode=='hold_failure':assert not result.success and result.code==3006,result
                 elif mode=='hardware_fault':assert not result.success and result.code==3102,result
                 elif mode=='action_cancel':assert result.success,result
