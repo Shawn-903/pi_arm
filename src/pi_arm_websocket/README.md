@@ -7,6 +7,7 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 | 模块 | 职责 |
 | --- | --- |
 | [gateway.py](pi_arm_websocket/gateway.py) | 进程入口、WebSocket 连接管理和状态推送 |
+| [state_payload.py](pi_arm_websocket/state_payload.py) | 将同一状态快照转换为协议字段，处理单位、无反馈默认值和非有限数值 |
 | [ros_bridge.py](pi_arm_websocket/ros_bridge.py) | `pi_arm_websocket` 节点、ROS 客户端、反馈快照与动作生命周期 |
 | [commands.py](pi_arm_websocket/commands.py) | 命令参数/模式校验、单位转换、服务和动作分发 |
 | [rotations.py](pi_arm_websocket/rotations.py) | 命令与反馈共享的角度单位、RPY/四元数换算 |
@@ -42,7 +43,7 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 
 网页目标使用 °、mm；ROS 动作转为 rad、m。RPY 使用固定轴 XYZ，即 `Rz(yaw) Ry(pitch) Rx(roll)`，坐标 base_link、控制点 tool0。预览轨迹 TCP 路径使用 m，不可按 mm 再传入渲染。具体必填字段及限制以 protocol/commands 实现和 `test/` 为准。
 
-依赖方向为 `gateway → commands / ros_bridge`；两者通过 bridge 的状态、服务和动作接口协作，不反向导入 gateway。入口仍是 `pi_arm_websocket.gateway:main`，原有 `gateway.RosBridge`、`gateway.CommandGateway` 和旋转换算函数的导入方式继续可用。
+依赖方向为 `gateway → commands / ros_bridge / state_payload`。commands 与 ros_bridge 通过状态、服务和动作接口协作；state_payload 只转换传入的状态快照。入口仍是 `pi_arm_websocket.gateway:main`，原有 `gateway.RosBridge`、`gateway.CommandGateway` 和旋转换算函数的导入方式继续可用。
 
 运动响应里的 task_id 表示“已接受”，终态见后续 state。接受后迟迟拿不到任务号会取消并确认；接受响应晚到也处理取消，不允许返回普通失败却留下无人跟踪的运动。
 
