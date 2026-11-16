@@ -17,6 +17,7 @@
 ## 接口与文件
 
 - [manager_node.cpp](src/manager_node.cpp)：动作、管理/停止服务、MoveIt/JTC 客户端、预览和执行主逻辑。
+- [trajectory_preparation.cpp](src/trajectory_preparation.cpp)：轨迹时间校验及关节/输出轴限速计算，使用节点取得的起点快照和模型限位；锁、租约和控制器提交仍由节点管理。
 - [direct_move_validation.hpp](include/pi_arm_manager/direct_move_validation.hpp)：关节顺序、限位、目标完整性及轨迹校验。
 - [arrival_check.hpp](include/pi_arm_manager/arrival_check.hpp)：目标误差、速度、新鲜度与稳定到位判断。
 - [management_gate.hpp](include/pi_arm_manager/management_gate.hpp)、[motion_stop_reason.hpp](include/pi_arm_manager/motion_stop_reason.hpp)：管理互斥与退出原因。

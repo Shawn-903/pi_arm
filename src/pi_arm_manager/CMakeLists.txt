@@ -19,7 +19,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 
-add_executable(pi_arm_manager_node src/manager_node.cpp)
+add_executable(pi_arm_manager_node src/manager_node.cpp src/trajectory_preparation.cpp)
 target_include_directories(pi_arm_manager_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -37,6 +37,11 @@ if(BUILD_TESTING)
   target_include_directories(test_arrival_check PRIVATE include)
   ament_add_gtest(test_direct_move_validation test/test_direct_move_validation.cpp)
   target_include_directories(test_direct_move_validation PRIVATE include)
+  ament_add_gtest(test_trajectory_preparation
+    test/test_trajectory_preparation.cpp src/trajectory_preparation.cpp)
+  target_include_directories(test_trajectory_preparation PRIVATE include src)
+  ament_target_dependencies(test_trajectory_preparation
+    rclcpp trajectory_msgs pi_arm_transmission)
   ament_add_gtest(test_state_aggregator test/test_state_aggregator.cpp)
   target_include_directories(test_state_aggregator PRIVATE include)
   ament_target_dependencies(test_state_aggregator pi_arm_interfaces)
