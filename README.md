@@ -2,7 +2,7 @@
 
 树莓派六自由度绳索机械臂，目标环境为 Ubuntu 24.04 ARM64 / ROS 2 Jazzy。使用 SocketCAN、ros2_control、MoveIt 2 和网页控制台，支持模拟、只读诊断、单轴方向测试及实机运动。
 
-恢复基线：分支 **`重复定位精度测试1.0`**，提交 **`95b65be`**。当前开发分支：`feature/repeatability-test-next`。
+主分支：**`main`**；当前工作分支：**`refactor/code-organization`**。历史重复定位测试 1.0 恢复点为标签 **`repeatability-v1.0`**（`95b65be`），本轮重构前基线为 **`baseline/pre-refactor-20261116`**（`7010186`）。
 
 ## 文档入口
 
@@ -125,21 +125,20 @@ ros2 topic echo /pi_arm/state --once
 代码恢复基线已推送到 Git。先停止当前服务，提交或另行保存未提交修改，再恢复：
 
 ```bash
-git fetch origin
-# 本地分支已存在时：
-git switch '重复定位精度测试1.0'
-# 新克隆仓库尚无本地分支时，改用：
-# git switch --track 'origin/重复定位精度测试1.0'
+git fetch origin --tags
+git switch --detach repeatability-v1.0
 bash scripts/build.sh
 ```
 
 随后使用上面的 R10 实机启动命令。只检查历史代码、不切换当前工作区，可用：
 
 ```bash
-git worktree add --detach ../pi_arm-repeatability-1.0 '重复定位精度测试1.0'
+git worktree add --detach ../pi_arm-repeatability-1.0 repeatability-v1.0
 ```
 
-继续开发使用 `git switch feature/repeatability-test-next`。旧阶段标签 `v0.1.0-stage1`、`v0.2.0-viewer-baseline` 保留用于追溯，不能据此认为其旧标定适用于当前实机。
+返回当前基线使用 `git switch main`，继续开发使用 `git switch refactor/code-organization`。新克隆后首次进入工作分支使用 `git switch --track origin/refactor/code-organization`。旧阶段标签 `v0.1.0-stage1`、`v0.2.0-viewer-baseline` 保留用于追溯，不能据此认为其旧标定适用于当前实机。
+
+日常保留 `main` 和一个工作分支。每批改动在工作分支单独提交，相关测试通过后快进合入 `main`；恢复节点使用标签，不用长期旧分支充当备份。清理分支前确认其提交已被 `main` 包含，未跟踪的本地文件须另行备份，不能用 `git clean` 代替分支清理。
 
 | 数据 | 保存位置与恢复方式 |
 | --- | --- |
