@@ -155,6 +155,7 @@ CAN 收发报错后，驱动会自动重新连接并恢复轮询；故障前的�
 | `control.html` | 页面结构、稳定 DOM 标识与脚本版本 |
 | `assets/console.css` | 视觉与响应式布局 |
 | `assets/control.js` | 唯一 WebSocket 传输、运动门禁、状态/管理操作 |
+| `assets/diagnostics.js` | 故障原因、原始坐标展示和诊断快照导出 |
 | `assets/console.js` | 导航、角色视图、任务概览，不发送运动 |
 | `assets/viewer.js` | 本地 URDF/Three.js 显示 |
 | `assets/interactive.js` | 手势、后端预览与失效管理 |
