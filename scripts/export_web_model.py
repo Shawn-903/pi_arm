@@ -43,21 +43,24 @@ def export(output):
         if not dest.exists():
             dest.write_bytes(gzip.compress(raw, compresslevel=9, mtime=0))
         mesh.set("filename", "meshes/" + dest.name)
-        records.append(dict(source=str(path.relative_to(ROOT)), sha256=digest,
+        records.append(dict(source=path.relative_to(ROOT).as_posix(), sha256=digest,
                             url="meshes/" + dest.name, source_bytes=len(raw),
                             compressed_bytes=dest.stat().st_size))
     xml = ET.tostring(robot, encoding="unicode", xml_declaration=True)
-    (output / "pi_arm.urdf").write_text(xml + "\n")
+    # Hash and write the same bytes, including on Windows (no CRLF conversion).
+    xml_bytes = (xml + "\n").encode("utf-8")
+    (output / "pi_arm.urdf").write_bytes(xml_bytes)
     joints = {joint.attrib["name"]: joint for joint in robot.findall("joint")}
-    manifest = dict(schema=1, source=str(source.relative_to(ROOT)),
+    manifest = dict(schema=1, source=source.relative_to(ROOT).as_posix(),
                     source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
-                    urdf_sha256=hashlib.sha256((xml + "\n").encode()).hexdigest(),
+                    urdf_sha256=hashlib.sha256(xml_bytes).hexdigest(),
                     urdf="pi_arm.urdf", root="base_link", tip="tool0",
                     joint_names=names,
                     limits_rad={name: {key: float(joints[name].find("limit").attrib[key])
                                        for key in ("lower", "upper")} for name in names},
                     meshes=records)
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (output / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"Web model: {len(names)} axes, {len(records)} meshes, "
           f"{sum(r['compressed_bytes'] for r in records) / 1024**2:.1f} MiB compressed")
     return manifest
