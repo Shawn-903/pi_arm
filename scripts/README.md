@@ -24,11 +24,37 @@ CAN HAT 驱动/设备树安装不在现有脚本能力内。空的旧安装占�
 ```bash
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
+```
+
+先按下表选择覆盖实际风险的最小集合。Python 可选具体测试文件；ament_cmake 包可用 CTest 名称筛选。以下是两种选择方式，按变更使用对应命令：
+
+```bash
+python3 -m pytest src/pi_arm_websocket/test/test_protocol.py -q
+colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_write_gate$' --event-handlers console_direct+
+```
+
+| 修改类型 | 相关检查或测试入口 |
+| --- | --- |
+| 文档、注释、编辑器配置 | 差异、相对链接、配置解析与作用范围；不启动 ROS 或浏览器 |
+| 网关命令、状态或点位逻辑 | 从 [网关测试目录](../src/pi_arm_websocket/test/) 选择对应文件；ROS 调用或共享状态变化时，再覆盖受影响的 mock 路径 |
+| 网页布局、诊断、重复运动等单项功能 | 从下方离线网页测试中选择对应脚本；跨页面共用逻辑变化时覆盖相关页面 |
+| commissioning 电机测试界面、请求或模拟器冻结运动 | `test_web_axis.py` 普通与 `--stall` 场景，使用独立 commissioning/vcan 服务 |
+| manager 到位、停止或取消 | [manager 测试目录](../src/pi_arm_manager/test/) 中对应单测；涉及编排、Action 或并发时加 `test_arrival_integration.py` |
+| 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
+| 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
+| ROS 接口、构建或依赖 | 重建受影响包及消费者，运行对应单测和受影响集成路径；范围跨包时扩大到依赖包 |
+| 网页模型导出或三维显示 | `test_web_viewer.py`；改变模型源时同时检查对应 description / transmission 测试 |
+
+冒烟检查是快速确认受影响的关键入口还能走通，例如启动测试用 mock、连接网关、读取状态并正常退出；按改动选择这些步骤即可，不额外建立一套重复测试。运动停止、写入许可等修改仍需上述相关断言，不能仅凭启动成功验收。
+
+全量测试用于建立基线，或改动范围确实覆盖全系统时；已有合并、发布要求仍需完成：
+
+```bash
 colcon test --event-handlers console_direct+
 colcon test-result --verbose
 ```
 
-局部修改可用 `colcon test --packages-select <包名>`，接口/耦合模型变更需覆盖依赖包。测试范围随修改选择，不因文档变化重复运行实机或全部控制测试。
+同一批相关检查通过后，只要代码、依赖、环境没有相关变化，也没有新发现的问题，就停止验证；不因提交或合并重复运行。优先复用已有测试，仅为新增行为、已确认缺陷或明确覆盖缺口补测试。记录测试入口、环境和结果，不以测试数量作为完成标准。
 
 ## 离线网页测试
 
