@@ -24,6 +24,7 @@ struct BackendConfig
   std::string can_interface{"can0"};
   std::string cable_kinematics_file;
   std::string calibration_file;
+  std::string software_zero_file;
   bool allow_real_control{false};
   bool read_only{false};
   bool commissioning{false};
@@ -67,6 +68,7 @@ struct HardwareSample
   bool motion_stop_pending{false};
   bool motion_stop_failed{false};
   std::string calibration_id;
+  std::string software_zero_id;
   std::vector<double> raw_protocol_positions_deg;
   std::vector<double> raw_output_positions_rad;
   std::vector<double> software_output_offsets_rad;
@@ -152,6 +154,9 @@ public:
   bool axis_test_active() const {return axis_test_active_;}
   std::uint64_t axis_test_id() const {return axis_test_id_;}
   std::string axis_test_status() const {return axis_test_status_;}
+  // Maintenance mode only, serialized by the monitor's single-threaded executor.
+  ManagementResult set_zero_reference(const CalibrationVector6 & reference_joint_rad,
+    bool reference_pose_confirmed, HardwareSample & applied_sample);
 
 private:
   MotionArmResult stop_and_hold(const std::vector<std::uint8_t> & motor_ids) noexcept;

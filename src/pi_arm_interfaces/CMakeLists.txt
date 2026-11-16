@@ -16,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetTeaching.srv"
   "srv/StopMotion.srv"
   "srv/AxisTest.srv"
+  "srv/SetZeroReference.srv"
   "srv/PreviewMotion.srv"
   "action/MoveJ.action"
   "action/MoveJs.action"

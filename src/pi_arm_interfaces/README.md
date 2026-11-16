@@ -30,6 +30,7 @@ ROS 2 公共接口定义包，由 rosidl 生成 C++/Python 类型；自身不启
 | [SetTeaching](srv/SetTeaching.srv) | 显式进入拖拽示教或退出并保持当前位置 |
 | [StopMotion](srv/StopMotion.srv) | 正常停止并保持当前位置，成功需确认保持；故障/失联不能保证保持 |
 | [AxisTest](srv/AxisTest.srv) | commissioning 专用 start/heartbeat/stop，步进与速度单位为 °、°/s |
+| [SetZeroReference](srv/SetZeroReference.srv) | 确认已知实物姿态并采集软件零点；参考关节角使用 rad。硬件入口 `/pi_arm/commissioning/set_zero_reference` 只在维护模式存在，不移动机械臂、不写 ROM |
 | [PreviewMotion](srv/PreviewMotion.srv) | joint/output/ik/lin 只读预览，不执行；返回轨迹仅供显示 |
 
 修改字段时同步硬件发布、manager、网关与消费者测试。此包的验证以接口生成及各消费者测试为主；可用 `ros2 interface show pi_arm_interfaces/msg/RobotState` 检查安装结果。

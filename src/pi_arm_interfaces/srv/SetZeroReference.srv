@@ -1,0 +1,10 @@
+# The operator has placed the arm at this known pose. This never moves the arm.
+float64[6] reference_joint_positions_rad
+bool reference_pose_confirmed
+---
+bool success
+int32 code
+string message
+string reference_id
+float64[6] raw_protocol_positions_deg
+float64[6] software_output_offsets_rad

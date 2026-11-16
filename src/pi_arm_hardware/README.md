@@ -10,6 +10,7 @@ ros2_control 的 `SystemInterface` 插件包，通过六轴 Backend 将关节命
 | [backend.cpp](src/backend.cpp) | Real/Mock Backend、反馈有效性、租约、停止确认、保持与拖拽示教 |
 | [actuator_coordinates.cpp](src/actuator_coordinates.cpp) | 协议度、减速比、安装方向与输出轴弧度转换 |
 | [calibration.cpp](src/calibration.cpp) | 加载接受的参考、核验配置指纹、计算软件零偏 |
+| [software_zero.cpp](src/software_zero.cpp)、[zero_reference.cpp](src/zero_reference.cpp) | 持久化软件参考、静止采样及整组六轴零偏应用；不写电机 ROM |
 | [axis_test.cpp](src/axis_test.cpp) | 独立电机/关节方向测试及心跳、行程、编码后路径检查 |
 | [monitor_node.cpp](src/monitor_node.cpp) | `pi_arm_hardware_monitor_node`，只读或 commissioning 入口 |
 | [motion_write_gate.hpp](include/pi_arm_hardware/motion_write_gate.hpp) | 新控制器命令与当前运动租约匹配，隔离旧目标 |

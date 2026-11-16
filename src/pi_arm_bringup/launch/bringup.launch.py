@@ -51,6 +51,9 @@ def generate_launch_description():
                 cable_kinematics_file,
                 " calibration_file:=",
                 calibration_file,
+                " software_zero_file:='",
+                LaunchConfiguration("software_zero_file"),
+                "'",
                 " allow_real_control:=",
                 allow_real_control,
             ]
@@ -120,6 +123,7 @@ def generate_launch_description():
                 description="Select deterministic mock or SocketCAN real hardware",
             ),
             DeclareLaunchArgument("can_interface", default_value="can0"),
+            DeclareLaunchArgument("software_zero_file", default_value=""),
             DeclareLaunchArgument("bitrate", default_value="1000000"),
             DeclareLaunchArgument(
                 "cable_kinematics_file",

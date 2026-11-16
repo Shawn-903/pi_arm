@@ -4,9 +4,11 @@
 #include "pi_arm_interfaces/msg/hardware_state.hpp"
 #include "pi_arm_interfaces/srv/axis_test.hpp"
 #include "pi_arm_interfaces/srv/manage_motor.hpp"
+#include "pi_arm_interfaces/srv/set_zero_reference.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -72,6 +74,7 @@ BackendConfig backend_config_from_robot_description(const std::string & robot_de
     required_parameter(info.hardware_parameters, "ros2_control hardware", "cable_kinematics_file");
   config.calibration_file =
     required_parameter(info.hardware_parameters, "ros2_control hardware", "calibration_file");
+  config.software_zero_file = parameter_or(info.hardware_parameters, "software_zero_file", "");
   config.poll_interval = std::chrono::milliseconds{
     parse_value<int>(
       parameter_or(info.hardware_parameters, "state_poll_interval_ms", "20"),
@@ -153,6 +156,27 @@ public:
     backend_->configure();
     backend_->activate();
     if (config_.commissioning) {
+      using SetZeroReference = pi_arm_interfaces::srv::SetZeroReference;
+      zero_reference_service_ = create_service<SetZeroReference>(
+        "/pi_arm/commissioning/set_zero_reference",
+        [this](const std::shared_ptr<SetZeroReference::Request> request,
+          std::shared_ptr<SetZeroReference::Response> response) {
+          HardwareSample applied;
+          const auto result = backend_->set_zero_reference(
+            request->reference_joint_positions_rad, request->reference_pose_confirmed, applied);
+          response->success = result.success;
+          response->code = result.code;
+          response->message = result.message;
+          response->reference_id = applied.software_zero_id;
+          if (result.success) {
+            std::copy_n(applied.raw_protocol_positions_deg.begin(), 6,
+              response->raw_protocol_positions_deg.begin());
+            std::copy_n(applied.software_output_offsets_rad.begin(), 6,
+              response->software_output_offsets_rad.begin());
+          }
+          RCLCPP_INFO(get_logger(), "software zero: success=%d reference=%s %s",
+            result.success, response->reference_id.c_str(), result.message.c_str());
+        });
       using AxisTest = pi_arm_interfaces::srv::AxisTest;
       axis_test_service_ = create_service<AxisTest>("/pi_arm/commissioning/axis_test",
         [this](const std::shared_ptr<AxisTest::Request> request,
@@ -258,6 +282,7 @@ private:
     message.motion_stop_pending = sample.motion_stop_pending;
     message.motion_stop_failed = sample.motion_stop_failed;
     message.calibration_id = sample.calibration_id;
+    message.software_zero_id = sample.software_zero_id;
     message.raw_protocol_positions_deg = sample.raw_protocol_positions_deg;
     message.raw_output_positions_rad = sample.raw_output_positions_rad;
     message.software_output_offsets_rad = sample.software_output_offsets_rad;
@@ -287,6 +312,7 @@ private:
   rclcpp::Publisher<pi_arm_interfaces::msg::HardwareState>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Service<pi_arm_interfaces::srv::AxisTest>::SharedPtr axis_test_service_;
+  rclcpp::Service<pi_arm_interfaces::srv::SetZeroReference>::SharedPtr zero_reference_service_;
   std::vector<rclcpp::Service<pi_arm_interfaces::srv::ManageMotor>::SharedPtr> management_services_;
 };
 

@@ -132,6 +132,7 @@ PI_ARM_DEFINE_HAS_FIELD(control_permitted);
 PI_ARM_DEFINE_HAS_FIELD(motion_stop_pending);
 PI_ARM_DEFINE_HAS_FIELD(motion_stop_failed);
 PI_ARM_DEFINE_HAS_FIELD(calibration_id);
+PI_ARM_DEFINE_HAS_FIELD(software_zero_id);
 PI_ARM_DEFINE_HAS_FIELD(raw_protocol_positions_deg);
 PI_ARM_DEFINE_HAS_FIELD(raw_output_positions_rad);
 PI_ARM_DEFINE_HAS_FIELD(software_output_offsets_rad);
@@ -256,6 +257,9 @@ void fill_hardware_state_message(
   }
   if constexpr (has_calibration_id<MessageT>::value) {
     message.calibration_id = sample.calibration_id;
+  }
+  if constexpr (has_software_zero_id<MessageT>::value) {
+    message.software_zero_id = sample.software_zero_id;
   }
   if constexpr (has_raw_protocol_positions_deg<MessageT>::value) {
     message.raw_protocol_positions_deg = sample.raw_protocol_positions_deg;
@@ -410,6 +414,8 @@ bool PiArmSystem::parse_configuration()
     string_parameter_or(parameters, "cable_kinematics_file", "");
   backend_config_.calibration_file =
     string_parameter_or(parameters, "calibration_file", "");
+  backend_config_.software_zero_file =
+    string_parameter_or(parameters, "software_zero_file", "");
   backend_config_.allow_real_control =
     parameter_or<bool>(parameters, "allow_real_control", false);
   if (backend_config_.cable_kinematics_file.empty()) {

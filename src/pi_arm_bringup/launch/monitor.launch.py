@@ -26,6 +26,9 @@ def generate_launch_description():
                 cable_kinematics_file,
                 " calibration_file:=",
                 calibration_file,
+                " software_zero_file:='",
+                LaunchConfiguration("software_zero_file"),
+                "'",
                 " allow_real_control:=false",
             ]
         )
@@ -34,6 +37,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("can_interface", default_value="can0"),
+            DeclareLaunchArgument("software_zero_file", default_value=""),
             DeclareLaunchArgument("commissioning", default_value="false", choices=["true", "false"]),
             DeclareLaunchArgument(
                 "cable_kinematics_file",

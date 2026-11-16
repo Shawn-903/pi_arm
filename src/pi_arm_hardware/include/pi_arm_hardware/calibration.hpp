@@ -32,6 +32,7 @@ struct CalibrationData
 struct CalibrationResult
 {
   CalibrationData data;
+  std::string software_zero_id;
   CalibrationVector6 software_output_offsets_rad{};
   bool valid{false};
   std::string message;

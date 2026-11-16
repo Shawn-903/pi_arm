@@ -30,6 +30,8 @@ bool control_permitted
 bool motion_stop_pending
 bool motion_stop_failed
 string calibration_id
+# Host-side zero reference layered on the unchanged base calibration; empty if absent.
+string software_zero_id
 float64[] raw_protocol_positions_deg
 float64[] raw_output_positions_rad
 float64[] software_output_offsets_rad

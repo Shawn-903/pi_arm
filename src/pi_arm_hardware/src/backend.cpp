@@ -1,4 +1,5 @@
 #include "pi_arm_hardware/backend.hpp"
+#include "pi_arm_hardware/software_zero.hpp"
 
 #include "pi_arm_transmission/config_loader.hpp"
 
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 #include <unordered_set>
@@ -199,6 +201,20 @@ RealBackend::RealBackend(BackendConfig config)
   validate_backend_config(config_);
   calibration_ = load_pack_reference_calibration(
     config_.calibration_file, config_.cable_kinematics_file, config_.actuators, kinematics_);
+  if (!config_.software_zero_file.empty()) {
+    try {
+      if (!std::filesystem::path(config_.software_zero_file).is_absolute()) {
+        throw std::invalid_argument("software_zero_file must be absolute");
+      }
+      if (!config_.commissioning || std::filesystem::exists(config_.software_zero_file)) {
+        calibration_ = load_software_zero_reference(config_.software_zero_file,
+          calibration_, config_.actuators, kinematics_);
+      }
+    } catch (const std::exception & error) {
+      calibration_.valid = false;
+      calibration_.message = std::string("software zero invalid: ") + error.what();
+    }
+  }
 }
 
 RealBackend::~RealBackend()
@@ -281,6 +297,7 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     sample.software_output_offsets_rad.assign(kAxisCount, nan);
     sample.calibrated = calibration_.valid;
     sample.calibration_id = calibration_.data.calibration_id;
+    sample.software_zero_id = calibration_.software_zero_id;
     sample.kinematics_valid = false;
     sample.control_permitted = false;
     sample.kinematics_error_code = calibration_.valid ? "NONE" : "CALIBRATION_INVALID";

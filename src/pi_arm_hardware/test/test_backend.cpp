@@ -1,6 +1,7 @@
 #include "pi_arm_hardware/backend.hpp"
 #include "pi_arm_hardware/actuator_coordinates.hpp"
 #include "pi_arm_hardware/calibration.hpp"
+#include "pi_arm_hardware/software_zero.hpp"
 #include "pi_arm_transmission/config_loader.hpp"
 
 #include <gtest/gtest.h>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 #include <string>
 #include <vector>
@@ -300,6 +302,106 @@ TEST(Calibration, UnapprovedCandidateFailsClosedAndApprovedCandidateComputesOffs
     EXPECT_NEAR(offset, 0.0, 1.0e-12);
   }
   std::filesystem::remove(path);
+}
+
+class SoftwareZero : public ::testing::Test
+{
+protected:
+  SoftwareZero()
+  : config(make_config()), kinematics(
+      pi_arm_transmission::load_cable_kinematics_config(config.cable_kinematics_file))
+  {
+    config.actuators[2].motor_direction = -1;
+    config.actuators[3].motor_direction = -1;
+    config.actuators[4].motor_direction = -1;
+    base.valid = true;
+    base.data.approved = true;
+    base.data.robot_id = "zero-test-robot";
+    base.data.calibration_id = "base-reference";
+    base.data.configuration_fingerprint = pi_arm_hardware::calibration_configuration_fingerprint(
+      config.cable_kinematics_file, config.actuators);
+    base.data.motor_ids = {1, 2, 3, 4, 5, 6};
+    std::string pattern = (std::filesystem::temp_directory_path() / "pi-arm-zero-XXXXXX").string();
+    if (!::mkdtemp(pattern.data())) {throw std::runtime_error("cannot create test directory");}
+    directory = pattern;
+    path = directory / "zero.yaml";
+  }
+  void TearDown() override {std::filesystem::remove_all(directory);}
+  std::string contents() const
+  {
+    std::ifstream file(path);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  }
+  pi_arm_hardware::CalibrationResult save(const std::string & id = "zero-1")
+  {
+    return pi_arm_hardware::save_software_zero_reference(path.string(), base,
+      reference, protocol, config.actuators, kinematics, id, "2026-11-16T00:00:00Z");
+  }
+  pi_arm_hardware::BackendConfig config;
+  pi_arm_transmission::CableKinematics kinematics;
+  pi_arm_hardware::CalibrationResult base;
+  pi_arm_hardware::CalibrationVector6 reference{0.2, 0.1, -0.05, 0.02, -0.02, 0.1};
+  pi_arm_hardware::CalibrationVector6 protocol{1800, -3600, 500, 420, -600, 360};
+  std::filesystem::path directory, path;
+};
+
+TEST_F(SoftwareZero, PersistsReferenceAndRoundTripsCoupledTargets)
+{
+  const auto saved = save();
+  const auto loaded = pi_arm_hardware::load_software_zero_reference(
+    path.string(), base, config.actuators, kinematics);
+  EXPECT_EQ(loaded.software_zero_id, "zero-1");
+  EXPECT_EQ(loaded.software_output_offsets_rad, saved.software_output_offsets_rad);
+  EXPECT_EQ(loaded.data.raw_output_at_packing_rad, base.data.raw_output_at_packing_rad);
+  pi_arm_transmission::Vector6 output{}, recovered{};
+  for (std::size_t i = 0; i < 6; ++i) {
+    output[i] = pi_arm_hardware::protocol_position_to_model_output_rad(
+      protocol[i], loaded.software_output_offsets_rad[i], config.actuators[i]);
+    EXPECT_NEAR(pi_arm_hardware::model_output_position_to_protocol_deg(
+      output[i], loaded.software_output_offsets_rad[i], config.actuators[i]), protocol[i], 1e-9);
+  }
+  ASSERT_TRUE(kinematics.output_to_joint_position(output, recovered));
+  for (std::size_t i = 0; i < 6; ++i) {EXPECT_NEAR(recovered[i], reference[i], 1e-9);}
+  protocol[0] += 36.0;
+  const auto replaced = save("zero-2");
+  EXPECT_NEAR(replaced.software_output_offsets_rad[0] - saved.software_output_offsets_rad[0],
+    -3.14159265358979323846 / 180.0, 1e-12);
+  EXPECT_EQ(pi_arm_hardware::load_software_zero_reference(
+    path.string(), base, config.actuators, kinematics).software_zero_id, "zero-2");
+}
+
+TEST_F(SoftwareZero, InvalidCandidateLeavesCommittedReferenceUnchanged)
+{
+  save();
+  const auto before = contents();
+  protocol[2] = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_THROW(save("invalid"), std::exception);
+  EXPECT_EQ(contents(), before);
+  auto mismatched = base;
+  mismatched.data.configuration_fingerprint = "different";
+  EXPECT_THROW(pi_arm_hardware::load_software_zero_reference(
+    path.string(), mismatched, config.actuators, kinematics), std::exception);
+  auto reversed = config.actuators;
+  std::swap(reversed[0], reversed[1]);
+  EXPECT_THROW(pi_arm_hardware::load_software_zero_reference(
+    path.string(), base, reversed, kinematics), std::exception);
+}
+
+TEST_F(SoftwareZero, MissingCorruptOrUnapprovedReferenceIsRejected)
+{
+  EXPECT_THROW(pi_arm_hardware::load_software_zero_reference(
+    path.string(), base, config.actuators, kinematics), std::exception);
+  base.valid = false;
+  EXPECT_THROW(save(), std::exception);
+  EXPECT_FALSE(std::filesystem::exists(path));
+  base.valid = true;
+  {std::ofstream file(path); file << "unrelated: file\n";}
+  EXPECT_THROW(save(), std::exception);
+  EXPECT_EQ(contents(), "unrelated: file\n");
+  const auto blocker = directory / "not-a-directory";
+  {std::ofstream file(blocker); file << "keep\n";}
+  path = blocker / "zero.yaml";
+  EXPECT_THROW(save(), std::exception);
 }
 
 }  // namespace

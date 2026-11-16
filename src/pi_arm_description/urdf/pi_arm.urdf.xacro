@@ -5,6 +5,7 @@
   <xacro:arg name="bitrate" default="1000000" />
   <xacro:arg name="cable_kinematics_file" default="" />
   <xacro:arg name="calibration_file" default="" />
+  <xacro:arg name="software_zero_file" default="" />
   <xacro:arg name="allow_real_control" default="false" />
   <link name="base_link">
     <inertial>
@@ -311,6 +312,7 @@
       <param name="bitrate">$(arg bitrate)</param>
       <param name="cable_kinematics_file">$(arg cable_kinematics_file)</param>
       <param name="calibration_file">$(arg calibration_file)</param>
+      <param name="software_zero_file">$(arg software_zero_file)</param>
       <param name="allow_real_control">$(arg allow_real_control)</param>
       <param name="moving_speed_threshold_rad_s">0.00017453292519943296</param>
       <param name="state_stale_timeout_sec">1.0</param>
