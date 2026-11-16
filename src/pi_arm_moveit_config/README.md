@@ -23,4 +23,6 @@ SRDF 的排除对包含相邻连杆及共享关节附近永久重叠的简化碰
 
 常规启动见 [根 README](../../README.md)。独立启动规划/RViz 前加载构建环境并隔离 ROS 域，避免连接错误的控制器。通过 mock 的 `test_web_interactive.py`、`test_web_control_spaces.py` 和 `test_web_presets.py` 检查规划及正常控制集成，参数见 [scripts](../../scripts/README.md)。
 
-已知系统 MoveIt 退出阶段可能段错误，尚未作为已修复问题处理；需与规划/执行时故障区分。
+树莓派安装的 MoveIt 2.12.4 在退出时，会先卸载控制器插件和默认能力插件，再销毁仍引用这些库的 ROS 回调对象，从而触发段错误。`move_group.launch.py` 针对该版本设置进程局部的 `LD_PRELOAD`，让这两个已安装的插件库保留到进程退出，并保留调用方原有的预加载项。该兼容处理只作用于此规划入口；其他 MoveIt 版本沿用原启动方式，升级后需重新检查退出行为。
+
+退出回归使用独立 ROS 域，只启动 mock 配置的规划进程：`python3 scripts/test_moveit_shutdown.py`；加 `--signal SIGTERM` 检查终止信号路径。脚本核验 `move_group` 子进程正常退出，不能仅凭 `ros2 launch` 返回 0 判断通过。

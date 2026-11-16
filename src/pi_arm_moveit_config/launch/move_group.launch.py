@@ -1,7 +1,10 @@
+from pathlib import Path
+import xml.etree.ElementTree as ET
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_configs_utils.launches import generate_move_group_launch
 
@@ -40,6 +43,26 @@ def _launch_setup(context):
     )
 
     generated = generate_move_group_launch(moveit_config)
+    moveit_package = Path(get_package_share_directory("moveit_ros_move_group")) / "package.xml"
+    if ET.parse(moveit_package).getroot().findtext("version") == "2.12.4":
+        # Callback groups can outlive these plugin loaders in MoveIt 2.12.4.
+        # Keep their library code mapped until process exit (see this package's README).
+        libraries = [
+            Path(get_package_prefix("moveit_simple_controller_manager"))
+            / "lib/libmoveit_simple_controller_manager.so",
+            Path(get_package_prefix("moveit_ros_move_group"))
+            / "lib/libmoveit_move_group_default_capabilities.so",
+        ]
+        for library in libraries:
+            if not library.is_file():
+                raise RuntimeError(f"MoveIt 2.12.4 shutdown workaround requires {library}")
+        preload = " ".join([*(str(path) for path in libraries),
+                            context.environment.get("LD_PRELOAD", "")]).strip()
+        # Scoped to this move_group launch; preserve any caller-supplied preload.
+        return [GroupAction(actions=[
+            SetEnvironmentVariable("LD_PRELOAD", preload),
+            *generated.entities,
+        ])]
     return list(generated.entities)
 
 

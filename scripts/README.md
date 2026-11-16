@@ -45,6 +45,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | CAN 断线重连、接口迟到或重建 | `test_can_recovery_vcan.py`，验证反馈恢复、旧授权失效和停止未确认状态保留 |
 | 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
 | ROS 接口、构建或依赖 | 重建受影响包及消费者，运行对应单测和受影响集成路径；范围跨包时扩大到依赖包 |
+| MoveIt 生命周期或插件加载方式 | `test_moveit_shutdown.py` 的 SIGINT/SIGTERM 路径，以及正常 mock 规划、执行和退出 |
 | 网页模型导出或三维显示 | `test_web_viewer.py`；改变模型源时同时检查对应 description / transmission 测试 |
 
 冒烟检查是快速确认受影响的关键入口还能走通，例如启动测试用 mock、连接网关、读取状态并正常退出；按改动选择这些步骤即可，不额外建立一套重复测试。运动停止、写入许可等修改仍需上述相关断言，不能仅凭启动成功验收。
@@ -94,6 +95,15 @@ python3 scripts/test_web_console.py
 ```
 
 ## mock 端到端测试
+
+[MoveIt 退出回归](test_moveit_shutdown.py) 使用已加载工作区中的规划入口，固定 mock 配置，不启动硬件驱动或发送运动请求。默认使用空闲 ROS 域 91，可通过 `--domain-id` 调整：
+
+```bash
+python3 scripts/test_moveit_shutdown.py
+python3 scripts/test_moveit_shutdown.py --signal SIGTERM
+```
+
+脚本等待规划器就绪，发送退出信号，并检查 `move_group` 子进程正常结束；崩溃时即使 launch 返回 0 也会判失败。
 
 先在独立终端按根 README 启动 `ROS_DOMAIN_ID=81`、HTTP 8001、WS 8766 的 mock。根据各脚本要求使用新启动、零位且未使能的实例；不要把有前序任务/使能状态的实例当作干净环境。
 
