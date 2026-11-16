@@ -57,7 +57,7 @@ def dispatch(bridge, preset, **extra):
 def test_presets_use_backend_joint_targets_and_default_speed(presets, preset, configured_speed, monkeypatch):
     # Check the configured speed and units, independently of an operator's local setting.
     monkeypatch.setattr('pi_arm_websocket.presets.PRESET_JOINT_SPEED_DEG_S', configured_speed)
-    monkeypatch.setattr('pi_arm_websocket.gateway.PRESET_JOINT_SPEED_DEG_S', configured_speed)
+    monkeypatch.setattr('pi_arm_websocket.commands.PRESET_JOINT_SPEED_DEG_S', configured_speed)
     bridge = Bridge(presets)
     result = dispatch(bridge, preset)
     assert result['task_id'] == 42

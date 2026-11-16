@@ -6,8 +6,10 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 
 | 模块 | 职责 |
 | --- | --- |
-| [gateway.py](pi_arm_websocket/gateway.py) | 进程入口、连接管理、命令分发和状态推送 |
+| [gateway.py](pi_arm_websocket/gateway.py) | 进程入口、WebSocket 连接管理和状态推送 |
 | [ros_bridge.py](pi_arm_websocket/ros_bridge.py) | `pi_arm_websocket` 节点、ROS 客户端、反馈快照与动作生命周期 |
+| [commands.py](pi_arm_websocket/commands.py) | 命令参数/模式校验、单位转换、服务和动作分发 |
+| [rotations.py](pi_arm_websocket/rotations.py) | 命令与反馈共享的角度单位、RPY/四元数换算 |
 | [protocol.py](pi_arm_websocket/protocol.py) | JSON 校验、错误码、字段精度及合法命令 |
 | [points.py](pi_arm_websocket/points.py) | 点位库、版本冲突校验、文件锁/fsync/原子替换 |
 | [frames.py](pi_arm_websocket/frames.py) | 同帧六关节的 URDF FK，包含 mimic、各关节坐标系与 tool0 |
@@ -37,7 +39,9 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 | `axis_test` / `axis_test_heartbeat` / `axis_test_stop` | commissioning 专用单轴测试 |
 | `point_list` / `point_save` / `point_delete` | 点位库读取/存储/删除，不发运动 |
 
-网页目标使用 °、mm；ROS 动作转为 rad、m。RPY 使用固定轴 XYZ，即 `Rz(yaw) Ry(pitch) Rx(roll)`，坐标 base_link、控制点 tool0。预览轨迹 TCP 路径使用 m，不可按 mm 再传入渲染。具体必填字段及限制以 protocol/gateway 实现和 `test/` 为准。
+网页目标使用 °、mm；ROS 动作转为 rad、m。RPY 使用固定轴 XYZ，即 `Rz(yaw) Ry(pitch) Rx(roll)`，坐标 base_link、控制点 tool0。预览轨迹 TCP 路径使用 m，不可按 mm 再传入渲染。具体必填字段及限制以 protocol/commands 实现和 `test/` 为准。
+
+依赖方向为 `gateway → commands / ros_bridge`；两者通过 bridge 的状态、服务和动作接口协作，不反向导入 gateway。入口仍是 `pi_arm_websocket.gateway:main`，原有 `gateway.RosBridge`、`gateway.CommandGateway` 和旋转换算函数的导入方式继续可用。
 
 运动响应里的 task_id 表示“已接受”，终态见后续 state。接受后迟迟拿不到任务号会取消并确认；接受响应晚到也处理取消，不允许返回普通失败却留下无人跟踪的运动。
 
