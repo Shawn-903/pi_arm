@@ -1,6 +1,6 @@
 # pi_arm_tasks
 
-在已有 ROS Service / Action 上组织可复用任务。网页经 WebSocket 调用本包的公共接口，Python 程序和命令行也调用同一接口；本包不打开 CAN，不保存另一份零偏或绕过硬件检查。第一版提供软件标零，后续按实际需要增加任务。
+这个包目前提供软件标零任务，网页、Python 程序和命令行都调用同一套接口。任务复用已有 ROS Service / Action（服务和动作接口）；网页请求经 WebSocket 转发。本包不直接连接 CAN，不另存一套零偏，也不绕过硬件检查。后续按实际需要增加任务。
 
 ## 软件标零
 
@@ -34,7 +34,7 @@ ros2 run pi_arm_tasks pi_arm_zero --confirm-reference \
   --reference-deg 0 100.7 -85.6 0 0 0
 ```
 
-Python API 使用弧度，返回 ROS future；调用方负责 spin，并检查业务结果：
+Python API 使用弧度，返回用于等待结果的 ROS future；调用方需要让 ROS 处理消息（spin），再检查标零是否成功：
 
 ```python
 import rclpy
@@ -61,7 +61,7 @@ finally:
     rclpy.shutdown()
 ```
 
-超时或失联不能当作标零失败且未生效；应核对反馈中的参考编号与持久化文件。任务不会自动重试，硬件请求未返回时拒绝开始另一项标零。
+请求超时或连接中断时，标零仍可能已经生效。应核对反馈中的参考编号与持久化文件，再决定后续操作。任务不会自动重试，硬件请求未返回时拒绝开始另一项标零。
 
 ## 正常运行与参考有效性
 
