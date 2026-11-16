@@ -94,7 +94,8 @@ def main() -> None:
                 flush=True,
             )
         if args.freeze_motion and payload[0] == 0xA4:
-            reply = response(motors[motor_id], bytes([0x9C]) + bytes(7))
+            # Freeze the encoder position, but still acknowledge the A4 command.
+            reply = bytes([0xA4]) + response(motors[motor_id], bytes([0x9C]) + bytes(7))[1:]
         else:
             reply = response(motors[motor_id], payload)
         if reply is not None:

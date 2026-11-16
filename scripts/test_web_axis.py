@@ -25,8 +25,8 @@ def main():
         page.locator('[data-view-target="commissioning"]').click()
         assert page.locator('#motorTestStep').input_value() == '5'
         assert page.locator('#motorTestStep').get_attribute('max') == '5'
-        assert page.locator('#motorTestSpeed').input_value() == '1'
-        assert page.locator('#motorTestSpeed').get_attribute('max') == '1'
+        assert page.locator('#motorTestSpeed').input_value() == '5'
+        assert page.locator('#motorTestSpeed').get_attribute('max') == '10'
         page.locator("#testMotorId").select_option("3")
         page.locator("#testEnableMotor").click()
         positive = page.locator('[data-axis-test="motor"][data-sign="1"]')
@@ -40,7 +40,12 @@ def main():
             page.locator("#axisTestStop").click()
         page.wait_for_function("id => lastState.axis_test.test_id > id && !lastState.axis_test.active", arg=before)
         page.wait_for_function("axisTestRecords.at(-1)?.after !== undefined")
-        assert "acknowledged" in page.locator("#axisTestStatus").inner_text()
+        status = page.locator("#axisTestStatus").inner_text()
+        if args.stall:
+            assert "stopped: operator request" in status and "positions held" in status, status
+        else:
+            assert "succeeded" in status and "0x81 acknowledged" in status, status
+        assert page.evaluate('lastState.motion_stop_failed === false')
         page.locator("#axisObservation").fill("VCAN TEST: observed direction placeholder")
         page.locator("#saveAxisObservation").click()
         page.locator('[data-view-target="diagnostics"]').click()
@@ -49,7 +54,7 @@ def main():
         snapshot = json.loads(Path(download.value.path()).read_text())
         record = snapshot["axis_tests"][-1]
         assert record["request"]["space"] == "motor" and record["request"]["axis_id"] == 3
-        assert record['request']['delta_deg'] == 5 and record['request']['speed_deg_s'] == 1
+        assert record['request']['delta_deg'] == 5 and record['request']['speed_deg_s'] == 5
         if not args.stall:
             assert 'succeeded' in record['after']['axis_test']['status']
             before_angles = record['before']['raw_protocol_positions_deg']
@@ -67,7 +72,9 @@ def main():
             page.wait_for_timeout(1000)
             page.locator("#connectBtn").click()
             page.wait_for_function("id => lastState?.axis_test.test_id > id && !lastState.axis_test.active", arg=before)
-            assert "stopped" in page.locator("#axisTestStatus").inner_text()
+            status = page.locator("#axisTestStatus").inner_text()
+            assert "stopped" in status and "positions held" in status, status
+            assert page.evaluate('lastState.motion_stop_failed === false')
         assert not errors, errors
         browser.close()
     print("PASS axis UI, explicit motor selection, feedback record, observation/export" + (", heartbeat/stop/disconnect" if args.stall else ""))

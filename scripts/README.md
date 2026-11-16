@@ -116,7 +116,14 @@ sudo ip link delete vcan_motion
 | [test_normal_motion_vcan.py](test_normal_motion_vcan.py) | 普通 real Backend 绑定 vcan0、模拟器、匹配的虚拟标定，等 JTC active；默认 WS 8766 |
 | [test_web_axis.py](test_web_axis.py) | commissioning vcan0、HTTP 8001/WS 8766；`--stall` 配合 `--freeze-motion` |
 
-专项虚拟标定不能复制到实机运行。`test_web_axis.py` 仍有旧的 1°/s 默认/上限断言，与现有 5/10 设置不一致，需后续更新测试后再作为验收依据；本轮文档整理没有修改该测试逻辑。
+专项虚拟标定不能复制到实机运行。`test_web_axis.py` 核验电机测试速度默认 5°/s、上限 10°/s，以及请求和导出记录中的实际速度。普通场景检查到达目标后收到 0x81 停止确认；`--stall` 场景检查持续心跳、操作员停止保持和断线停止保持，不能把“停止未确认”当成成功。
+
+两个场景分别启动干净的 commissioning 服务和模拟器，再运行下面对应的命令。普通场景使用默认模拟器，停滞场景使用 `vcan_motor_emulator.py vcan0 --freeze-motion`；冻结运动只阻止编码器位置跟随目标，仍返回正确的 A4 应答。
+
+```bash
+python3 scripts/test_web_axis.py
+python3 scripts/test_web_axis.py --stall
+```
 
 ## 维护规范
 
