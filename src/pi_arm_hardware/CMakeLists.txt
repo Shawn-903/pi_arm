@@ -24,6 +24,7 @@ add_library(pi_arm_hardware SHARED
   src/software_zero.cpp
   src/zero_reference.cpp
   src/backend.cpp
+  src/mock_backend.cpp
   src/axis_test.cpp
   src/hardware_state_message.cpp
   src/pi_arm_system.cpp

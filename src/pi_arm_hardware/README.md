@@ -7,7 +7,9 @@ ros2_control 的 `SystemInterface` 插件包，通过六轴 Backend 将关节命
 | 文件 | 职责 |
 | --- | --- |
 | [pi_arm_system.cpp](src/pi_arm_system.cpp) | 插件生命周期、position/velocity 接口、硬件状态发布和管理服务 |
-| [backend.cpp](src/backend.cpp) | Real/Mock Backend、反馈有效性、租约、停止确认、保持与拖拽示教 |
+| [backend.cpp](src/backend.cpp) | RealBackend、实机反馈有效性、租约、停止确认、保持与拖拽示教 |
+| [mock_backend.cpp](src/mock_backend.cpp) | MockBackend，提供确定性的命令反馈和模拟管理操作 |
+| [backend_common.hpp](src/backend_common.hpp) | 两种后端共用的配置校验、速度限幅和关节与电机依赖关系 |
 | [actuator_coordinates.cpp](src/actuator_coordinates.cpp) | 协议度、减速比、安装方向与输出轴弧度转换 |
 | [calibration.cpp](src/calibration.cpp) | 加载接受的参考、核验配置指纹、计算软件零偏 |
 | [software_zero.cpp](src/software_zero.cpp)、[zero_reference.cpp](src/zero_reference.cpp) | 持久化软件参考、静止采样及整组六轴零偏应用；不写电机 ROM |
