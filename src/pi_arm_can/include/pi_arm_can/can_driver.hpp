@@ -100,10 +100,11 @@ public:
   DriverMode mode() const noexcept {return mode_.load();}
   ManagementOperation management_operation() const noexcept {return operation_.load();}
   bool running() const noexcept {return running_.load();}
+  std::uint64_t connection_generation() const noexcept {return connection_generation_.load();}
   std::string last_error() const;
 
-  bool hold_positions(const std::vector<PositionCommand> & commands);
-  bool enqueue_position_batch(const std::vector<PositionCommand> & commands);
+  bool hold_positions(const std::vector<PositionCommand> & commands, std::uint64_t generation);
+  bool enqueue_position_batch(const std::vector<PositionCommand> & commands, std::uint64_t generation);
   // Purges queued position commands, then sends protocol 0x81 and waits for ACKs.
   bool stop_motors(const std::vector<std::uint8_t> & motor_ids);
   // Non-blocking ACK wait: suitable for faults detected in the control loop.
@@ -112,7 +113,8 @@ public:
   bool wait_for_motor_stop();
   bool execute_management(
     ManagementOperation operation, const std::vector<std::uint8_t> & motor_ids,
-    std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
+    std::chrono::milliseconds timeout = std::chrono::milliseconds{1000},
+    std::uint64_t generation = 0U);
 
   MotorState motor_state(std::uint8_t motor_id) const;
   std::unordered_map<std::uint8_t, MotorState> snapshot() const;
@@ -126,14 +128,18 @@ private:
     std::vector<CanFrame> frames;
     std::shared_ptr<std::promise<bool>> completion;
     bool requires_control{false};
+    std::uint64_t generation{0U};
   };
 
   bool validate_motor_id(std::uint8_t motor_id) const noexcept;
   bool enqueue_batch(TxBatch batch, bool high_priority = false);
   std::vector<CanFrame> make_poll_batch(std::size_t poll_sequence) const;
-  void rx_loop() noexcept;
-  void tx_loop() noexcept;
-  bool write_batch(const std::vector<CanFrame> & frames, bool requires_control = false) noexcept;
+  void io_loop() noexcept;
+  void receive_frame(int timeout_ms) noexcept;
+  void open_socket();
+  void discard_pending_batches() noexcept;
+  bool write_batch(const std::vector<CanFrame> & frames, bool requires_control,
+    std::uint64_t generation) noexcept;
   void discard_pending_control_batches() noexcept;
   void set_fault(const std::string & message) noexcept;
   void close_socket() noexcept;
@@ -151,6 +157,7 @@ private:
   std::atomic<ManagementOperation> operation_{ManagementOperation::NONE};
   std::atomic<bool> running_{false};
   std::atomic<bool> stop_requested_{false};
+  std::atomic<std::uint64_t> connection_generation_{0U};
 
   std::mutex tx_mutex_;
   // Serializes a CONTROL -> MONITORING transition with an in-flight position
@@ -165,8 +172,8 @@ private:
   std::atomic<MotionStopStatus> motion_stop_status_{MotionStopStatus::IDLE};
   std::vector<std::uint8_t> stop_motor_ids_;
   std::chrono::steady_clock::time_point motor_stop_requested_at_{};
-  std::thread rx_thread_;
-  std::thread tx_thread_;
+  // One owner opens/closes the socket and performs I/O, including reconnects.
+  std::thread io_thread_;
   int lease_fd_{-1};
   int socket_fd_{-1};
 };

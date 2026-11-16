@@ -6,6 +6,7 @@
 #include <string>
 #include <sstream>
 #include <atomic>
+#include <algorithm>
 using namespace std::chrono_literals;
 int main(int argc, char **argv) {
   if(argc!=4) return 2;
@@ -108,6 +109,8 @@ int main(int argc, char **argv) {
     std::cout << "op=" << command << " ok=" << ok << " read_us=" << read_us << " q2_deg=" << s.positions_rad[1]*180/3.141592653589793 << " q5_deg=" << s.positions_rad[3]*180/3.141592653589793
       << " q3_deg=" << s.positions_rad[2]*180/3.141592653589793
       << " teaching=" << s.teaching_active << " kin=" << s.kinematics_valid << " control=" << s.control_permitted
+      << " connected=" << s.connected << " driver=" << s.driver_mode
+      << " fresh=" << std::count(s.motor_fresh.begin(), s.motor_fresh.end(), true)
       << " joint_permit=" << s.joint_test_permitted << " active=" << b.axis_test_active()
       << " stop_pending=" << s.motion_stop_pending << " stop_failed=" << s.motion_stop_failed
       << " error=" << s.kinematics_error_code << " detail=" << detail + " | " + b.axis_test_status() << std::endl;

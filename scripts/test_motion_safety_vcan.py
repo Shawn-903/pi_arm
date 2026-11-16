@@ -124,10 +124,10 @@ def command(process, text, ok=True):
 
 
 @contextlib.contextmanager
-def backend(executable, calibration, commissioning=False):
+def backend(executable, calibration, commissioning=False, *, user=None):
     process = subprocess.Popen([str(executable), str(ROOT), str(calibration),
                                 'commissioning' if commissioning else 'normal'],
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, user=user)
     try:
         assert readline(process) == 'READY'
         yield process

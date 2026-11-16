@@ -194,6 +194,10 @@ private:
   pi_arm_transmission::Vector6 last_joint_positions_rad_{};
   std::atomic_bool position_initialized_{false};
   std::atomic_bool control_permitted_{false};
+  std::atomic_uint64_t feedback_generation_{0U};
+  std::atomic_uint64_t motion_generation_{0U};
+  std::uint64_t last_read_generation_{0U};
+  std::uint64_t axis_test_generation_{0U};
   std::atomic_bool teaching_active_{false};
   MotionWriteGate motion_write_gate_;
   std::unique_ptr<pi_arm_can::CanDriver> driver_;

@@ -136,9 +136,20 @@ void CanDriver::start()
             "' is already owned by another Pi Arm process: " + detail);
   }
 
+  mode_.store(DriverMode::FAULT);
+  running_.store(true);
+  try {
+    io_thread_ = std::thread(&CanDriver::io_loop, this);
+  } catch (...) {
+    stop();
+    throw;
+  }
+}
+
+void CanDriver::open_socket()
+{
   const int fd = ::socket(PF_CAN, SOCK_RAW, CAN_RAW);
   if (fd < 0) {
-    release_interface_lease();
     throw std::runtime_error("failed to create SocketCAN socket: " + std::string(std::strerror(errno)));
   }
 
@@ -177,38 +188,28 @@ void CanDriver::start()
     }
   } catch (...) {
     ::close(fd);
-    release_interface_lease();
     throw;
   }
 
   socket_fd_ = fd;
-  running_.store(true);
-  mode_.store(DriverMode::MONITORING);
-  try {
-    rx_thread_ = std::thread(&CanDriver::rx_loop, this);
-    tx_thread_ = std::thread(&CanDriver::tx_loop, this);
-  } catch (...) {
-    stop();
-    throw;
-  }
 }
 
 void CanDriver::stop() noexcept
 {
   stop_requested_.store(true);
   tx_cv_.notify_all();
-  if (socket_fd_ >= 0) {
-    ::shutdown(socket_fd_, SHUT_RDWR);
+  if (io_thread_.joinable()) {
+    io_thread_.join();
   }
-  if (tx_thread_.joinable()) {
-    tx_thread_.join();
-  }
-  if (rx_thread_.joinable()) {
-    rx_thread_.join();
-  }
-  close_socket();
   release_interface_lease();
+  discard_pending_batches();
+  running_.store(false);
+  mode_.store(DriverMode::OFFLINE);
+  operation_.store(ManagementOperation::NONE);
+}
 
+void CanDriver::discard_pending_batches() noexcept
+{
   std::deque<TxBatch> abandoned;
   {
     std::lock_guard<std::mutex> lock(tx_mutex_);
@@ -219,9 +220,6 @@ void CanDriver::stop() noexcept
       try {batch.completion->set_value(false);} catch (...) {}
     }
   }
-  running_.store(false);
-  mode_.store(DriverMode::OFFLINE);
-  operation_.store(ManagementOperation::NONE);
 }
 
 bool CanDriver::set_mode(const DriverMode requested)
@@ -248,7 +246,8 @@ bool CanDriver::set_mode(const DriverMode requested)
   if (config_.read_only && requested == DriverMode::CONTROL) {
     return false;
   }
-  mode_.store(requested);
+  auto expected = current;
+  if (!mode_.compare_exchange_strong(expected, requested)) {return false;}
   if (requested == DriverMode::MONITORING) {
     discard_pending_control_batches();
   }
@@ -290,12 +289,11 @@ bool CanDriver::validate_motor_id(const std::uint8_t motor_id) const noexcept
 
 bool CanDriver::enqueue_batch(TxBatch batch, const bool high_priority)
 {
-  if (!running_.load() || stop_requested_.load() || mode_.load() == DriverMode::FAULT) {
-    return false;
-  }
   {
     std::lock_guard<std::mutex> lock(tx_mutex_);
-    if (tx_queue_.size() >= config_.max_pending_batches) {
+    if (!running_.load() || stop_requested_.load() || mode_.load() == DriverMode::FAULT ||
+      batch.generation != connection_generation_.load() ||
+      tx_queue_.size() >= config_.max_pending_batches) {
       return false;
     }
     if (high_priority) {
@@ -308,7 +306,8 @@ bool CanDriver::enqueue_batch(TxBatch batch, const bool high_priority)
   return true;
 }
 
-bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & commands)
+bool CanDriver::enqueue_position_batch(
+  const std::vector<PositionCommand> & commands, const std::uint64_t generation)
 {
   if (motion_stop_status_.load() == MotionStopStatus::PENDING ||
     motion_stop_status_.load() == MotionStopStatus::FAILED) {return false;}
@@ -317,6 +316,7 @@ bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & comm
     return false;
   }
   TxBatch batch;
+  batch.generation = generation;
   batch.requires_control = true;
   batch.frames.reserve(commands.size());
   try {
@@ -336,12 +336,16 @@ bool CanDriver::enqueue_position_batch(const std::vector<PositionCommand> & comm
   return enqueue_batch(std::move(batch));
 }
 
-bool CanDriver::hold_positions(const std::vector<PositionCommand> & commands)
+bool CanDriver::hold_positions(
+  const std::vector<PositionCommand> & commands, const std::uint64_t generation)
 {
+  std::unique_lock<std::mutex> operation_lock(management_mutex_);
   if (config_.read_only || commands.empty() || mode_.load() != DriverMode::MONITORING ||
+    generation != connection_generation_.load() ||
     motion_stop_status() == MotionStopStatus::PENDING ||
     motion_stop_status() == MotionStopStatus::FAILED) {return false;}
   TxBatch batch;
+  batch.generation = generation;
   batch.completion = std::make_shared<std::promise<bool>>();
   auto sent = batch.completion->get_future();
   try {
@@ -352,17 +356,20 @@ bool CanDriver::hold_positions(const std::vector<PositionCommand> & commands)
     }
   } catch (...) {return false;}
   // Explicit teaching exit, serialized with management; never restore old targets via RUN.
-  mode_.store(DriverMode::EXCLUSIVE_MANAGEMENT);
+  auto expected = DriverMode::MONITORING;
+  if (!mode_.compare_exchange_strong(expected, DriverMode::EXCLUSIVE_MANAGEMENT)) {return false;}
   const auto since = std::chrono::steady_clock::now();
   const bool transmitted = enqueue_batch(std::move(batch), true) &&
     sent.wait_for(std::chrono::seconds(1)) == std::future_status::ready && sent.get();
   // Polling is paused in exclusive management. Resume it after transmission
   // so the fresh angle/status checks below can actually be satisfied.
-  if (mode_.load() != DriverMode::FAULT) {mode_.store(DriverMode::MONITORING);}
+  expected = DriverMode::EXCLUSIVE_MANAGEMENT;
+  mode_.compare_exchange_strong(expected, DriverMode::MONITORING);
   bool confirmed = false;
   if (transmitted) {
     std::unique_lock<std::shared_mutex> lock(state_mutex_);
     confirmed = state_cv_.wait_for(lock, std::chrono::seconds(1), [&]() {
+      if (generation != connection_generation_.load()) {return true;}
       for (const auto & command : commands) {
         const auto & s = states_.at(command.motor_id);
         if (s.position_ack_update <= since || s.angle_update <= since || s.status1_update <= since || s.status2_update <= since ||
@@ -373,7 +380,7 @@ bool CanDriver::hold_positions(const std::vector<PositionCommand> & commands)
       return true;
     });
   }
-  if (mode_.load() != DriverMode::FAULT) {mode_.store(DriverMode::MONITORING);}
+  confirmed = confirmed && generation == connection_generation_.load();
   if (!confirmed) {
     std::vector<std::uint8_t> ids;
     for (const auto & command : commands) {ids.push_back(command.motor_id);}
@@ -407,6 +414,7 @@ bool CanDriver::request_motor_stop(
   }
   motor_stop_requested_at_ = std::chrono::steady_clock::now();
   TxBatch batch;
+  batch.generation = connection_generation_.load();
   for (const auto id : motor_ids) {batch.frames.push_back(make_request(id, Opcode::MOTOR_STOP));}
   if (!enqueue_batch(std::move(batch), true)) {
     motion_stop_status_.store(MotionStopStatus::FAILED);
@@ -424,11 +432,13 @@ void CanDriver::refresh_motor_stop()
       return states_.at(id).stop_ack_update > motor_stop_requested_at_;
     });
   if (confirmed) {
-    motion_stop_status_.store(MotionStopStatus::CONFIRMED);
+    auto expected = MotionStopStatus::PENDING;
+    motion_stop_status_.compare_exchange_strong(expected, MotionStopStatus::CONFIRMED);
   } else if (std::chrono::steady_clock::now() - motor_stop_requested_at_ >=
     std::chrono::milliseconds(500))
   {
-    motion_stop_status_.store(MotionStopStatus::FAILED);
+    auto expected = MotionStopStatus::PENDING;
+    motion_stop_status_.compare_exchange_strong(expected, MotionStopStatus::FAILED);
   }
   stop_cv_.notify_all();
 }
@@ -452,7 +462,7 @@ bool CanDriver::wait_for_motor_stop()
 
 bool CanDriver::execute_management(
   const ManagementOperation operation, const std::vector<std::uint8_t> & motor_ids,
-  const std::chrono::milliseconds timeout)
+  const std::chrono::milliseconds timeout, std::uint64_t generation)
 {
   if (config_.read_only || operation == ManagementOperation::NONE || motor_ids.empty() ||
     timeout.count() <= 0)
@@ -460,6 +470,8 @@ bool CanDriver::execute_management(
     return false;
   }
   std::unique_lock<std::mutex> operation_lock(management_mutex_);
+  if (generation == 0U) {generation = connection_generation_.load();}
+  if (generation != connection_generation_.load()) {return false;}
   const DriverMode previous = mode_.load();
   if (operation == ManagementOperation::MOTOR_RUN &&
     (motion_stop_status_.load() == MotionStopStatus::PENDING ||
@@ -487,9 +499,14 @@ bool CanDriver::execute_management(
   const bool exclusive = operation != ManagementOperation::CLEAR_ERROR_FLAGS;
   operation_.store(operation);
   if (exclusive) {
-    mode_.store(DriverMode::EXCLUSIVE_MANAGEMENT);
+    auto expected = operation == ManagementOperation::MOTOR_REBOOT ? DriverMode::MONITORING : previous;
+    if (!mode_.compare_exchange_strong(expected, DriverMode::EXCLUSIVE_MANAGEMENT)) {
+      operation_.store(ManagementOperation::NONE);
+      return false;
+    }
   }
   TxBatch batch;
+  batch.generation = generation;
   batch.completion = std::make_shared<std::promise<bool>>();
   auto completion = batch.completion->get_future();
   batch.frames.reserve(motor_ids.size());
@@ -500,7 +517,9 @@ bool CanDriver::execute_management(
 
   if (!enqueue_batch(std::move(batch), true)) {
     if (exclusive) {
-      mode_.store(operation == ManagementOperation::MOTOR_REBOOT ? DriverMode::MONITORING : previous);
+      auto expected = DriverMode::EXCLUSIVE_MANAGEMENT;
+      mode_.compare_exchange_strong(expected,
+        operation == ManagementOperation::MOTOR_REBOOT ? DriverMode::MONITORING : previous);
     }
     operation_.store(ManagementOperation::NONE);
     return false;
@@ -511,10 +530,12 @@ bool CanDriver::execute_management(
     return false;
   }
   const bool success = completion.get();
-  if (exclusive && mode_.load() != DriverMode::FAULT) {
-    mode_.store(operation == ManagementOperation::MOTOR_REBOOT ? DriverMode::MONITORING : previous);
+  if (exclusive) {
+    auto expected = DriverMode::EXCLUSIVE_MANAGEMENT;
+    mode_.compare_exchange_strong(expected,
+      operation == ManagementOperation::MOTOR_REBOOT ? DriverMode::MONITORING : previous);
   }
-  if (!success) {
+  if (!success || generation != connection_generation_.load()) {
     operation_.store(ManagementOperation::NONE);
     return false;
   }
@@ -534,6 +555,7 @@ bool CanDriver::execute_management(
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     const auto fresh_after = std::chrono::steady_clock::now();
     TxBatch off;
+    off.generation = generation;
     off.completion = std::make_shared<std::promise<bool>>();
     auto off_result = off.completion->get_future();
     for (const auto id : motor_ids) {off.frames.push_back(make_request(id, Opcode::MOTOR_OFF));}
@@ -546,6 +568,7 @@ bool CanDriver::execute_management(
     }
     std::unique_lock<std::shared_mutex> lock(state_mutex_);
     const bool recovered = state_cv_.wait_for(lock, timeout, [&]() {
+        if (generation != connection_generation_.load()) {return true;}
         for (const auto id : motor_ids) {
           const auto & state = states_.at(id);
           if (!state.angle_valid || !state.status1_valid || !state.status2_valid ||
@@ -559,15 +582,17 @@ bool CanDriver::execute_management(
     lock.unlock();
     operation_.store(ManagementOperation::NONE);
     std::lock_guard<std::mutex> error_lock(error_mutex_);
-    last_error_ = recovered ? "" :
+    const bool confirmed = recovered && generation == connection_generation_.load();
+    last_error_ = confirmed ? "" :
       "reboot sent without ACK; fresh angle/status, cleared faults or disabled state not confirmed";
-    return recovered;
+    return confirmed;
   }
 
   std::unique_lock<std::shared_mutex> state_lock(state_mutex_);
   const bool confirmed = state_cv_.wait_for(
     state_lock, timeout,
-    [this, operation, &motor_ids, &previous_updates]() {
+    [this, operation, generation, &motor_ids, &previous_updates]() {
+      if (generation != connection_generation_.load()) {return true;}
       for (const auto id : motor_ids) {
         const auto & state = states_.at(id);
         if (operation == ManagementOperation::SET_CURRENT_POSITION_ZERO) {
@@ -596,11 +621,11 @@ bool CanDriver::execute_management(
       return true;
     });
   operation_.store(ManagementOperation::NONE);
-  if (!confirmed) {
+  if (!confirmed || generation != connection_generation_.load()) {
     std::lock_guard<std::mutex> lock(error_mutex_);
     last_error_ = "management command was transmitted but device state was not confirmed";
   }
-  return confirmed;
+  return confirmed && generation == connection_generation_.load();
 }
 
 MotorState CanDriver::motor_state(const std::uint8_t motor_id) const
@@ -630,17 +655,57 @@ std::vector<CanFrame> CanDriver::make_poll_batch(const std::size_t sequence) con
   return frames;
 }
 
-void CanDriver::tx_loop() noexcept
+void CanDriver::io_loop() noexcept
 {
   auto next_poll = std::chrono::steady_clock::now();
+  auto next_connect = next_poll;
   std::size_t poll_sequence = 0U;
   while (!stop_requested_.load()) {
+    if (mode_.load() == DriverMode::FAULT) {
+      close_socket();
+      discard_pending_batches();
+      {
+        std::unique_lock<std::mutex> lock(tx_mutex_);
+        tx_cv_.wait_until(lock, next_connect, [this]() {return stop_requested_.load();});
+      }
+      if (stop_requested_.load()) {break;}
+      next_connect = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+      // Finish any failed management call before opening another connection.
+      // Its queued commands and delayed reboot follow-up must never cross it.
+      std::unique_lock<std::mutex> operation_lock(management_mutex_, std::try_to_lock);
+      if (operation_lock.owns_lock()) {
+        try {
+          open_socket();
+          {
+            std::unique_lock<std::shared_mutex> lock(state_mutex_);
+            for (auto & [id, state] : states_) {
+              state = MotorState{};
+              state.motor_id = id;
+            }
+          }
+          ++connection_generation_;
+          {
+            std::lock_guard<std::mutex> lock(error_mutex_);
+            last_error_.clear();
+          }
+          mode_.store(DriverMode::MONITORING);
+          next_poll = std::chrono::steady_clock::now();
+          poll_sequence = 0U;
+        } catch (const std::exception & error) {
+          set_fault(error.what());
+        }
+        operation_lock.unlock();
+      }
+      if (mode_.load() == DriverMode::FAULT) {
+        std::unique_lock<std::mutex> lock(tx_mutex_);
+        tx_cv_.wait_for(lock, std::chrono::seconds(1), [this]() {return stop_requested_.load();});
+        continue;
+      }
+    }
     TxBatch batch;
     bool have_batch = false;
     {
-      std::unique_lock<std::mutex> lock(tx_mutex_);
-      tx_cv_.wait_until(
-        lock, next_poll, [this]() {return stop_requested_.load() || !tx_queue_.empty();});
+      std::lock_guard<std::mutex> lock(tx_mutex_);
       if (stop_requested_.load()) {
         break;
       }
@@ -652,29 +717,34 @@ void CanDriver::tx_loop() noexcept
     }
 
     if (have_batch) {
-      const bool success = write_batch(batch.frames, batch.requires_control);
+      const bool success = write_batch(batch.frames, batch.requires_control, batch.generation);
       if (batch.completion) {
         try {batch.completion->set_value(success);} catch (...) {}
       }
-      if (!success && (!batch.requires_control || mode_.load() == DriverMode::FAULT)) {
-        break;
-      }
+      if (mode_.load() == DriverMode::FAULT) {continue;}
     }
 
     const auto now = std::chrono::steady_clock::now();
     if (now >= next_poll && mode_.load() != DriverMode::EXCLUSIVE_MANAGEMENT) {
-      if (!write_batch(make_poll_batch(poll_sequence++))) {
-        break;
-      }
+      if (!write_batch(make_poll_batch(poll_sequence++), false, connection_generation_.load())) {continue;}
       do {
         next_poll += config_.state_poll_interval;
       } while (next_poll <= now);
     }
+    // Socket ownership stays in this thread. Bound command latency while also
+    // draining queued replies immediately when poll reports readable data.
+    const auto until_poll = std::chrono::duration_cast<std::chrono::milliseconds>(
+      next_poll - std::chrono::steady_clock::now()).count();
+    receive_frame(mode_.load() == DriverMode::EXCLUSIVE_MANAGEMENT ? 10 :
+      static_cast<int>(std::clamp<std::int64_t>(until_poll, 0, 10)));
   }
+  close_socket();
+  discard_pending_batches();
 }
 
 bool CanDriver::write_batch(
-  const std::vector<CanFrame> & frames, const bool requires_control) noexcept
+  const std::vector<CanFrame> & frames, const bool requires_control,
+  const std::uint64_t generation) noexcept
 {
   std::unique_lock<std::mutex> control_lock(control_tx_mutex_, std::defer_lock);
   if (requires_control) {
@@ -686,6 +756,8 @@ bool CanDriver::write_batch(
     }
   }
   for (const auto & frame : frames) {
+    if (stop_requested_.load() || mode_.load() == DriverMode::FAULT ||
+      generation != connection_generation_.load()) {return false;}
     struct can_frame native {};
     native.can_id = frame.id;
     native.can_dlc = static_cast<__u8>(frame.data.size());
@@ -704,46 +776,46 @@ bool CanDriver::write_batch(
   return true;
 }
 
-void CanDriver::rx_loop() noexcept
+void CanDriver::receive_frame(const int timeout_ms) noexcept
 {
-  while (!stop_requested_.load()) {
+  if (!stop_requested_.load()) {
     struct pollfd descriptor {socket_fd_, POLLIN, 0};
-    const int result = ::poll(&descriptor, 1, 100);
+    const int result = ::poll(&descriptor, 1, timeout_ms);
     if (result < 0) {
       if (errno == EINTR) {
-        continue;
+        return;
       }
       set_fault("SocketCAN poll failed: " + std::string(std::strerror(errno)));
-      break;
+      return;
     }
     if (result == 0) {
-      continue;
+      return;
     }
     if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
       if (!stop_requested_.load()) {
         set_fault("SocketCAN receive socket reported an error");
       }
-      break;
+      return;
     }
     if ((descriptor.revents & POLLIN) == 0) {
-      continue;
+      return;
     }
 
     struct can_frame native {};
     const ssize_t received = ::read(socket_fd_, &native, sizeof(native));
     if (received < 0 && errno == EINTR) {
-      continue;
+      return;
     }
     if (received != static_cast<ssize_t>(sizeof(native))) {
       if (!stop_requested_.load()) {
         set_fault("SocketCAN read returned an invalid frame");
       }
-      break;
+      return;
     }
     if ((native.can_id & (CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG)) != 0U ||
       native.can_dlc != kCanPayloadSize)
     {
-      continue;
+      return;
     }
     CanFrame frame;
     frame.id = native.can_id & CAN_SFF_MASK;
@@ -819,9 +891,23 @@ void CanDriver::set_fault(const std::string & message) noexcept
     std::lock_guard<std::mutex> lock(error_mutex_);
     last_error_ = message;
   }
-  mode_.store(DriverMode::FAULT);
-  stop_requested_.store(true);
+  const auto previous = mode_.exchange(DriverMode::FAULT);
+  if (previous != DriverMode::FAULT) {++connection_generation_;}
+  {
+    std::unique_lock<std::shared_mutex> lock(state_mutex_);
+    for (auto & [id, state] : states_) {
+      (void)id;
+      state.angle_valid = state.status1_valid = state.status2_valid = state.zero_ack_valid = false;
+      state.stationary_samples = 0U;
+    }
+  }
+  if (previous == DriverMode::CONTROL || previous == DriverMode::EXCLUSIVE_MANAGEMENT ||
+    motion_stop_status_.load() == MotionStopStatus::PENDING) {
+    motion_stop_status_.store(MotionStopStatus::FAILED);
+  }
   tx_cv_.notify_all();
+  state_cv_.notify_all();
+  stop_cv_.notify_all();
 }
 
 void CanDriver::close_socket() noexcept

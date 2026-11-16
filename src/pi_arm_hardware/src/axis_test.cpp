@@ -42,6 +42,7 @@ ManagementResult RealBackend::start_axis_test(
   const std::string & space, const int axis_id, const double delta_deg, const double speed_deg_s)
 {
   if (axis_test_active_) {return {false, 2003, "another axis test is active"};}
+  const auto generation = driver_ ? driver_->connection_generation() : 0U;
   if (axis_test_stop_failed_) {return {false, 2001, "previous stop not acknowledged; retry Stop first"};}
   if (!axis_test_raw_ready(true)) {
     return {false, 2001, "axis test requires commissioning mode and six fresh, error-free, stationary motors"};
@@ -185,11 +186,12 @@ ManagementResult RealBackend::start_axis_test(
   axis_test_started_ = axis_test_heartbeat_ = std::chrono::steady_clock::now();
   axis_test_timeout_sec_ = encoded_duration + 2.0;
   axis_test_active_ = true;
+  axis_test_generation_ = generation;
   stop_hold_active_.store(false);
   ++axis_test_id_;
   axis_test_status_ = "running: " + space + " axis=" + std::to_string(axis_id) +
     " delta_deg=" + std::to_string(delta_deg);
-  if (!driver_->enqueue_position_batch(commands)) {
+  if (!driver_->enqueue_position_batch(commands, generation)) {
     stop_axis_test("failed: CAN position enqueue rejected");
     return {false, 2002, axis_test_status_};
   }
@@ -232,7 +234,7 @@ void RealBackend::update_axis_test(const HardwareSample & sample)
   if (std::chrono::duration<double>(now - axis_test_heartbeat_).count() > 0.8) {
     stop_axis_test("stopped: browser heartbeat expired", true); return;
   }
-  if (!axis_test_raw_ready(false) ||
+  if (axis_test_generation_ != driver_->connection_generation() || !axis_test_raw_ready(false) ||
     (axis_test_space_ == "joint" && (!sample.calibrated || !sample.kinematics_valid)))
   {stop_axis_test("failed: feedback unavailable or fault"); return;}
   if (std::chrono::duration<double>(now - axis_test_started_).count() > axis_test_timeout_sec_) {

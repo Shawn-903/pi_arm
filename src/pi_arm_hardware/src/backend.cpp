@@ -271,6 +271,15 @@ bool RealBackend::read(HardwareSample & sample) noexcept
 
   const auto feedback_hold_epoch = stop_hold_epoch_.load();
   try {
+    const auto generation = driver_->connection_generation();
+    if (generation != last_read_generation_) {
+      control_permitted_.store(false);
+      disarm_motion(0U);
+      for (auto & detector : motor_motion_detectors_) {detector.reset();}
+      for (auto & detector : joint_motion_detectors_) {detector.reset();}
+      position_initialized_ = false;
+      last_read_generation_ = generation;
+    }
     const auto snapshot = driver_->snapshot();
     const auto now = std::chrono::steady_clock::now();
     const auto seconds = [](const auto time) {
@@ -549,10 +558,12 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       sample.error_message = sample.kinematics_error_message;
     }
     sample.teaching_active = teaching_active_.load();
-    sample.control_permitted = !sample.teaching_active &&
+    sample.control_permitted = sample.connected &&
+      generation == driver_->connection_generation() && !sample.teaching_active &&
       config_.allow_real_control && calibration_.valid && sample.kinematics_valid &&
       all_enabled && all_fresh && !any_motor_error && !stopping && !stop_failed;
 
+    feedback_generation_.store(generation);
     control_permitted_.store(sample.control_permitted);
     const bool commissioning_hold = config_.commissioning && stop_hold_active_.load() &&
       all_fresh && !any_motor_error && !stop_failed &&
@@ -650,6 +661,7 @@ MotionArmResult RealBackend::stop_and_hold(const std::vector<std::uint8_t> & mot
     if (!driver_->set_mode(pi_arm_can::DriverMode::MONITORING)) {
       return fail("cannot close the previous command stream");
     }
+    const auto generation = driver_->connection_generation();
     const auto snapshot = driver_->snapshot();
     const auto now = std::chrono::steady_clock::now();
     const bool all_off = std::all_of(motor_ids.begin(), motor_ids.end(), [&](const auto id) {
@@ -693,7 +705,7 @@ MotionArmResult RealBackend::stop_and_hold(const std::vector<std::uint8_t> & mot
     // Direct A4 replacement preserves position control; no torque-release 0x81
     // is sent on the healthy soft-stop path. ACK + fresh stationary feedback
     // must confirm the captured targets before reporting success.
-    if (!driver_->hold_positions(commands)) {return fail("captured position hold was not acknowledged/settled");}
+    if (!driver_->hold_positions(commands, generation)) {return fail("captured position hold was not acknowledged/settled");}
     normal_motion_sent_ = true;
     stop_hold_failed_.store(false);
     stop_hold_active_.store(true);
@@ -716,6 +728,7 @@ MotionArmResult RealBackend::set_motion_armed(
     std::lock_guard<std::mutex> lock(motion_mutex_);
     if (armed || lease_id == 0U || !motion_write_gate_.armed() ||
       motion_write_gate_.active_lease_id() != lease_id || !control_permitted_.load() ||
+      (driver_ && motion_generation_.load() != driver_->connection_generation()) ||
       !driver_ || teaching_active_.load() || driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::PENDING ||
       driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED) {
       return {false, motion_write_gate_.armed(), "invalid hold release or hardware not ready"};
@@ -740,7 +753,7 @@ MotionArmResult RealBackend::set_motion_armed(
         commands.push_back({actuator.motor_id, state.protocol_angle_deg,
           std::max(1.0, std::floor(std::abs(output_velocity_to_protocol_dps(0.017453292519943295, actuator))))});
       }
-      if (!driver_->hold_positions(commands)) {return {false, true, "current-position hold not confirmed"};}
+      if (!driver_->hold_positions(commands, motion_generation_.load())) {return {false, true, "current-position hold not confirmed"};}
       normal_motion_sent_ = true;
     }
     motion_write_gate_.disarm(lease_id);
@@ -772,7 +785,8 @@ MotionArmResult RealBackend::set_motion_armed(
     reboot_reference_uncertain_.load() || stop_hold_failed_.load()) {
     return {false, false, "real-control prerequisites are not satisfied"};
   }
-  if (!driver_ || !driver_->running() ||
+  const auto generation = feedback_generation_.load();
+  if (!driver_ || !driver_->running() || generation != driver_->connection_generation() ||
     (driver_->mode() != pi_arm_can::DriverMode::MONITORING &&
     driver_->mode() != pi_arm_can::DriverMode::CONTROL))
   {
@@ -793,6 +807,7 @@ MotionArmResult RealBackend::set_motion_armed(
       "invalid/conflicting motion lease or no finite idle command baseline"};
   }
   output_speed_limit_rad_s_ = speed_limit;
+  motion_generation_.store(generation);
   stop_hold_active_.store(false);
   {
     std::lock_guard<std::mutex> feedback_lock(feedback_mutex_);
@@ -826,7 +841,7 @@ bool RealBackend::write(
     motion_write_gate_.observe_idle(positions_rad, velocities_rad_s);
     return true;
   }
-  if (!control_permitted_.load()) {
+  if (!control_permitted_.load() || motion_generation_.load() != driver_->connection_generation()) {
     disarm_motion(0U);
     return true;
   }
@@ -842,6 +857,7 @@ bool RealBackend::write(
     return false;
   }
   const auto lease_id = motion_write_gate_.active_lease_id();
+  const auto generation = motion_generation_.load();
   pi_arm_transmission::Vector6 recovery_start{};
   double output_speed_limit = 0.0;
   {
@@ -940,10 +956,12 @@ bool RealBackend::write(
     if (!motion_write_gate_.armed() || motion_write_gate_.active_lease_id() != lease_id ||
       !control_permitted_.load()) {return true;}
     if (!driver_->set_mode(pi_arm_can::DriverMode::CONTROL)) {return true;}
-    if (!driver_->enqueue_position_batch(commands)) {
+    if (!driver_->enqueue_position_batch(commands, generation)) {
       motion_lock.unlock();
       if (!motion_write_gate_.armed() ||
-        driver_->mode() == pi_arm_can::DriverMode::MONITORING)
+        driver_->mode() == pi_arm_can::DriverMode::MONITORING ||
+        generation != driver_->connection_generation() ||
+        driver_->mode() == pi_arm_can::DriverMode::FAULT)
       {
         // A concurrent cancel/stop revoked the lease after this cycle began.
         // Treat the dropped batch as the intended fail-closed outcome, not as
@@ -982,6 +1000,7 @@ ManagementResult RealBackend::manage(
   if (!driver_) {
     return {false, 2, "CAN driver is not configured"};
   }
+  const auto generation = driver_->connection_generation();
   if (operation == pi_arm_can::ManagementOperation::MOTOR_REBOOT && motor_id <= 0) {
     return {false, 1004, "reboot requires one explicit motor_id"};
   }
@@ -1032,7 +1051,7 @@ ManagementResult RealBackend::manage(
     }
     const bool previously_uncertain = reboot_reference_uncertain_.exchange(true);
     control_permitted_.store(false);
-    if (!driver_->execute_management(operation, ids)) {
+    if (!driver_->execute_management(operation, ids, std::chrono::milliseconds(1000), generation)) {
       return {false, 2002, driver_->last_error() + "; verify position reference before resuming"};
     }
     const auto after = driver_->snapshot();
@@ -1050,7 +1069,7 @@ ManagementResult RealBackend::manage(
     }
     return {true, 0, "reboot command sent (no ACK); fresh feedback recovered, errors clear, motor disabled; enable separately"};
   }
-  if (!driver_->execute_management(operation, ids)) {
+  if (!driver_->execute_management(operation, ids, std::chrono::milliseconds(1000), generation)) {
     const auto detail = driver_->last_error();
     return {false, 3, detail.empty() ? "management command was rejected" : detail};
   }
@@ -1082,6 +1101,7 @@ ManagementResult RealBackend::set_teaching(const bool enabled) noexcept
     current.motion_stop_pending || current.motion_stop_failed || reboot_reference_uncertain_.load()) {
     return {false, 2001, "fresh valid calibration/kinematics required to hold current pose"};
   }
+  const auto generation = driver_->connection_generation();
   const auto snapshot = driver_->snapshot();
   const auto now = std::chrono::steady_clock::now();
   std::vector<pi_arm_can::PositionCommand> commands;
@@ -1100,7 +1120,7 @@ ManagementResult RealBackend::set_teaching(const bool enabled) noexcept
   }
   // Services are serialized by the auxiliary executor. The control loop is
   // disarmed; no old controller target can overwrite these captured targets.
-  if (!driver_->hold_positions(commands)) {
+  if (!driver_->hold_positions(commands, generation)) {
     return {false, 2002, "failed to confirm current-position hold; teaching remains active"};
   }
   {std::lock_guard<std::mutex> lock(motion_mutex_); normal_motion_sent_ = true;}

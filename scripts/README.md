@@ -42,6 +42,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | 软件标零计算、持久化或任务入口 | 硬件 `test_backend` 中 `SoftwareZero.*` 及相关坐标测试；`test_software_zero_vcan.py` 验证生产后端；任务/网页变化选择客户端和网页专项入口 |
 | manager 到位、停止或取消 | [manager 测试目录](../src/pi_arm_manager/test/) 中对应单测；涉及编排、Action 或并发时加 `test_arrival_integration.py` |
 | 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
+| CAN 断线重连、接口迟到或重建 | `test_can_recovery_vcan.py`，验证反馈恢复、旧授权失效和停止未确认状态保留 |
 | 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
 | ROS 接口、构建或依赖 | 重建受影响包及消费者，运行对应单测和受影响集成路径；范围跨包时扩大到依赖包 |
 | 网页模型导出或三维显示 | `test_web_viewer.py`；改变模型源时同时检查对应 description / transmission 测试 |
@@ -118,6 +119,12 @@ source install/setup.bash
 python3 scripts/test_motion_safety_vcan.py
 python3 scripts/test_reboot_vcan.py
 python3 scripts/test_rebind_cable_directions.py
+```
+
+[CAN 重连专项检查](test_can_recovery_vcan.py) 需要独立环境且启动前不存在 `vcan0`。脚本以 sudo 创建、断开、重建并清理自己的虚拟接口，后端仍以调用 sudo 的用户运行：
+
+```bash
+sudo bash -c 'source /opt/ros/jazzy/setup.bash && source install/setup.bash && PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_can_recovery_vcan.py'
 ```
 
 前两个脚本自己建立模拟器并调用生产 RealBackend，固定/核验 vcan0，不需要另启实机服务；应顺序运行，不能与其他驱动或模拟器争用 vcan0。方向重绑定测试是离线文件测试。
