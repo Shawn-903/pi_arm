@@ -13,6 +13,7 @@ ros2_control 的 `SystemInterface` 插件包，通过六轴 Backend 将关节命
 | [software_zero.cpp](src/software_zero.cpp)、[zero_reference.cpp](src/zero_reference.cpp) | 持久化软件参考、静止采样及整组六轴零偏应用；不写电机 ROM |
 | [axis_test.cpp](src/axis_test.cpp) | 独立电机/关节方向测试及心跳、行程、编码后路径检查 |
 | [monitor_node.cpp](src/monitor_node.cpp) | `pi_arm_hardware_monitor_node`，只读或 commissioning 入口 |
+| [hardware_state_message.cpp](src/hardware_state_message.cpp) | 正常控制、只读和 commissioning 共用的硬件状态消息转换 |
 | [motion_write_gate.hpp](include/pi_arm_hardware/motion_write_gate.hpp) | 新控制器命令与当前运动租约匹配，隔离旧目标 |
 | [motion_detector.hpp](include/pi_arm_hardware/motion_detector.hpp) | 基于新鲜编码器角度和持续速度的反馈运动判定、防抖与稳定期 |
 

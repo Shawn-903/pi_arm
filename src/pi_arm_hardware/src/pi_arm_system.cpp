@@ -1,4 +1,5 @@
 #include "pi_arm_hardware/pi_arm_system.hpp"
+#include "pi_arm_hardware/hardware_state_message.hpp"
 
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
 #include <pluginlib/class_list_macros.hpp>
@@ -92,237 +93,6 @@ std::string string_parameter_or(
 {
   const auto found = parameters.find(name);
   return found == parameters.end() ? fallback : found->second;
-}
-
-#define PI_ARM_DEFINE_HAS_FIELD(field) \
-  template<typename T, typename = void> struct has_##field : std::false_type {}; \
-  template<typename T> struct has_##field<T, std::void_t<decltype(std::declval<T &>().field)>> \
-  : std::true_type {}
-
-PI_ARM_DEFINE_HAS_FIELD(header);
-PI_ARM_DEFINE_HAS_FIELD(stamp);
-PI_ARM_DEFINE_HAS_FIELD(backend);
-PI_ARM_DEFINE_HAS_FIELD(driver_mode);
-PI_ARM_DEFINE_HAS_FIELD(management_operation);
-PI_ARM_DEFINE_HAS_FIELD(connected);
-PI_ARM_DEFINE_HAS_FIELD(joint_names);
-PI_ARM_DEFINE_HAS_FIELD(motor_ids);
-PI_ARM_DEFINE_HAS_FIELD(positions);
-PI_ARM_DEFINE_HAS_FIELD(current_joint_angles);
-PI_ARM_DEFINE_HAS_FIELD(velocities);
-PI_ARM_DEFINE_HAS_FIELD(current_speeds);
-PI_ARM_DEFINE_HAS_FIELD(enabled);
-PI_ARM_DEFINE_HAS_FIELD(has_error);
-PI_ARM_DEFINE_HAS_FIELD(errors);
-PI_ARM_DEFINE_HAS_FIELD(in_motion);
-PI_ARM_DEFINE_HAS_FIELD(moving);
-PI_ARM_DEFINE_HAS_FIELD(fresh);
-PI_ARM_DEFINE_HAS_FIELD(error_codes);
-PI_ARM_DEFINE_HAS_FIELD(ages_sec);
-PI_ARM_DEFINE_HAS_FIELD(last_update_ages_sec);
-PI_ARM_DEFINE_HAS_FIELD(motor_enabled);
-PI_ARM_DEFINE_HAS_FIELD(motor_errors);
-PI_ARM_DEFINE_HAS_FIELD(motor_moving);
-PI_ARM_DEFINE_HAS_FIELD(motor_fresh);
-PI_ARM_DEFINE_HAS_FIELD(motor_error_codes);
-PI_ARM_DEFINE_HAS_FIELD(motor_ages_sec);
-PI_ARM_DEFINE_HAS_FIELD(calibrated);
-PI_ARM_DEFINE_HAS_FIELD(kinematics_valid);
-PI_ARM_DEFINE_HAS_FIELD(control_permitted);
-PI_ARM_DEFINE_HAS_FIELD(motion_stop_pending);
-PI_ARM_DEFINE_HAS_FIELD(motion_stop_failed);
-PI_ARM_DEFINE_HAS_FIELD(calibration_id);
-PI_ARM_DEFINE_HAS_FIELD(software_zero_id);
-PI_ARM_DEFINE_HAS_FIELD(raw_protocol_positions_deg);
-PI_ARM_DEFINE_HAS_FIELD(raw_output_positions_rad);
-PI_ARM_DEFINE_HAS_FIELD(software_output_offsets_rad);
-PI_ARM_DEFINE_HAS_FIELD(model_output_positions_rad);
-PI_ARM_DEFINE_HAS_FIELD(kinematics_error_code);
-PI_ARM_DEFINE_HAS_FIELD(kinematics_error_axis);
-PI_ARM_DEFINE_HAS_FIELD(kinematics_error_value);
-PI_ARM_DEFINE_HAS_FIELD(kinematics_error_message);
-PI_ARM_DEFINE_HAS_FIELD(all_enabled);
-PI_ARM_DEFINE_HAS_FIELD(any_error);
-PI_ARM_DEFINE_HAS_FIELD(any_in_motion);
-PI_ARM_DEFINE_HAS_FIELD(error_message);
-PI_ARM_DEFINE_HAS_FIELD(message);
-PI_ARM_DEFINE_HAS_FIELD(diagnostic);
-
-#undef PI_ARM_DEFINE_HAS_FIELD
-
-template<typename MessageT>
-void fill_hardware_state_message(
-  MessageT & message, const HardwareSample & sample,
-  const std::vector<std::string> & joint_names,
-  const std::vector<ActuatorConfig> & actuators,
-  const std::string & backend, const rclcpp::Time & now)
-{
-  if constexpr (has_header<MessageT>::value) {
-    message.header.stamp = now;
-  }
-  if constexpr (has_stamp<MessageT>::value) {
-    message.stamp = now;
-  }
-  if constexpr (has_backend<MessageT>::value) {
-    message.backend = backend;
-  }
-  if constexpr (has_driver_mode<MessageT>::value) {
-    message.driver_mode = sample.driver_mode;
-  }
-  if constexpr (has_management_operation<MessageT>::value) {
-    message.management_operation = sample.management_operation;
-  }
-  if constexpr (has_connected<MessageT>::value) {
-    message.connected = sample.connected;
-  }
-  if constexpr (has_joint_names<MessageT>::value) {
-    message.joint_names = joint_names;
-  }
-  if constexpr (has_motor_ids<MessageT>::value) {
-    message.motor_ids.clear();
-    for (const auto & actuator : actuators) {
-      message.motor_ids.push_back(actuator.motor_id);
-    }
-  }
-  if constexpr (has_positions<MessageT>::value) {
-    message.positions = sample.positions_rad;
-  }
-  if constexpr (has_current_joint_angles<MessageT>::value) {
-    message.current_joint_angles = sample.positions_rad;
-  }
-  if constexpr (has_velocities<MessageT>::value) {
-    message.velocities = sample.velocities_rad_s;
-  }
-  if constexpr (has_current_speeds<MessageT>::value) {
-    message.current_speeds = sample.velocities_rad_s;
-  }
-  if constexpr (has_enabled<MessageT>::value) {
-    message.enabled = sample.enabled;
-  }
-  if constexpr (has_has_error<MessageT>::value) {
-    message.has_error = sample.has_error;
-  }
-  if constexpr (has_errors<MessageT>::value) {
-    message.errors = sample.has_error;
-  }
-  if constexpr (has_in_motion<MessageT>::value) {
-    message.in_motion = sample.in_motion;
-  }
-  if constexpr (has_moving<MessageT>::value) {
-    message.moving = sample.in_motion;
-  }
-  if constexpr (has_fresh<MessageT>::value) {
-    message.fresh = sample.fresh;
-  }
-  if constexpr (has_error_codes<MessageT>::value) {
-    message.error_codes = sample.error_codes;
-  }
-  if constexpr (has_ages_sec<MessageT>::value) {
-    message.ages_sec = sample.ages_sec;
-  }
-  if constexpr (has_last_update_ages_sec<MessageT>::value) {
-    message.last_update_ages_sec = sample.ages_sec;
-  }
-  if constexpr (has_motor_enabled<MessageT>::value) {
-    message.motor_enabled = sample.motor_enabled;
-  }
-  if constexpr (has_motor_errors<MessageT>::value) {
-    message.motor_errors = sample.motor_has_error;
-  }
-  if constexpr (has_motor_moving<MessageT>::value) {
-    message.motor_moving = sample.motor_in_motion;
-  }
-  if constexpr (has_motor_fresh<MessageT>::value) {
-    message.motor_fresh = sample.motor_fresh;
-  }
-  if constexpr (has_motor_error_codes<MessageT>::value) {
-    message.motor_error_codes = sample.motor_error_codes;
-  }
-  if constexpr (has_motor_ages_sec<MessageT>::value) {
-    message.motor_ages_sec = sample.motor_ages_sec;
-  }
-  if constexpr (has_calibrated<MessageT>::value) {
-    message.calibrated = sample.calibrated;
-  }
-  if constexpr (has_kinematics_valid<MessageT>::value) {
-    message.kinematics_valid = sample.kinematics_valid;
-  }
-  if constexpr (has_control_permitted<MessageT>::value) {
-    message.control_permitted = sample.control_permitted;
-  }
-  if constexpr (has_motion_stop_pending<MessageT>::value) {
-    message.motion_stop_pending = sample.motion_stop_pending;
-    message.teaching_active = sample.teaching_active;
-    message.motion_stop_failed = sample.motion_stop_failed;
-  }
-  if constexpr (has_calibration_id<MessageT>::value) {
-    message.calibration_id = sample.calibration_id;
-  }
-  if constexpr (has_software_zero_id<MessageT>::value) {
-    message.software_zero_id = sample.software_zero_id;
-  }
-  if constexpr (has_raw_protocol_positions_deg<MessageT>::value) {
-    message.raw_protocol_positions_deg = sample.raw_protocol_positions_deg;
-  }
-  if constexpr (has_raw_output_positions_rad<MessageT>::value) {
-    message.raw_output_positions_rad = sample.raw_output_positions_rad;
-  }
-  if constexpr (has_software_output_offsets_rad<MessageT>::value) {
-    message.software_output_offsets_rad = sample.software_output_offsets_rad;
-  }
-  if constexpr (has_model_output_positions_rad<MessageT>::value) {
-    message.model_output_positions_rad = sample.model_output_positions_rad;
-  }
-  if constexpr (has_kinematics_error_code<MessageT>::value) {
-    message.kinematics_error_code = sample.kinematics_error_code;
-  }
-  if constexpr (has_kinematics_error_axis<MessageT>::value) {
-    message.kinematics_error_axis = sample.kinematics_error_axis;
-  }
-  if constexpr (has_kinematics_error_value<MessageT>::value) {
-    message.kinematics_error_value = sample.kinematics_error_value;
-  }
-  if constexpr (has_kinematics_error_message<MessageT>::value) {
-    message.kinematics_error_message = sample.kinematics_error_message;
-  }
-  if constexpr (has_all_enabled<MessageT>::value) {
-    message.all_enabled =
-      !sample.enabled.empty() && std::all_of(sample.enabled.begin(), sample.enabled.end(), [](bool v) {
-        return v;
-      });
-  }
-  if constexpr (has_any_error<MessageT>::value) {
-    message.any_error = std::any_of(sample.has_error.begin(), sample.has_error.end(), [](bool v) {
-      return v;
-    });
-  }
-  if constexpr (has_any_in_motion<MessageT>::value) {
-    message.any_in_motion =
-      std::any_of(sample.in_motion.begin(), sample.in_motion.end(), [](bool v) {return v;});
-  }
-  if constexpr (has_error_message<MessageT>::value) {
-    message.error_message = sample.error_message;
-  }
-  if constexpr (has_message<MessageT>::value) {
-    message.message = sample.error_message;
-  }
-  if constexpr (has_diagnostic<MessageT>::value) {
-    message.diagnostic = sample.error_message;
-  }
-}
-
-const char * operation_name(const pi_arm_can::ManagementOperation operation)
-{
-  switch (operation) {
-    case pi_arm_can::ManagementOperation::NONE: return "NONE";
-    case pi_arm_can::ManagementOperation::MOTOR_OFF: return "MOTOR_OFF";
-    case pi_arm_can::ManagementOperation::MOTOR_RUN: return "MOTOR_RUN";
-    case pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS: return "CLEAR_ERROR_FLAGS";
-    case pi_arm_can::ManagementOperation::MOTOR_REBOOT: return "MOTOR_REBOOT";
-    case pi_arm_can::ManagementOperation::SET_CURRENT_POSITION_ZERO:
-      return "SET_CURRENT_POSITION_ZERO";
-  }
-  return "UNKNOWN";
 }
 
 bool has_exact_interfaces(
@@ -681,7 +451,7 @@ void PiArmSystem::create_management_service(
       {
         {
           std::lock_guard<std::mutex> sample_lock(sample_mutex_);
-          latest_sample_.management_operation = operation_name(operation);
+          latest_sample_.management_operation = pi_arm_can::to_string(operation);
         }
         const auto result = backend_->manage(operation, request->motor_id);
         {
@@ -713,14 +483,8 @@ void PiArmSystem::publish_hardware_state()
     std::fill(sample.motor_fresh.begin(), sample.motor_fresh.end(), false);
     sample.connected = false;
   }
-  pi_arm_interfaces::msg::HardwareState message;
-  fill_hardware_state_message(
-    message, sample, joint_names_, backend_config_.actuators, backend_name_, node_->now());
-  message.can_interface = backend_config_.can_interface;
-  for (const auto & actuator : backend_config_.actuators) {
-    message.protocol_angle_ratios.push_back(actuator.protocol_angle_ratio);
-    message.motor_directions.push_back(actuator.motor_direction);
-  }
+  auto message = make_hardware_state_message(
+    sample, joint_names_, backend_config_, node_->now());
   state_publisher_->publish(std::move(message));
 }
 

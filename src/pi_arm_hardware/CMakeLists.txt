@@ -25,6 +25,7 @@ add_library(pi_arm_hardware SHARED
   src/zero_reference.cpp
   src/backend.cpp
   src/axis_test.cpp
+  src/hardware_state_message.cpp
   src/pi_arm_system.cpp
 )
 target_include_directories(pi_arm_hardware
