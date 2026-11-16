@@ -291,9 +291,10 @@ def main() -> None:
     try:
         asyncio.run(WebSocketGateway(bridge).run())
     except KeyboardInterrupt:
-        bridge.get_logger().info("WebSocket 网关收到退出信号")
+        if rclpy.ok():
+            bridge.get_logger().info("WebSocket 网关收到退出信号")
     finally:
         executor.shutdown()
         bridge.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
         spin_thread.join(timeout=2.0)
