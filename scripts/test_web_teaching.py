@@ -58,7 +58,8 @@ def main():
             page.locator('[data-view-target="points"]').click();saved(' joint')
             card(' joint').locator('[data-point-action="load"]').click()
             assert page.locator('#multi').is_visible() and page.locator('#cartesian').is_hidden()
-            assert page.locator('#multiJoint1').input_value()=='0.3'
+            # Inputs display three decimals; verify the loaded value, not trailing zeros.
+            assert float(page.locator('#multiJoint1').input_value()) == .3
             assert page.locator('#targetX').is_hidden()
             page.locator('[data-view-target="points"]').click()
             card(' cart').locator('[data-point-action="load"]').click()
