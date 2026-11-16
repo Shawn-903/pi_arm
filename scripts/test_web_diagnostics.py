@@ -60,12 +60,26 @@ def main():
             page.locator("#exportDiagnosticBtn").click()
         data = json.loads(Path(download.value.path()).read_text())
         assert data["state"]["kinematics_error"]["value"] == -8.146277666983426
+        page.locator('[data-view-target="workbench"]').click()
+        page.evaluate('''handleMessage({...lastState, read_only:false, commissioning:false,
+          robot_state:"DISCONNECTED", motor_fresh:[true,true,true,true,true,false],
+          motor_in_motion:[false,false,false,false,false,false], task:{status:0}, reboot_available:true})''')
+        page.locator('#recoveryMotorId').select_option('1')
+        page.evaluate('refreshControlGate()')
+        assert page.locator('#clearMotorFaultBtn').is_enabled()
+        assert page.locator('#rebootMotorBtn').is_disabled()
+        page.locator('#recoveryMotorId').select_option('6')
+        page.evaluate('refreshControlGate()')
+        assert page.locator('#clearMotorFaultBtn').is_disabled()
+        page.locator('#recoveryMotorId').select_option('1')
+        page.locator('[data-view-target="diagnostics"]').click()
         page.evaluate('''handleMessage({...lastState, motion_stop_failed:true,
           kinematics_error:{code:"JOINT_POSITION_LIMIT",axis:4,value:0.610865,
             message:"joint limit exceeded: joint_05 value=0.610865 rad, limit=[-0.523599,0.523599] rad"}})''')
         summary = page.locator("#diagnosticSummary").inner_text()
         assert "JOINT_POSITION_LIMIT" in summary and "joint_05" in summary
         assert "停止未确认" in summary and "重试停止" in summary
+        assert page.locator('#clearMotorFaultBtn').is_disabled()
         page.evaluate('''handleMessage({...lastState, read_only:false, commissioning:true,
           motor_test_permitted:false, protocol_angle_ratios:[36,36,36,6,6,6]})''')
         page.locator('[data-view-target="commissioning"]').click()

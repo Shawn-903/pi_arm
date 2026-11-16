@@ -692,6 +692,12 @@ private:
           allowed = decision.allowed;
           rejection_code = decision.code;
           rejection_message = decision.message;
+        } else if (operation == Operation::RESET) {
+          const auto decision = decide_motor_clear_errors(hardware_snapshot,
+              task_claimed || preview_active_.load(), request->motor_id);
+          allowed = decision.allowed;
+          rejection_code = decision.code;
+          rejection_message = decision.message;
         } else {
           const auto decision = decide_motor_recovery(hardware_snapshot, state,
               task_claimed || preview_active_.load(), still, request->motor_id);

@@ -159,3 +159,35 @@ TEST(ManagementGate, RecoveryAllowsFaultEvenWhenKinematicsAreInvalid)
   h.motor_fresh[0] = false;
   EXPECT_FALSE(pi_arm_manager::decide_motor_recovery(h, RobotState::FAULT, false, true, 2).allowed);
 }
+
+TEST(ManagementGate, ClearErrorsOnlyRequiresSelectedFeedback)
+{
+  auto h = healthy_motors();
+  h.motor_fresh[5] = false;
+  h.motor_errors[0] = true;
+  EXPECT_TRUE(pi_arm_manager::decide_motor_clear_errors(h, false, 1).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, false, 6).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, false, 0).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, false, 7).allowed);
+  // Power and reboot gates still depend on the complete arm.
+  EXPECT_FALSE(pi_arm_manager::decide_motor_power_operation(
+    MotorPowerOperation::ENABLE, h, RobotState::DISCONNECTED, false, true, 1).allowed);
+  EXPECT_FALSE(pi_arm_manager::decide_motor_recovery(h, RobotState::DISCONNECTED, false, true, 1).allowed);
+}
+
+TEST(ManagementGate, ClearErrorsRejectsActiveMotionAndUnknownStop)
+{
+  auto h = healthy_motors();
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, true, 1).allowed);
+  h.motor_moving[1] = true;
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, false, 1).allowed);
+  h.motor_moving[1] = false;
+  h.motion_stop_failed = true;
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, false, 1).allowed);
+  h.motion_stop_failed = false;
+  h.motion_stop_pending = true;
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, false, 1).allowed);
+  h.motion_stop_pending = false;
+  h.connected = false;
+  EXPECT_FALSE(pi_arm_manager::decide_motor_clear_errors(h, false, 1).allowed);
+}

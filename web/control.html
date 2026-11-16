@@ -393,8 +393,8 @@
                   </button>
                 </div>
                 <p>
-                  故障状态仍可恢复；需要 CAN
-                  反馈有效、整臂静止。重启会短暂掉线并释放所选电机力矩，请先支撑机械臂。完成后保持关闭，需另行使能。
+                  清错需要所选电机反馈有效且静止；重启需要六轴反馈有效、整臂静止。
+                  重启会短暂掉线并释放所选电机力矩，请先支撑机械臂。完成后保持关闭，需另行使能。
                 </p>
                 <p id="recoveryGate" role="status">连接后检查恢复条件</p>
                 <p id="recoveryResult" role="status">
@@ -1194,7 +1194,7 @@
     <script src="vendor/viewer-libs.js"></script>
     <script src="assets/viewer.js"></script>
     <script src="assets/console.js"></script>
-    <script src="assets/control.js?v=20261116-software-zero1"></script>
+    <script src="assets/control.js?v=20261116-can-recovery1"></script>
     <script src="assets/interactive.js"></script>
     <script src="assets/repeat.js?v=20260922-timing1"></script>
     <script src="assets/teaching.js?v=20260920-repeat2"></script>

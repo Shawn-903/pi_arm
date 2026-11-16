@@ -142,14 +142,10 @@ function refreshControlGate() {
   const recoveryPending = [...pending.values()].some((item) =>
     ["reset_motor", "reboot_motor"].includes(item.cmd),
   );
-  const recoveryReady =
+  const recoveryIdle =
     fresh &&
     !lastState?.read_only &&
     lastState?.hardware_connected &&
-    lastState?.motor_fresh?.length === 6 &&
-    lastState.motor_fresh.every(Boolean) &&
-    lastState?.motor_in_motion?.length === 6 &&
-    lastState.motor_in_motion.every((moving) => moving === false) &&
     lastState.task?.status !== 1 &&
     !lastState.axis_test?.active &&
     acceptedTaskId === null &&
@@ -159,12 +155,25 @@ function refreshControlGate() {
         ["preview_motion", "reset_motor", "reboot_motor", "set_teaching"].includes(item.cmd),
     ) &&
     !recoveryPending;
+  const completeMotorState = lastState?.motor_ids?.length === 6 &&
+    lastState?.motor_fresh?.length === 6 && lastState?.motor_in_motion?.length === 6;
+  const recoveryReady = recoveryIdle && completeMotorState &&
+    lastState.motor_fresh.every(Boolean) &&
+    lastState.motor_in_motion.every((moving) => moving === false);
+  const clearReady = (motorId) => {
+    if (!recoveryIdle || !completeMotorState || lastState.motion_stop_pending || lastState.motion_stop_failed ||
+      lastState.motor_in_motion.some((moving, i) => lastState.motor_fresh[i] && moving)) return false;
+    const selected = lastState.motor_ids.map((id, i) => ({ id, i }))
+      .filter(({ id }) => motorId === 0 || id === motorId);
+    return selected.length > 0 && selected.every(({ i }) =>
+      lastState.motor_fresh[i] && lastState.motor_in_motion[i] === false);
+  };
   document
     .querySelectorAll('[data-cmd="reset_motor"], [data-cmd="reboot_motor"]')
     .forEach((button) => {
-      button.disabled =
-        !recoveryReady ||
-        (button.dataset.cmd === "reboot_motor" && !lastState?.reboot_available);
+      button.disabled = button.dataset.cmd === "reset_motor"
+        ? !clearReady(Number(button.dataset.motorId))
+        : !recoveryReady || !lastState?.reboot_available;
     });
   if (recoveryPending)
     document.querySelectorAll('[data-cmd="enable_motor"]').forEach((button) => {
@@ -190,8 +199,12 @@ function refreshControlGate() {
     ? "正在恢复，请等待结果；不会自动重试重启"
     : lastState?.read_only
       ? "只读模式不允许发恢复指令，请使用正常控制或方向测试服务"
+      : lastState?.motion_stop_pending || lastState?.motion_stop_failed
+        ? "请先等待停止确认；停止失败时，恢复通信后重试停止"
       : !recoveryReady
-        ? "等待新鲜的原始电机反馈、整臂静止且无运动任务；无需运动学解算通过"
+        ? clearReady(Number(document.getElementById("recoveryMotorId").value))
+          ? "所选电机可清错；电机重启仍需六轴反馈新鲜、整臂静止且无运动任务"
+          : "清错需要所选电机反馈新鲜、静止，且无活动任务或未确认的停止；重启需要六轴反馈"
         : !lastState?.reboot_available
           ? "可清除错误；当前后端尚无重启服务，需编译重启新版程序"
           : "可操作：可先清除错误；若仍故障，可选择电机重启，后端再次核验静止与停止应答";
@@ -1171,6 +1184,7 @@ function init() {
     .addEventListener("change", (event) => {
       for (const id of ["clearMotorFaultBtn", "rebootMotorBtn"])
         document.getElementById(id).dataset.motorId = event.target.value;
+      refreshControlGate();
     });
   bindTabs();
   bindCommands();

@@ -123,4 +123,33 @@ inline MotorPowerDecision decide_motor_recovery(
   return decision;
 }
 
+// Clearing flags changes neither power nor the position reference. Verify the
+// selected motors; missing feedback from an unrelated motor is not a veto.
+// The hardware service also checks three raw stationary speed samples.
+inline MotorPowerDecision decide_motor_clear_errors(
+  const pi_arm_interfaces::msg::HardwareState & hardware,
+  const bool task_claimed, const int motor_id)
+{
+  if (!complete_raw_motor_state(hardware) || !hardware.connected) {
+    return {false, false, 2001, "CAN connection or raw motor state is unavailable"};
+  }
+  if (task_claimed || hardware.motion_stop_pending || hardware.motion_stop_failed) {
+    return {false, false, 2001, "clear errors requires no active task and no unconfirmed stop"};
+  }
+  bool found = false;
+  for (std::size_t i = 0; i < hardware.motor_ids.size(); ++i) {
+    if (hardware.motor_fresh[i] && hardware.motor_moving[i]) {
+      return {false, false, 2001, "clear errors is rejected while a motor is moving"};
+    }
+    if (motor_id == 0 || motor_id == hardware.motor_ids[i]) {
+      found = true;
+      if (!hardware.motor_fresh[i] || hardware.motor_moving[i]) {
+        return {false, false, 2001, "selected motor feedback must be fresh and stationary"};
+      }
+    }
+  }
+  if (!found) {return {false, false, 2004, "motor_id is not configured (use 0 for all motors)"};}
+  return {true, false, 0, "ok"};
+}
+
 }  // namespace pi_arm_manager

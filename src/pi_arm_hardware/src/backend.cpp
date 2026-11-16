@@ -1007,6 +1007,46 @@ ManagementResult RealBackend::manage(
   if (operation == pi_arm_can::ManagementOperation::MOTOR_RUN && reboot_reference_uncertain_.load()) {
     return {false, 2002, "reboot position reference unverified; enabling is inhibited"};
   }
+  const auto ids = selected_motor_ids(config_, motor_id);
+  if (ids.empty()) {
+    return {false, 1, "motor_id is not configured (use 0 for all motors)"};
+  }
+  if (operation == pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS) {
+    {
+      std::lock_guard<std::mutex> lock(motion_mutex_);
+      if (config_.read_only || motion_write_gate_.armed() ||
+        driver_->mode() != pi_arm_can::DriverMode::MONITORING ||
+        driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::PENDING ||
+        driver_->motion_stop_status() == pi_arm_can::MotionStopStatus::FAILED ||
+        stop_hold_failed_.load() || axis_test_stop_failed_)
+      {
+        return {false, 2001, "clear errors requires idle writable CAN and no unconfirmed stop"};
+      }
+    }
+    const auto snapshot = driver_->snapshot();
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto & actuator : config_.actuators) {
+      const auto & state = snapshot.at(actuator.motor_id);
+      if (state.status2_valid && age_seconds(state.status2_update, now) <= config_.state_stale_timeout_sec &&
+        state.protocol_speed_dps != 0.0) {
+        return {false, 2001, "clear errors is rejected while a motor is moving"};
+      }
+      if (std::find(ids.begin(), ids.end(), actuator.motor_id) == ids.end()) {continue;}
+      if (!state.angle_valid || !state.status1_valid || !state.status2_valid ||
+        std::max({age_seconds(state.angle_update, now), age_seconds(state.status1_update, now),
+          age_seconds(state.status2_update, now)}) > config_.state_stale_timeout_sec ||
+        state.protocol_speed_dps != 0.0 || state.stationary_samples < 3U)
+      {
+        return {false, 2001, "selected motor feedback must be fresh and stationary"};
+      }
+    }
+    // Auxiliary services are serialized. Clearing flags does not revoke a hold,
+    // issue a whole-arm stop, switch power, or change a position reference.
+    if (!driver_->execute_management(operation, ids, std::chrono::milliseconds(1000), generation)) {
+      return {false, 2002, "clear error state was not confirmed: " + driver_->last_error()};
+    }
+    return {true, 0, "selected motor errors cleared and confirmed by feedback"};
+  }
   // Power and fault-management operations are never motion-authorizing. They
   // revoke an existing lease before any management frame is queued.
   const auto stopped = set_motion_armed(false, 0U);
@@ -1019,11 +1059,7 @@ ManagementResult RealBackend::manage(
       false, 6,
       "ROM zero is disabled in the normal hardware service; use the local maintenance CLI"};
   }
-  const auto ids = selected_motor_ids(config_, motor_id);
-  if (ids.empty()) {
-    return {false, 1, "motor_id is not configured (use 0 for all motors)"};
-  }
-  if (operation != pi_arm_can::ManagementOperation::CLEAR_ERROR_FLAGS) {
+  {
     const auto snapshot = driver_->snapshot();
     const auto now = std::chrono::steady_clock::now();
     for (const auto & actuator : config_.actuators) {

@@ -24,7 +24,7 @@
 
 对外动作与服务见 [interfaces](../pi_arm_interfaces/README.md)。`/pi_arm/preview_motion` 复用生产模型：joint/output 是 DirectMove 插值；ik 调用 `/compute_ik` 检查端点；lin 仅规划 Pilz 路径。预览不使能、不创建执行租约，执行前仍从最新起点重新生成。
 
-故障恢复在标定无效时可依据原始电机反馈开放，但仍要求静止、无活动任务及可确认停止。`/pi_arm/hardware/*` 是内部管理边界，不是另一套用户运动入口。
+清错服务按所选电机检查新鲜、静止反馈，其他电机暂时失联时仍可对在线电机清错；活动任务、已知运动或停止未确认时会拒绝请求。使能、失能和重启继续检查整臂反馈与静止状态。`/pi_arm/hardware/*` 是供 manager 使用的内部管理接口。
 
 ## 验证
 
