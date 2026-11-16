@@ -31,6 +31,7 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 | `motor_move` / `move` | 单关节 / 完整六关节目标，经 DirectMove；不是裸电机协议控制 |
 | `output_move` | 六个模型输出轴角，经绳索反解和 DirectMove |
 | `move_preset` | 打包 / 零位，前端可设置关节速度，仍受输出轴限速约束 |
+| `set_zero_reference` | commissioning 软件标零；`reference_joint_positions_deg` 为六关节参考姿态，`reference_pose_confirmed` 必须为 true。经 `pi_arm_tasks` 统一执行，返回参考编号 |
 | `movej` / `movejs` / `movel` | 对应 ROS MoveJ / MoveJs / MoveL |
 | `preview_motion` | joint/output/ik/lin 只读预览 |
 | `enable_motor` / `disable_motor` / `reset_motor` / `reboot_motor` | 管理服务；reset 为清错，reboot 为选定电机重启 |

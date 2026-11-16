@@ -1,6 +1,6 @@
 # 源码与开发约定
 
-本工作区有 10 个 ROS 2 包。安装、整体启动和版本恢复统一见 [根 README](../README.md)，网页操作见 [web](../web/README.md)。
+本工作区有 11 个 ROS 2 包。安装、整体启动和版本恢复统一见 [根 README](../README.md)，网页操作见 [web](../web/README.md)。
 
 ## 包索引
 
@@ -8,6 +8,7 @@
 | --- | --- |
 | [pi_arm_bringup](pi_arm_bringup/README.md) | 装配 launch、控制器、manager 和网关配置 |
 | [pi_arm_interfaces](pi_arm_interfaces/README.md) | 消息、服务和动作契约 |
+| [pi_arm_tasks](pi_arm_tasks/README.md) | 可编程任务入口；软件标零流程、Python 客户端及命令行 |
 | [pi_arm_manager](pi_arm_manager/README.md) | 任务准入、规划/插值、到位核验及停止协调 |
 | [pi_arm_websocket](pi_arm_websocket/README.md) | JSON 协议、单位转换、点位库与坐标显示 |
 | [pi_arm_hardware](pi_arm_hardware/README.md) | ros2_control 插件、实机/mock 后端、标定与写入许可 |

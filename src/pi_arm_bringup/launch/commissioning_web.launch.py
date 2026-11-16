@@ -15,6 +15,7 @@ def generate_launch_description():
         IncludeLaunchDescription(PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare("pi_arm_bringup"), "launch", "monitor.launch.py",
         ])), launch_arguments={"commissioning": "true"}.items()),
+        Node(package="pi_arm_tasks", executable="pi_arm_tasks", output="screen"),
         Node(package="pi_arm_websocket", executable="pi_arm_websocket",
              name="pi_arm_websocket", output="screen",
              parameters=[{"hardware_type": "real", "commissioning": True,

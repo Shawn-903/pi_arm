@@ -39,6 +39,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | 网关命令、状态或点位逻辑 | 从 [网关测试目录](../src/pi_arm_websocket/test/) 选择对应文件；ROS 调用或共享状态变化时，再覆盖受影响的 mock 路径 |
 | 网页布局、诊断、重复运动等单项功能 | 从下方离线网页测试中选择对应脚本；跨页面共用逻辑变化时覆盖相关页面 |
 | commissioning 电机测试界面、请求或模拟器冻结运动 | `test_web_axis.py` 普通与 `--stall` 场景，使用独立 commissioning/vcan 服务 |
+| 软件标零计算、持久化或任务入口 | 硬件 `test_backend` 中 `SoftwareZero.*` 及相关坐标测试；`test_software_zero_vcan.py` 验证生产后端；任务/网页变化选择客户端和网页专项入口 |
 | manager 到位、停止或取消 | [manager 测试目录](../src/pi_arm_manager/test/) 中对应单测；涉及编排、Action 或并发时加 `test_arrival_integration.py` |
 | 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
 | 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
@@ -150,6 +151,19 @@ sudo ip link delete vcan_motion
 python3 scripts/test_web_axis.py
 python3 scripts/test_web_axis.py --stall
 ```
+
+## 软件标零专项验证
+
+构建并 source 待测工作区后，在独占的 vcan0 上执行 `python3 scripts/test_software_zero_vcan.py`。它固定 ROS 域 84，启动生产监测节点和已有虚拟电机模拟器，使用临时参考文件，覆盖静止采样、无电机写入、保存失败、反馈过期、活动任务拒绝及程序重启重载。
+
+任务与网页验证使用另一个干净的 commissioning/vcan0 实例，配置临时 `software_zero_file`、虚拟基础标定、HTTP 8001 和 WS 8766。对同一测试实例分别运行：
+
+```bash
+python3 scripts/test_software_zero_clients.py
+python3 scripts/test_web_software_zero.py
+```
+
+前者验证 Python `TaskClient` 和命令行的服务调用与单位转换；后者验证网页确认、返回结果、参考编号和原始编码器读数不变。两者都拒绝非 vcan0 的反馈；它们会改变测试实例的软件参考，不应指向现场服务。零点数据、测试用基础标定及一次性启动工具留在临时目录，不复制为实机参考。
 
 ## 维护规范
 

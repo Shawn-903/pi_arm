@@ -18,6 +18,7 @@ POINT_COMMANDS = {'point_list', 'point_save', 'point_delete'}
 
 COMMANDS = POINT_COMMANDS | {
     "set_teaching",
+    "set_zero_reference",
     "preview_motion",
     "output_move",
     "move_preset",

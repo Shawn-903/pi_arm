@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import PoseStamped
 from pi_arm_interfaces.action import DirectMove, MoveJ, MoveJs, MoveL
-from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion, SetTeaching
+from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion, SetTeaching, SetZeroReference
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from .motion_limits import DEFAULT_ANGULAR_SPEED_DEG_S, MAX_ANGULAR_SPEED_DEG_S
@@ -72,6 +72,19 @@ class CommandGateway:
             return await asyncio.to_thread(dispatch_points, self.bridge, command, params)
         if self.bridge.read_only:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "只读排查模式：仅查看反馈，不提供控制服务")
+        if command == "set_zero_reference":
+            if not self.bridge.commissioning:
+                raise ProtocolError(CODE_STATE_UNAVAILABLE, "软件标零需要 commissioning 维护模式")
+            if set(params) != {"reference_joint_positions_deg", "reference_pose_confirmed"} or params.get("reference_pose_confirmed") is not True:
+                raise ProtocolError(CODE_INVALID_PARAMS, "必须明确参考姿态，并确认机械臂已处于该实际姿态")
+            reference = required_vector(params, "reference_joint_positions_deg", 6)
+            result = await self.bridge.call_service(command, SetZeroReference.Request(
+                reference_joint_positions_rad=[value * DEG_TO_RAD for value in reference],
+                reference_pose_confirmed=True,
+            ))
+            return {"reference_id": result.reference_id, "message": result.message,
+                    "raw_protocol_positions_deg": list(result.raw_protocol_positions_deg),
+                    "software_output_offsets_rad": list(result.software_output_offsets_rad)}
         if command == "set_teaching":
             if self.bridge.commissioning or set(params) != {"enabled"} or type(params["enabled"]) is not bool:
                 raise ProtocolError(CODE_INVALID_PARAMS, "拖拽示教需要正常控制模式和 enabled 布尔参数")

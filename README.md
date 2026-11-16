@@ -14,6 +14,7 @@
 | 构建、测试脚本与隔离测试环境 | [scripts/README.md](scripts/README.md) |
 | CAN 原始协议、标定证据、已知限制 | [docs/README.md](docs/README.md) |
 | 当前标定、坐标换算及配置维护 | [硬件配置 README](src/pi_arm_hardware/config/README.md) |
+| 软件标零、Python 任务调用和命令行 | [pi_arm_tasks](src/pi_arm_tasks/README.md) |
 
 ## 安装与构建
 

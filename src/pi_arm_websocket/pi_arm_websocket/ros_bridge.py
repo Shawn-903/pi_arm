@@ -11,7 +11,7 @@ from typing import Any
 from ament_index_python.packages import get_package_share_directory
 from pi_arm_interfaces.action import DirectMove, MoveJ, MoveJs, MoveL
 from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState
-from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion, SetTeaching
+from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion, SetTeaching, SetZeroReference
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -108,6 +108,8 @@ class RosBridge(Node):
                 for name in ("enable_motor", "disable_motor", "reset_motor", "reboot_motor")
             }
             self.service_clients["axis_test"] = self.create_client(AxisTest, "/pi_arm/commissioning/axis_test")
+            self.service_clients["set_zero_reference"] = self.create_client(
+                SetZeroReference, "/pi_arm/tasks/set_zero_reference")
 
     def _on_hardware_state(self, hardware: HardwareState) -> None:
         self._on_state(monitor_state(hardware))

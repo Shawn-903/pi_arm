@@ -941,7 +941,7 @@
               <div class="section-heading">
                 <div>
                   <span class="eyebrow">COMMISSIONING</span>
-                  <h2>单轴方向确认</h2>
+                  <h2>方向确认与软件标零</h2>
                 </div>
               </div>
               <div class="empty-state" id="commissioningUnavailable">
@@ -954,6 +954,14 @@
                 </p>
                 <p>切换界面视图不会更改后端模式或控制权限。</p>
               </div>
+              <fieldset hidden="" id="zeroReferencePanel">
+                <legend>设置机械零位参考</legend>
+                <p>先将机械臂实际放到六个关节均为 0° 的机械零位，再采集当前编码器读数。此操作只保存软件零偏，不移动机械臂，也不写电机 ROM。</p>
+                <label><input type="checkbox" id="zeroReferenceConfirmed" /> 我已确认实物处于机械零位，且六轴静止</label>
+                <button id="setZeroReference" disabled="">采集并保存软件零点</button>
+                <div id="zeroReferenceCurrent" role="status">当前软件零点：未设置</div>
+                <div id="zeroReferenceResult" role="status">等待维护模式及新鲜静止反馈</div>
+              </fieldset>
               <fieldset hidden="" id="axisTestPanel">
                 <legend>单轴方向测试</legend>
                 <p>
@@ -1186,7 +1194,7 @@
     <script src="vendor/viewer-libs.js"></script>
     <script src="assets/viewer.js"></script>
     <script src="assets/console.js"></script>
-    <script src="assets/control.js?v=20260920-repeat2"></script>
+    <script src="assets/control.js?v=20261116-software-zero1"></script>
     <script src="assets/interactive.js"></script>
     <script src="assets/repeat.js?v=20260922-timing1"></script>
     <script src="assets/teaching.js?v=20260920-repeat2"></script>

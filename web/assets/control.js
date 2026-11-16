@@ -365,7 +365,7 @@ function sendCommand(cmd, params = {}, options = {}) {
     cmd === "axis_test" &&
     (ownAxisTest !== null ||
       [...pending.values()].some((item) =>
-        ["axis_test", "reset_motor", "reboot_motor"].includes(item.cmd),
+        ["axis_test", "reset_motor", "reboot_motor", "set_zero_reference"].includes(item.cmd),
       ))
   )
     return false;
@@ -715,6 +715,7 @@ function exportDiagnostics() {
 function refreshAxisTests(fresh) {
   const commissioning = lastState?.commissioning === true;
   document.getElementById("axisTestPanel").hidden = !commissioning;
+  document.getElementById("zeroReferencePanel").hidden = !commissioning;
   document.getElementById("normalMotionControls").hidden = commissioning;
   const idle =
     fresh &&
@@ -722,8 +723,13 @@ function refreshAxisTests(fresh) {
     !lastState.axis_test?.active &&
     ownAxisTest === null &&
     ![...pending.values()].some((item) =>
-      ["axis_test", "reset_motor", "reboot_motor"].includes(item.cmd),
+      ["axis_test", "reset_motor", "reboot_motor", "set_zero_reference"].includes(item.cmd),
     );
+  document.getElementById("setZeroReference").disabled =
+    !idle || !lastState?.motor_test_permitted ||
+    !document.getElementById("zeroReferenceConfirmed").checked;
+  document.getElementById("zeroReferenceCurrent").textContent =
+    `当前软件零点：${lastState?.software_zero_id || "未设置，使用基础标定"}`;
   const id = Number(document.getElementById("testMotorId").value);
   const index = lastState?.motor_ids?.indexOf(id) ?? -1;
   const enabled = lastState?.motor_enabled?.[index] === true;
@@ -779,6 +785,26 @@ function renderAxisTestRecords() {
 }
 
 function bindAxisTests() {
+  document.getElementById("zeroReferenceConfirmed").addEventListener("change", refreshControlGate);
+  document.getElementById("setZeroReference").addEventListener("click", () => {
+    if (document.getElementById("setZeroReference").disabled) return;
+    const result = document.getElementById("zeroReferenceResult");
+    result.textContent = "正在采集静止编码器读数并保存…";
+    const sent = sendCommand("set_zero_reference", {
+      reference_joint_positions_deg: [0, 0, 0, 0, 0, 0],
+      reference_pose_confirmed: true,
+    }, {
+      resolve: (data) => {
+        result.textContent = `软件标零成功，参考编号：${data.reference_id}`;
+      },
+      reject: (error) => {
+        result.textContent = `软件标零未确认：${error.message}；核对当前参考编号后再操作。`;
+      },
+    });
+    document.getElementById("zeroReferenceConfirmed").checked = false;
+    if (!sent) result.textContent = "请求未发送，请检查连接与维护模式。";
+    refreshControlGate();
+  });
   document.getElementById("testMotorId").innerHTML = motorIds
     .map((id) => `<option value="${id}">CAN ${id}</option>`)
     .join("");
