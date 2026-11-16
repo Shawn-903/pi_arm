@@ -6,7 +6,8 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 
 | 模块 | 职责 |
 | --- | --- |
-| [gateway.py](pi_arm_websocket/gateway.py) | `pi_arm_websocket` 节点、ROS 客户端、连接管理、任务追踪和状态推送 |
+| [gateway.py](pi_arm_websocket/gateway.py) | 进程入口、连接管理、命令分发和状态推送 |
+| [ros_bridge.py](pi_arm_websocket/ros_bridge.py) | `pi_arm_websocket` 节点、ROS 客户端、反馈快照与动作生命周期 |
 | [protocol.py](pi_arm_websocket/protocol.py) | JSON 校验、错误码、字段精度及合法命令 |
 | [points.py](pi_arm_websocket/points.py) | 点位库、版本冲突校验、文件锁/fsync/原子替换 |
 | [frames.py](pi_arm_websocket/frames.py) | 同帧六关节的 URDF FK，包含 mimic、各关节坐标系与 tool0 |
