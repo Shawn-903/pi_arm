@@ -155,6 +155,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_websocket", default_value="true"),
             DeclareLaunchArgument("websocket_port", default_value="8765"),
             DeclareLaunchArgument("points_file", default_value=""),
+            DeclareLaunchArgument("execution_file", default_value=""),
             DeclareLaunchArgument("manager_config", default_value=PathJoinSubstitution(
                 [FindPackageShare("pi_arm_bringup"), "config", "manager.yaml"])),
             Node(
@@ -229,6 +230,15 @@ def generate_launch_description():
                     },
                     LaunchConfiguration("manager_config"),
                 ],
+                condition=IfCondition(use_manager),
+            ),
+            Node(
+                package="pi_arm_tasks",
+                executable="pi_arm_execution",
+                output="screen",
+                parameters=[{"hardware_type": hardware_type, "calibration_file": calibration_file,
+                             "points_file": ParameterValue(LaunchConfiguration("points_file"), value_type=str),
+                             "execution_file": ParameterValue(LaunchConfiguration("execution_file"), value_type=str)}],
                 condition=IfCondition(use_manager),
             ),
             Node(

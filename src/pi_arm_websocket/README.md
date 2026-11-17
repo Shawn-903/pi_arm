@@ -57,7 +57,7 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 
 点位与常用角度/XYZ/RPY 的网页输出保留最多三位小数；磁盘原始存档、ROS/CAN、弧度诊断、四元数和时间保留内部精度。`base_frames` 使用同一帧关节反馈计算 FK。
 
-重复循环由浏览器调度，每段运动通过现有动作接口执行。完整操作、断连处理和点位备份见 [web/README.md](../../web/README.md)。
+步骤程序和重复循环由树莓派执行服务调度，网页断线后继续。Python 控制会话、请求去重、运行历史与完整参数见 [执行接口](../../docs/execution.md)。点位支持 `point_update`、`point_import`（先预检再提交）和 `point_export`（返回完整精度的 JSON 文本）。网页操作见 [web/README.md](../../web/README.md)。
 
 ## 验证
 

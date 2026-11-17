@@ -14,9 +14,15 @@ CODE_STATE_UNAVAILABLE = 2001
 CODE_COMMAND_FAILED = 2002
 CODE_MOTION_BUSY = 2003
 
-POINT_COMMANDS = {'point_list', 'point_save', 'point_delete'}
+POINT_COMMANDS = {'point_list', 'point_save', 'point_delete', 'point_update', 'point_import', 'point_export'}
+EXECUTION_COMMANDS = {
+    'session_open', 'session_close', 'session_heartbeat', 'execution_state',
+    'execution_pause', 'execution_resume', 'execution_stop', 'request_get', 'task_get',
+    'program_list', 'program_get', 'program_save', 'program_delete', 'program_validate', 'program_start',
+    'run_list', 'run_get', 'run_export', 'step_move', 'move_to_point', 'wait',
+}
 
-COMMANDS = POINT_COMMANDS | {
+COMMANDS = POINT_COMMANDS | EXECUTION_COMMANDS | {'get_info', 'get_state'} | {
     "set_teaching",
     "set_zero_reference",
     "preview_motion",
@@ -97,10 +103,11 @@ def point_precision(value, rounded=False):
     return value
 
 
-def response(msg_id: int, code: int, message: str, data: dict[str, Any] | None = None) -> str:
+def response(msg_id: int, code: int, message: str, data: dict[str, Any] | None = None, *, precise=False) -> str:
     # ms 保存给客户端的文字说明，沿用现有协议键名。
     return json.dumps(
-        {"type": "rsp", "msg_id": msg_id, "code": code, "ms": message, "data": point_precision(data or {})},
+        {"type": "rsp", "msg_id": msg_id, "code": code, "ms": message,
+         "data": (data or {}) if precise else point_precision(data or {})},
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -109,6 +116,8 @@ def response(msg_id: int, code: int, message: str, data: dict[str, Any] | None =
 def required_float(params: dict[str, Any], name: str, *, positive: bool = False) -> float:
     if name not in params:
         raise ProtocolError(CODE_INVALID_PARAMS, f"缺少参数: {name}")
+    if isinstance(params[name], bool):
+        raise ProtocolError(CODE_INVALID_PARAMS, f"{name} 必须是数字")
     try:
         value = float(params[name])
     except (TypeError, ValueError) as exc:
@@ -128,6 +137,8 @@ def required_vector(
         raise ProtocolError(CODE_INVALID_PARAMS, f"{name} 必须是数组{expected}")
     result: list[float] = []
     for index, item in enumerate(value):
+        if isinstance(item, bool):
+            raise ProtocolError(CODE_INVALID_PARAMS, f"{name}[{index}] 必须是数字")
         try:
             number = float(item)
         except (TypeError, ValueError) as exc:

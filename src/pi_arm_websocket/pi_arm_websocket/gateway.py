@@ -9,6 +9,8 @@ import asyncio
 from itertools import count
 import json
 import threading
+import time
+import uuid
 from typing import Any
 
 import rclpy
@@ -64,14 +66,31 @@ class WebSocketGateway:
             f"WebSocket 客户端接入: {peer} (连接数={len(self.clients)})"
         )
         owned_test = None
+        connection_id = uuid.uuid4().hex
+        pending = set()
+        async def reply_to(raw):
+            nonlocal owned_test
+            reply = await self.commands.handle(raw, connection_id)
+            data = json.loads(reply)
+            if data['code'] == 0 and data['data'].get('cmd') == 'axis_test':
+                owned_test = data['data']['axis_test_id']
+            await websocket.send(reply)
+        def replied(task):
+            pending.discard(task)
+            if not task.cancelled():
+                error = task.exception()
+                if error and not isinstance(error, ConnectionClosed):
+                    self.bridge.get_logger().warning(f'响应发送失败: {error}')
         try:
             async for message in websocket:
                 raw = message if isinstance(message, str) else "{}"
-                reply = await self.commands.handle(raw)
-                data = json.loads(reply)
-                if data["code"] == 0 and data["data"].get("cmd") == "axis_test":
-                    owned_test = data["data"]["axis_test_id"]
-                await websocket.send(reply)
+                # 每条响应按 msg_id 关联，停止和心跳无需等普通请求完成。
+                if len(pending) >= 32:
+                    await websocket.close(code=1013, reason='too many pending requests')
+                    break
+                task = asyncio.create_task(reply_to(raw))
+                pending.add(task)
+                task.add_done_callback(replied)
         except ConnectionClosed as exc:
             self.bridge.get_logger().info(
                 f"WebSocket 连接关闭: {peer} code={exc.code} reason={exc.reason!r}"
@@ -79,6 +98,13 @@ class WebSocketGateway:
         except Exception as exc:
             self.bridge.get_logger().error(f"WebSocket 客户端异常: {peer} error={exc}")
         finally:
+            if getattr(self.bridge, 'connect_execution', False) and not self.bridge.read_only and not self.bridge.commissioning:
+                try:
+                    await self.bridge.execution('connection_lost', {}, connection_id)
+                except Exception as exc:
+                    self.bridge.get_logger().warning(f'会话断线通知失败: {exc}')
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
             if owned_test is not None:
                 try:
                     request = AxisTest.Request(operation="stop", test_id=owned_test)
@@ -110,6 +136,10 @@ class WebSocketGateway:
         body = robot_state_payload(state)
         body["pose"] = self._pose() if state is not None and not getattr(self.bridge, 'frame_model', None) else {}
         body["hardware_type"] = self.bridge.hardware_type
+        body['execution'] = dict(getattr(self.bridge, 'execution_state', {}),
+                                 fresh=time.monotonic()-getattr(self.bridge, 'execution_received_at', 0.) < 1.)
+        model = getattr(self.bridge, 'frame_model', None)
+        body['model'] = model.metadata() if model else {}
         preview = getattr(self.bridge, "service_clients", {}).get("preview_motion")
         reboot = getattr(self.bridge, "service_clients", {}).get("reboot_motor")
         body["reboot_available"] = bool(reboot and reboot.service_is_ready())

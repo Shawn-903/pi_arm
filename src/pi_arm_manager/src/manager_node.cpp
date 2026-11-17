@@ -28,6 +28,7 @@
 #include "pi_arm_interfaces/msg/robot_state.hpp"
 #include "pi_arm_interfaces/msg/task_state.hpp"
 #include "pi_arm_interfaces/srv/manage_motor.hpp"
+#include "pi_arm_interfaces/srv/control_session.hpp"
 #include "pi_arm_interfaces/srv/preview_motion.hpp"
 #include "pi_arm_interfaces/srv/set_motion_armed.hpp"
 #include "pi_arm_interfaces/srv/set_teaching.hpp"
@@ -101,6 +102,12 @@ public:
   {
     hardware_timeout_ = declare_parameter("hardware_timeout_sec", 1.0);
     operation_timeout_ = declare_parameter("operation_timeout_sec", 5.0);
+    control_lease_timeout_ = declare_parameter("control_lease_timeout_sec", 3.0);
+    if (!std::isfinite(control_lease_timeout_) || control_lease_timeout_ <= 0.5) {
+      throw std::runtime_error("control lease timeout must exceed 0.5 seconds");
+    }
+    controller_instance_id_ = std::to_string(
+      std::chrono::system_clock::now().time_since_epoch().count());
     motion_timeout_ = declare_parameter("motion_timeout_sec", 120.0);
     still_velocity_ = declare_parameter(
       "still_velocity_rad_s", 0.00017453292519943296);
@@ -126,6 +133,21 @@ public:
       "/pi_arm/state", rclcpp::QoS(10).reliable().transient_local());
 
     service_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+    control_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+    control_service_ = create_service<pi_arm_interfaces::srv::ControlSession>(
+      "/pi_arm/control_session",
+      std::bind(&ManagerNode::control_session, this, std::placeholders::_1,
+      std::placeholders::_2), rmw_qos_profile_services_default, control_group_);
+    control_timer_ = create_wall_timer(100ms, [this] {
+        std::string expired;
+        {
+          std::lock_guard<std::mutex> lock(command_mutex_);
+          if (!control_token_.empty() && std::chrono::steady_clock::now() >= control_deadline_) {
+            expired = control_token_;
+          }
+        }
+        if (!expired.empty()) {request_stop(MotionStopReason::STOP_SERVICE, expired);}
+      }, control_group_);
     // Reentrant group so worker threads can wait_for() action futures without
     // starving against the default MutuallyExclusive group (timers/subscriptions).
     action_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
@@ -154,7 +176,7 @@ public:
         {std::lock_guard<std::mutex> lock(state_mutex_); h = hardware_; t = task_;
           if ((now() - last_hardware_time_).seconds() > hardware_timeout_) {h.connected = false;}}
         const auto decision = decide_motor_recovery(h, aggregate_state(h, t),
-          task_claimed_.load() || preview_active_.load() || h.axis_test_active,
+          task_claimed_.load() || !control_token_.empty() || preview_active_.load() || h.axis_test_active,
           raw_still_frames_.load() >= 3, 0);
         if (!decision.allowed || h.commissioning || h.motion_stop_pending || h.motion_stop_failed) {
           response->success = false; response->code = 2001;
@@ -244,7 +266,7 @@ public:
       std::lock_guard<std::mutex> lock(command_mutex_);
       if (shutting_down_.exchange(true)) {return;}
       std::lock_guard<std::mutex> worker_lock(worker_mutex_);
-      motion_active = task_claimed_.load() || pending_workers_ != 0 ||
+      motion_active = !control_token_.empty() || task_claimed_.load() || pending_workers_ != 0 ||
         std::any_of(action_workers_.begin(), action_workers_.end(),
           [](auto & worker) {return worker.wait_for(0s) != std::future_status::ready;});
     }
@@ -358,7 +380,7 @@ private:
       if (shutting_down_.load()) {
         response->code = 2003; response->message = "manager shutting down"; return;
       }
-      if (task_claimed_.load() || preview_active_.exchange(true)) {
+      if (task_claimed_.load() || !control_token_.empty() || preview_active_.exchange(true)) {
         response->code = 2003;
         response->message = "motion or preview already active";
         return;
@@ -684,7 +706,7 @@ private:
         const auto state = aggregate_state(hardware_snapshot, task_snapshot);
         const bool still = (operation != Operation::ENABLE ?
           raw_still_frames_.load() : still_frames_.load()) >= 3;
-        const bool task_claimed = task_claimed_.load();
+        const bool task_claimed = task_claimed_.load() || !control_token_.empty();
         bool allowed = false;
         int rejection_code = 2001;
         std::string rejection_message = "operation rejected by robot state";
@@ -908,6 +930,7 @@ private:
       message.task = task_;
     }
     message.stamp = now();
+    message.controller_instance_id = controller_instance_id_;
     auto state_input = message.hardware;
     if (stale) {
       state_input.connected = false;
@@ -922,10 +945,42 @@ private:
     state_pub_->publish(message);
   }
 
-  bool claim_goal(const std::string & command)
+  void control_session(
+    const std::shared_ptr<pi_arm_interfaces::srv::ControlSession::Request> request,
+    std::shared_ptr<pi_arm_interfaces::srv::ControlSession::Response> response)
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    response->controller_instance_id = controller_instance_id_;
+    const auto now = std::chrono::steady_clock::now();
+    response->code = 2003;
+    response->message = "control session unavailable or expired";
+    if (shutting_down_.load()) {return;}
+    if (request->operation == "acquire") {
+      if (!control_token_.empty() || task_claimed_.load() || preview_active_.load() ||
+        current_state() != pi_arm_interfaces::msg::RobotState::READY) {return;}
+      control_token_ = controller_instance_id_ + ":" + std::to_string(++control_generation_);
+    } else if (request->token.empty() || request->token != control_token_ ||
+      now >= control_deadline_)
+    {
+      return;
+    } else if (request->operation == "release") {
+      if (task_claimed_.load()) {response->message = "motion is still active"; return;}
+      control_token_.clear();
+    } else if (request->operation != "renew") {
+      response->code = 1004; response->message = "invalid control operation"; return;
+    }
+    control_deadline_ = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(control_lease_timeout_));
+    response->success = true; response->code = 0;
+    response->message = "ok"; response->token = control_token_;
+  }
+
+  bool claim_goal(const std::string & command, const std::string & token)
   {
     std::lock_guard<std::mutex> command_lock(command_mutex_);
     if (shutting_down_.load()) {return false;}
+    if (token != control_token_ || (!control_token_.empty() &&
+      std::chrono::steady_clock::now() >= control_deadline_)) {return false;}
     if (preview_active_.load()) {
       RCLCPP_WARN(get_logger(), "motion rejected while read-only preview is calculating");
       return false;
@@ -1211,7 +1266,7 @@ private:
         min_acceleration_limit(goal->joint_names));
       return rclcpp_action::GoalResponse::REJECT;
     }
-    return claim_goal("movej") ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
+    return claim_goal("movej", goal->control_token) ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
            rclcpp_action::GoalResponse::REJECT;
   }
 
@@ -1225,7 +1280,7 @@ private:
         goal->trajectory.joint_names.size(), goal->trajectory.points.size());
       return rclcpp_action::GoalResponse::REJECT;
     }
-    return claim_goal("movejs") ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
+    return claim_goal("movejs", goal->control_token) ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
            rclcpp_action::GoalResponse::REJECT;
   }
 
@@ -1278,7 +1333,7 @@ private:
         angular_velocity_limit_, angular_acceleration_limit_);
       return rclcpp_action::GoalResponse::REJECT;
     }
-    return claim_goal("movel") ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
+    return claim_goal("movel", goal->control_token) ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
            rclcpp_action::GoalResponse::REJECT;
   }
 
@@ -1297,7 +1352,7 @@ private:
         goal->joint_names.size(), goal->max_velocity);
       return rclcpp_action::GoalResponse::REJECT;
     }
-    return claim_goal("direct_move") ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
+    return claim_goal("direct_move", goal->control_token) ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE :
            rclcpp_action::GoalResponse::REJECT;
   }
 
@@ -2000,10 +2055,12 @@ private:
     }
   }
 
-  bool request_stop(const MotionStopReason reason)
+  bool request_stop(const MotionStopReason reason, const std::string & expected_token = "")
   {
     // Block new claims until the hardware stop/hold and cancellation finish.
     std::lock_guard<std::mutex> command_lock(command_mutex_);
+    if (!expected_token.empty() && expected_token != control_token_) {return true;}
+    control_token_.clear();
     if (shutting_down_.load() && reason != MotionStopReason::NODE_SHUTDOWN) {
       record_stop_reason(reason);
       return false;
@@ -2062,6 +2119,14 @@ private:
   }
 
   double hardware_timeout_;
+  double control_lease_timeout_;
+  std::string controller_instance_id_;
+  std::string control_token_;
+  std::uint64_t control_generation_{0};
+  std::chrono::steady_clock::time_point control_deadline_{};
+  rclcpp::CallbackGroup::SharedPtr control_group_;
+  rclcpp::Service<pi_arm_interfaces::srv::ControlSession>::SharedPtr control_service_;
+  rclcpp::TimerBase::SharedPtr control_timer_;
   double operation_timeout_;
   double motion_timeout_;
   double still_velocity_;

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import json
 from pathlib import Path
 import threading
 import time
@@ -10,8 +11,8 @@ from typing import Any
 
 from ament_index_python.packages import get_package_share_directory
 from pi_arm_interfaces.action import DirectMove, MoveJ, MoveJs, MoveL
-from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState
-from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion, SetTeaching, SetZeroReference
+from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState, ExecutionState
+from pi_arm_interfaces.srv import AxisTest, ManageMotor, StopMotion, PreviewMotion, SetTeaching, SetZeroReference, ControlSession, ExecutionCommand
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -24,8 +25,13 @@ from .protocol import CODE_COMMAND_FAILED, CODE_MOTION_BUSY, CODE_STATE_UNAVAILA
 
 
 class RosBridge(Node):
-    def __init__(self) -> None:
-        super().__init__("pi_arm_websocket")
+    def __init__(self, name="pi_arm_websocket", *, connect_execution=True) -> None:
+        super().__init__(name)
+        self.connect_execution = connect_execution
+        self.control_token = ''
+        self.task_results = {}
+        self.execution_state = {}
+        self.execution_received_at = 0.
         self.declare_parameter("host", "0.0.0.0")
         self.declare_parameter("hardware_type", "real")
         self.declare_parameter("read_only", False)
@@ -96,6 +102,11 @@ class RosBridge(Node):
             "movel": ActionClient(self, MoveL, "/pi_arm/movel"),
             "direct": ActionClient(self, DirectMove, "/pi_arm/direct_move"),
         }
+        if not self.read_only and not self.commissioning:
+            self.service_clients['control_session'] = self.create_client(ControlSession, '/pi_arm/control_session')
+            if connect_execution:
+                self.service_clients['execution'] = self.create_client(ExecutionCommand, '/pi_arm/execution/command')
+                self.create_subscription(ExecutionState, '/pi_arm/execution/state', self._on_execution, 10)
         if self.commissioning:
             # 将普通控制客户端替换为维护节点及任务包的服务客户端。
             for client in self.service_clients.values():
@@ -113,6 +124,15 @@ class RosBridge(Node):
 
     def _on_hardware_state(self, hardware: HardwareState) -> None:
         self._on_state(monitor_state(hardware))
+
+    def _on_execution(self, message):
+        self.execution_state = {key: getattr(message, key) for key in message.get_fields_and_field_types() if key != 'stamp'}
+        self.execution_received_at = time.monotonic()
+
+    async def execution(self, command, params, connection=''):
+        result = await self.call_service('execution', ExecutionCommand.Request(
+            command=command, params_json=json.dumps(params, allow_nan=False), connection_id=connection))
+        return json.loads(result.data_json)
 
     def _on_state(self, message: RobotState) -> None:
         with self._state_lock:
@@ -141,19 +161,22 @@ class RosBridge(Node):
 
     async def call_service(self, command: str, request: Any) -> Any:
         client = self.service_clients[command]
-        self.get_logger().info(f"调用服务 {command}")
+        quiet = command in ('execution', 'control_session')
+        if not quiet:
+            self.get_logger().info(f"调用服务 {command}")
         available = await asyncio.to_thread(client.wait_for_service, self.timeout)
         if not available:
             self.get_logger().error(f"服务不可用: {command}")
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "manager 服务不可用")
-        result = await self.wait_future(client.call_async(request), 12.0 if command == "preview_motion" else None)
+        result = await self.wait_future(client.call_async(request), 20.0 if command == 'execution' else 12.0 if command == "preview_motion" else None)
         if not result.success:
             code = int(result.code) if result.code else CODE_COMMAND_FAILED
             self.get_logger().warning(
                 f"服务返回失败: cmd={command} code={code} message={result.message}"
             )
             raise ProtocolError(code, result.message)
-        self.get_logger().info(f"服务成功: {command}")
+        if not quiet:
+            self.get_logger().info(f"服务成功: {command}")
         return result
 
     def _track_goal(self, goal_handle: Any) -> Any:
@@ -202,6 +225,7 @@ class RosBridge(Node):
             return False
 
     async def send_goal(self, action_name: str, goal: Any) -> int:
+        goal.control_token = self.control_token
         state = self.state_snapshot()
         if state is None:
             self.get_logger().warning(f"action {action_name} 拒绝: 状态尚未就绪")
@@ -256,6 +280,13 @@ class RosBridge(Node):
             detail = "已请求取消，目标已结束" if ended else "停止未确认，请点击停止并检查任务状态"
             raise ProtocolError(CODE_COMMAND_FAILED, f"目标已接受但任务 ID 反馈超时；{detail}")
         self.get_logger().info(f"action {action_name} 已接受: task_id={task_id_box[0]}")
+        with self._goal_lock:
+            self.task_results[task_id_box[0]] = result_future
+            if len(self.task_results) > 512:
+                for key, value in list(self.task_results.items()):
+                    if value.done() and key != task_id_box[0]:
+                        del self.task_results[key]
+                        break
         return task_id_box[0]
 
 

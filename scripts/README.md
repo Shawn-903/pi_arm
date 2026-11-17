@@ -124,6 +124,17 @@ python3 scripts/test_web_recovery.py --ws ws://127.0.0.1:8766
 
 这些测试发送模拟运动、使能和恢复命令，并核对后端类型。点位测试会写入点位数据，启动 mock 时指定临时 `points_file`。
 
+程序与 SDK 验收另指定临时 `execution_file`，运行时不与其他运动测试共用实例：
+
+```bash
+python3 scripts/test_web_programs.py --ws ws://127.0.0.1:8766 --screenshots /tmp/pi-arm-ui
+python3 scripts/test_sdk_mock.py --host 127.0.0.1 --port 8766
+```
+
+网页脚本覆盖步骤编辑、冻结快照、暂停继续、停止确认、历史导出、点位身份及桌面/小屏/放大布局。SDK 脚本需先在独立 Python 环境安装 `sdk/python`，覆盖阻塞/非阻塞、心跳和断线、超时停止、三类有限步进、MoveJ/MoveL、五轮 A/B 及快照导出。Windows 客户端可将 `--host` 改为树莓派地址；其余 ROS 和浏览器测试在树莓派执行。
+
+执行状态机与网关单元测试：加载 ROS 环境后，设置 `PYTHONPATH="$PWD/src/pi_arm_tasks:$PWD/src/pi_arm_websocket:$PYTHONPATH"`，运行 `python3 -m pytest src/pi_arm_tasks/test/test_execution.py src/pi_arm_websocket/test`。覆盖重复受理、迟到请求、停止失败、写盘失败、重启中断及点位事务。
+
 ## vcan 与合成 ROS 验证
 
 单独准备空闲的虚拟接口，再 source 构建环境：

@@ -24,6 +24,17 @@ def test_parse_request_normalizes_command_and_defaults_params():
     assert request.params == {}
 
 
+def test_run_query_preserves_snapshot_and_sample_precision():
+    gateway = CommandGateway(None)
+    data = dict(run=dict(steps=[dict(point_snapshot=dict(values=[1.234567891]*6))]),
+                steps=[dict(sample=dict(joint_angles_deg=[2.345678912]*6))])
+    async def dispatch(*args):
+        return data
+    gateway.dispatch = dispatch
+    result = json.loads(asyncio.run(gateway.handle('{"cmd":"run_get","params":{"run_id":"r"}}')))
+    assert result['code'] == 0 and result['data'] == data
+
+
 @pytest.mark.parametrize("command", sorted(COMMANDS))
 def test_all_legacy_commands_are_accepted_by_parser(command):
     request = parse_request(json.dumps({"type": "req", "msg_id": 1, "cmd": command}))

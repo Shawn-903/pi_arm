@@ -24,6 +24,8 @@
 
 ## 接口与文件
 
+`/pi_arm/control_session` 提供 acquire/renew/release。程序或 SDK 会话取得的令牌覆盖等待和暂停阶段，运动 Goal 的 `control_token` 必须与当前令牌相符。默认 3 s 未续租时撤销令牌并停止；StopMotion 同样撤销令牌。`RobotState.controller_instance_id` 用于区分重启前后的任务。执行器及客户端用法见 [执行服务](../../docs/execution.md)。
+
 - [manager_node.cpp](src/manager_node.cpp)：动作、管理/停止服务、MoveIt/JTC 客户端、预览和执行主逻辑。
 - [trajectory_preparation.cpp](src/trajectory_preparation.cpp)：轨迹时间校验及关节/输出轴限速计算，使用节点取得的起点快照和模型限位；锁、租约和控制器提交仍由节点管理。
 - [direct_move_validation.hpp](include/pi_arm_manager/direct_move_validation.hpp)：关节顺序、限位、目标完整性及轨迹校验。

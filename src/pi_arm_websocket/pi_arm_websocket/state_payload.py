@@ -128,6 +128,7 @@ def robot_state_payload(state: RobotState | None) -> dict[str, Any]:
     body["driver_mode"] = state.hardware.driver_mode if state else "UNKNOWN"
     body["joint_fresh"] = list(state.hardware.fresh) if state else []
     body["joint_ages_sec"] = list(state.hardware.ages_sec) if state else []
+    body['controller_instance_id'] = state.controller_instance_id if state else ''
     return body
 
 

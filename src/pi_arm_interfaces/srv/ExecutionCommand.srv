@@ -1,0 +1,8 @@
+string command
+string params_json
+string connection_id
+---
+bool success
+int32 code
+string message
+string data_json

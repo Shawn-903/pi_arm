@@ -48,7 +48,9 @@ def main():
                 page.locator(f'[data-preset="{name}"]').click()
                 page.wait_for_function('pending.size===0')
                 assert sent[-1]['cmd'] == 'move_preset'
-                assert sent[-1]['params'] == dict(preset=name, max_speed=speed, output_speed_limit=10)
+                params = dict(sent[-1]['params'])
+                assert isinstance(params.pop('request_id'), str)
+                assert params == dict(preset=name, max_speed=speed, output_speed_limit=10)
             before = len(sent)
             page.locator('#presetSpeed').fill('10.001')
             page.locator('#moveZeroPose').click()

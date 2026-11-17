@@ -6,5 +6,8 @@ build/
 install/
 log/
 *.o
+*.egg-info/
+dist/
+.venv/
 # Generated from src/pi_arm_description by export_web_model.py.
 web/model/

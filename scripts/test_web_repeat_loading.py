@@ -79,7 +79,7 @@ def main():
             load('')
             for element in ('repeatStartPoint', 'repeatTargetPoint'):
                 assert page.locator(f'#{element} option').all_text_contents() == [
-                    '请选择点位', '零点A · 六关节', '重复定位A · 六关节', '重复点位B · 六关节']
+                    '请选择点位', '零点A', '重复定位A', '重复点位B']
             for asset in ('control.js', 'repeat.js', 'teaching.js'):
                 assert any(url.startswith('/assets/'+asset+'?v=') for url in requests), asset
             page.locator('#repeatStartPoint').select_option('0')

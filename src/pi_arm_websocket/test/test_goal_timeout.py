@@ -57,6 +57,8 @@ class Bridge:
     _cancel_accepted_goal = RosBridge._cancel_accepted_goal
 
     def __init__(self, client):
+        self.control_token = ''
+        self.task_results = {}
         self.timeout = 0.02
         self.action_clients = {"direct": client}
         self._goal_lock = threading.Lock()
@@ -74,7 +76,7 @@ def test_accepted_goal_without_feedback_is_cancelled_and_terminal_result_checked
     goal = Goal()
     bridge = Bridge(Client(goal))
     with pytest.raises(ProtocolError, match="目标已结束"):
-        asyncio.run(bridge.send_goal("direct", object()))
+        asyncio.run(bridge.send_goal("direct", SimpleNamespace()))
     assert goal.cancel_count == 1
     assert not bridge._active_goals
 
@@ -83,7 +85,7 @@ def test_cancel_ack_without_terminal_result_reports_unconfirmed_stop():
     goal = Goal(finish_on_cancel=False)
     bridge = Bridge(Client(goal))
     with pytest.raises(ProtocolError, match="停止未确认"):
-        asyncio.run(bridge.send_goal("direct", object()))
+        asyncio.run(bridge.send_goal("direct", SimpleNamespace()))
     assert goal.cancel_count == 1
     assert bridge._active_goals == [goal]
 
@@ -93,7 +95,7 @@ def test_late_acceptance_is_cancelled_even_after_request_event_loop_closed():
     client = Client(goal, late=True)
     bridge = Bridge(client)
     with pytest.raises(ProtocolError, match="接受状态未知"):
-        asyncio.run(bridge.send_goal("direct", object()))
+        asyncio.run(bridge.send_goal("direct", SimpleNamespace()))
     client.acceptance.set_result(goal)
     assert goal.cancel_count == 1
     assert not bridge._active_goals
@@ -105,7 +107,7 @@ def test_late_rejection_does_not_issue_cancel():
     client = Client(goal, late=True)
     bridge = Bridge(client)
     with pytest.raises(ProtocolError):
-        asyncio.run(bridge.send_goal("direct", object()))
+        asyncio.run(bridge.send_goal("direct", SimpleNamespace()))
     client.acceptance.set_result(goal)
     assert goal.cancel_count == 0
 
@@ -113,7 +115,7 @@ def test_late_rejection_does_not_issue_cancel():
 def test_timely_feedback_keeps_goal_active_until_result():
     goal = Goal()
     bridge = Bridge(Client(goal, feedback=True))
-    assert asyncio.run(bridge.send_goal("direct", object())) == 42
+    assert asyncio.run(bridge.send_goal("direct", SimpleNamespace())) == 42
     assert goal.cancel_count == 0
     assert bridge._active_goals == [goal]
     goal.result.set_result(SimpleNamespace(status=4))

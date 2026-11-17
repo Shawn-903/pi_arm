@@ -5,6 +5,7 @@ uint8 FAULT=3
 uint8 DISCONNECTED=4
 
 builtin_interfaces/Time stamp
+string controller_instance_id
 uint8 state
 string state_name
 pi_arm_interfaces/HardwareState hardware

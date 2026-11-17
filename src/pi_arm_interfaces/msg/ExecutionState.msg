@@ -1,0 +1,15 @@
+builtin_interfaces/Time stamp
+string run_id
+string session_id
+string mode
+string name
+string status
+string phase
+string step_id
+uint32 step_index
+uint32 step_count
+uint64 task_id
+int32 code
+string message
+bool stop_confirmed
+string controller_instance_id

@@ -48,14 +48,20 @@ class FrameModel:
         self.joints = {}
         for element in ET.fromstring(raw).findall('joint'):
             origin, axis, mimic = element.find('origin'), element.find('axis'), element.find('mimic')
+            limit = element.find('limit')
             vector = lambda attr: [float(v) for v in (origin.get(attr, '0 0 0') if origin is not None else '0 0 0').split()]
             self.joints[element.get('name')] = dict(
                 parent=element.find('parent').get('link'), child=element.find('child').get('link'),
                 kind=element.get('type'), xyz=vector('xyz'), rotation=quaternion(vector('rpy')),
+                limits=None if limit is None else [math.degrees(float(limit.get(key))) for key in ('lower', 'upper')],
                 axis=[float(v) for v in (axis.get('xyz') if axis is not None else '1 0 0').split()],
                 mimic=None if mimic is None else (mimic.get('joint'), float(mimic.get('multiplier', '1')), float(mimic.get('offset', '0'))))
         if len(self.names) != 6 or not all(name in self.joints for name in self.names):
             raise ValueError('URDF does not contain the six configured joints')
+
+    def metadata(self):
+        return dict(model_id=self.model_id, base_frame='base_link', tool_frame='tool0',
+                    joints=[dict(name=name, limits_deg=self.joints[name]['limits']) for name in self.names])
 
     def forward(self, positions):
         if len(positions) != 6 or not all(math.isfinite(v) for v in positions):

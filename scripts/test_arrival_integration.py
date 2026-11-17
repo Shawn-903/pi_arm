@@ -24,7 +24,7 @@ from control_msgs.action import FollowJointTrajectory
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from pi_arm_interfaces.action import DirectMove
 from pi_arm_interfaces.msg import HardwareState, RobotState, TaskState
-from pi_arm_interfaces.srv import SetMotionArmed, PreviewMotion, StopMotion
+from pi_arm_interfaces.srv import SetMotionArmed, PreviewMotion, StopMotion, ControlSession
 from rclpy.qos import qos_profile_sensor_data
 import xacro
 import yaml
@@ -55,6 +55,7 @@ class Fixture(Node):
         self.client=ActionClient(self,DirectMove,'/pi_arm/direct_move',callback_group=self.group)
         self.preview=self.create_client(PreviewMotion,'/pi_arm/preview_motion',callback_group=self.group)
         self.stop=self.create_client(StopMotion,'/pi_arm/stop_motion',callback_group=self.group)
+        self.control=self.create_client(ControlSession,'/pi_arm/control_session',callback_group=self.group)
 
     def accept_follow(self, _request):
         self.controller_requested.set()
@@ -260,6 +261,27 @@ def main():
             assert node.follow_count==count,'Stop generated an unwanted hold trajectory'
             assert node.arm_requests==[(False,True,0),(False,True,0)],node.arm_requests
             print('PASS idle/dwell repeated Stop holds without generating trajectories',flush=True)
+            # 程序等待及暂停没有 action，控制权仍须由 manager 最终保护。
+            time.sleep(.4)
+            lease=await_future(node.control.call_async(ControlSession.Request(operation='acquire',name='test')))
+            assert lease.success and lease.token and lease.controller_instance_id, lease
+            goal=DirectMove.Goal(joint_names=NAMES,positions=[0.]*6,max_velocity=math.radians(1),max_output_velocity=math.radians(1))
+            assert not await_future(node.client.send_goal_async(goal)).accepted
+            assert not await_future(node.preview.call_async(preview)).success
+            goal.control_token=lease.token
+            node.positions=[0.]*6;node.mode='settle';node.sent_at=0.;time.sleep(.2)
+            handle=await_future(node.client.send_goal_async(goal));assert handle.accepted
+            result=await_future(handle.get_result_async(),3)
+            assert result.status==GoalStatus.STATUS_SUCCEEDED,result
+            assert await_future(node.control.call_async(ControlSession.Request(operation='release',token=lease.token))).success
+            time.sleep(.3)
+            assert not await_future(node.client.send_goal_async(goal)).accepted,'old token was reused'
+            expiring=await_future(node.control.call_async(ControlSession.Request(operation='acquire',name='expiry')))
+            assert expiring.success
+            before=len(node.arm_requests);time.sleep(3.4)
+            assert len(node.arm_requests)>before,'expiry did not request hold'
+            assert not await_future(node.control.call_async(ControlSession.Request(operation='renew',token=expiring.token))).success
+            print('PASS exclusive lease / unauthorized ROS rejection / stale token / expiry hold',flush=True)
         finally:
             os.killpg(process.pid,signal.SIGINT)
             try:process.wait(timeout=10)

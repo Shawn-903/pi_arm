@@ -4,6 +4,7 @@
 
 | 任务 | 用途 | 调用入口 |
 | --- | --- | --- |
+| [execution](../../docs/execution.md) | 独占控制会话、步骤程序、暂停停止和持久运行记录 | `pi_arm_execution`、网页、[Python SDK](../../sdk/python/README.md) |
 | [zero_reference](pi_arm_tasks/zero_reference/README.md) | 采集已知姿态的编码器读数，计算并保存软件零点 | `scripts/zero_reference.sh` 一键流程；网页、`ZeroReferenceClient`、`pi_arm_zero` 接入维护服务 |
 | [calibration_motion](pi_arm_tasks/calibration_motion/README.md) | 按姿态清单逐点运动、等待到位、停留并记录反馈 | `CalibrationMotionTask`、`pi_arm_calibration_motion` |
 

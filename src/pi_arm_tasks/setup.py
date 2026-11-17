@@ -19,6 +19,7 @@ setup(
     description="Reusable tasks using Pi Arm ROS services and actions.",
     license="Apache-2.0",
     entry_points={"console_scripts": [
+        "pi_arm_execution = pi_arm_tasks.execution.node:main",
         "pi_arm_zero_reference = pi_arm_tasks.zero_reference.node:main",
         "pi_arm_zero = pi_arm_tasks.zero_reference.cli:main",
         "pi_arm_zero_once = pi_arm_tasks.zero_reference.standalone:main",

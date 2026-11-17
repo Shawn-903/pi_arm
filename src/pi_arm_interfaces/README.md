@@ -9,6 +9,7 @@ ROS 2 公共接口定义包。硬件、manager、任务包和网关通过这里�
 | [HardwareState](msg/HardwareState.msg) | 六轴反馈、原始协议/输出角、标定、诊断、写入许可及示教/停止状态；`/pi_arm/hardware_state` |
 | [RobotState](msg/RobotState.msg) | manager 聚合整机状态、硬件和任务；`/pi_arm/state` |
 | [TaskState](msg/TaskState.msg) | task_id、进度、结果、到位阶段、目标/误差；IDLE=0、RUNNING=1、SUCCEEDED=2、CANCELED=3、FAILED=4 |
+| [ExecutionState](msg/ExecutionState.msg) | 程序/会话、步骤、暂停停止、控制器实例与停止确认；`/pi_arm/execution/state` |
 
 ## 动作
 
@@ -21,6 +22,8 @@ ROS 2 公共接口定义包。硬件、manager、任务包和网关通过这里�
 
 调用动作后，从反馈取得任务号，通过终态和到位核验结果判断完成情况。`max_output_velocity=0` 选择默认 5°/s，非零使用 rad/s。关节顺序见 [源码索引](../README.md)。
 
+四种运动 Goal 均有 `control_token`。持有控制会话时须使用匹配的令牌；没有控制会话时可留空。manager 对每个 Goal 检查令牌和有效期。任务编号应与 RobotState 的 `controller_instance_id` 一起核对，避免重启后混淆任务。
+
 ## 服务
 
 | 定义 | 服务入口 | 作用 |
@@ -32,6 +35,8 @@ ROS 2 公共接口定义包。硬件、manager、任务包和网关通过这里�
 | [AxisTest](srv/AxisTest.srv) | `/pi_arm/commissioning/axis_test` | 维护模式的 start/heartbeat/stop，步进与速度单位为 °、°/s |
 | [SetZeroReference](srv/SetZeroReference.srv) | `/pi_arm/tasks/set_zero_reference` | 确认实物参考姿态并采集软件零点，参考关节角使用 rad；转调 `/pi_arm/commissioning/set_zero_reference`，调用方式见 [任务包](../pi_arm_tasks/README.md) |
 | [PreviewMotion](srv/PreviewMotion.srv) | `/pi_arm/preview_motion` | 根据 joint/output/ik/lin 请求计算目标和轨迹，供前端预览 |
+| [ControlSession](srv/ControlSession.srv) | `/pi_arm/control_session` | acquire/renew/release 独占控制权；默认 500 ms 续租，3 s 过期 |
+| [ExecutionCommand](srv/ExecutionCommand.srv) | `/pi_arm/execution/command` | 程序、SDK 会话、有限步进与历史查询；命令和 JSON 参数见 [执行服务](../../docs/execution.md) |
 
 `SetMotionArmed` 的租约是一次运动的临时写入许可，用 `lease_id` 关联任务与清理请求。正常到位释放该许可时保留最终目标；用户停止使用零 lease 捕获当前位置。该服务由控制链内部协调，上层程序通过动作或 `StopMotion` 发起操作。
 

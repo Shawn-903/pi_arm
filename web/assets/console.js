@@ -4,11 +4,12 @@
     workbench: "操作工作台",
     points: "点位示教",
     records: "运行记录",
+    programs: "步骤程序",
     diagnostics: "开发诊断",
     commissioning: "方向测试",
   };
   const role = document.getElementById("viewRole");
-  const limits = [180, 100.7, 85.6, 30, 60, 180];
+  const limits = [null, null, null, null, null, null];
   const names = [
     "joint_01",
     "joint_02",
@@ -21,11 +22,12 @@
   overview.innerHTML = names
     .map(
       (name, i) =>
-        `<article class="joint-tile unavailable" data-overview-axis="${i}"><header><strong>J${i + 1}</strong><span>±${limits[i]}°</span></header><div class="joint-value"><span>--</span><small>°</small></div><div class="angle-track" aria-hidden="true"><span></span></div></article>`,
+        `<article class="joint-tile unavailable" data-overview-axis="${i}"><header><strong>J${i + 1}</strong><span>等待模型限位</span></header><div class="joint-value"><span>--</span><small>°</small></div><div class="angle-track" aria-hidden="true"><span></span></div></article>`,
     )
     .join("");
   function showView(view) {
     if (!(view in titles)) return;
+    if (document.body.dataset.view !== view) window.scrollTo(0, 0);
     window.PiArmViewer?.setView(view);
     if (
       ["diagnostics", "commissioning"].includes(view) &&
@@ -94,6 +96,8 @@
       READY: "就绪",
       DISABLED: "未使能",
       MOVING: "运动中",
+      RUNNING: "运行中",
+      DISCONNECTED: "反馈断开",
       BUSY: "执行中",
       FAULT: "故障",
       ERROR: "故障",
@@ -163,13 +167,23 @@
     document.querySelectorAll("[data-overview-axis]").forEach((el) => {
       const i = Number(el.dataset.overviewAxis),
         q = state?.current_joint_angles?.[i];
+      const bounds = state?.model?.joints?.[i]?.limits_deg;
+      if (bounds) {
+        limits[i] = Math.max(...bounds.map(Math.abs));
+        el.querySelector('header>span').textContent = `${bounds[0].toFixed(1)}～${bounds[1].toFixed(1)}°`;
+        el.title = state.model.joints[i].name;
+        for (const prefix of ['target', 'multiJoint']) {
+          const input = document.getElementById(prefix+(i+1));
+          if (input) { input.min = bounds[0]; input.max = bounds[1]; }
+        }
+      }
       const usable = valid && number(q);
       el.classList.toggle("unavailable", !usable);
-      el.classList.toggle("warn", usable && Math.abs(q) > limits[i]);
+      el.classList.toggle("warn", usable && limits[i] !== null && Math.abs(q) > limits[i]);
       el.querySelector(".joint-value>span").textContent = usable
         ? q.toFixed(2)
         : "--";
-      el.querySelector(".angle-track>span").style.left = usable
+      el.querySelector(".angle-track>span").style.left = usable && limits[i]
         ? `${Math.max(0, Math.min(100, 50 + (q / limits[i]) * 50))}%`
         : "50%";
     });

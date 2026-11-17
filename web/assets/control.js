@@ -20,6 +20,7 @@ let lastStateAt = 0;
 let lastTaskKey = "";
 let targetsInitialized = false;
 let acceptedTaskId = null;
+let acceptedRunId = null;
 let ownAxisTest = null;
 const axisTestRecords = [];
 const pending = new Map();
@@ -91,6 +92,8 @@ let connectionState = "closed";
 function refreshControlGate() {
   const connected = connectionState === "connected";
   const fresh = connected && lastState && Date.now() - lastStateAt < 1500;
+  if (fresh && acceptedRunId === lastState?.execution?.run_id &&
+      ['SUCCEEDED', 'CANCELED', 'FAILED', 'INTERRUPTED'].includes(lastState.execution.status)) acceptedRunId = null;
   if (
     fresh &&
     acceptedTaskId !== null &&
@@ -105,6 +108,7 @@ function refreshControlGate() {
     !lastState?.read_only &&
     !lastState?.teaching_active &&
     acceptedTaskId === null &&
+    acceptedRunId === null &&
     fresh &&
     lastState.control_permitted === true &&
     lastState.robot_state === "READY" &&
@@ -114,8 +118,10 @@ function refreshControlGate() {
         motionCommands.has(item.cmd) ||
         ["preview_motion", "reset_motor", "reboot_motor", "set_teaching"].includes(item.cmd),
     );
-  const permitted = motionReady && !window.PiArmRepeat?.active;
+  const occupied = ['STARTING', 'RUNNING', 'PAUSING', 'PAUSED', 'STOPPING'].includes(lastState?.execution?.status);
+  const permitted = motionReady && !occupied;
   window.PiArmRepeat?.refresh(lastState, { fresh, permitted: motionReady, connectionState });
+  window.PiArmPrograms?.refresh(lastState, { fresh, permitted, connectionState });
   document
     .querySelectorAll(
       "button[data-cmd], #multiStopBtn, button[data-action='stop']",
@@ -142,7 +148,7 @@ function refreshControlGate() {
   const recoveryPending = [...pending.values()].some((item) =>
     ["reset_motor", "reboot_motor"].includes(item.cmd),
   );
-  const recoveryIdle =
+  const recoveryIdle = !occupied &&
     fresh &&
     !lastState?.read_only &&
     lastState?.hardware_connected &&
@@ -286,6 +292,7 @@ function connect() {
   lastStateAt = 0;
   targetsInitialized = false;
   acceptedTaskId = null;
+  acceptedRunId = null;
   try {
     ws = new WebSocket(wsUrl);
   } catch (error) {
@@ -331,8 +338,8 @@ function connect() {
 }
 
 function sendCommand(cmd, params = {}, options = {}) {
-  if (window.PiArmRepeat?.active && motionCommands.has(cmd) && !options.repeat) {
-    log("请先停止重复定位测试，再发送其他运动");
+  if (window.PiArmPrograms?.occupied && motionCommands.has(cmd)) {
+    log("程序或脚本正在控制机械臂，请先停止当前运行");
     return false;
   }
   if (
@@ -346,7 +353,6 @@ function sendCommand(cmd, params = {}, options = {}) {
     ].includes(cmd)
   ) {
     window.PiArmInteractive?.cancelActions("停止或下使能请求，松手执行已关闭");
-    window.PiArmRepeat?.cancel("收到停止、示教或电机操作，循环已中止", false);
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     log("发送失败：WebSocket 未连接", { cmd, params });
@@ -393,6 +399,7 @@ function sendCommand(cmd, params = {}, options = {}) {
     try {
       params = {
         ...params,
+        request_id: params.request_id || crypto.randomUUID(),
         output_speed_limit: options.repeat ? params.output_speed_limit : readPositiveFloat("outputSpeedLimit"),
         ...(cmd === "move_preset" ? { max_speed: readPositiveFloat("presetSpeed") } : {}),
       };
@@ -487,7 +494,8 @@ function handleMessage(data) {
       text.className = ok ? "status-ok" : "status-error";
     }
     if (item?.resolve) {
-      if (ok && motionCommands.has(item.cmd) && data.data?.task_id !== undefined)
+      if (ok && data.data?.step_id) acceptedRunId = data.data.run_id;
+      else if (ok && motionCommands.has(item.cmd) && data.data?.task_id !== undefined)
         acceptedTaskId = data.data.task_id;
       if (ok) item.resolve(data.data);
       else item.reject(new Error(data.ms || "请求失败"));
@@ -503,7 +511,8 @@ function handleMessage(data) {
     }
     const accepted =
       motionCommands.has(item?.cmd) && data.data?.task_id !== undefined;
-    if (ok && accepted) acceptedTaskId = data.data.task_id;
+    if (ok && data.data?.step_id) acceptedRunId = data.data.run_id;
+    else if (ok && accepted) acceptedTaskId = data.data.task_id;
     log(
       ok
         ? accepted
@@ -979,8 +988,15 @@ function readNumber(id) {
     !Number.isFinite(value) ||
     !input.checkValidity()
   ) {
+    input?.setAttribute('aria-invalid', 'true');
+    let error = input?.parentElement.querySelector('.field-error');
+    if (input && !error) { error = document.createElement('span'); error.className = 'field-error'; input.after(error); }
+    if (error) error.textContent = '请填写范围内的有效数字';
+    input?.focus();
     throw new Error(`${id} 必须填写有效数字（检查范围）`);
   }
+  input.removeAttribute('aria-invalid');
+  input.parentElement.querySelector('.field-error')?.remove();
   return value;
 }
 
@@ -1121,6 +1137,15 @@ init();
 
 // Single transport and the same motion gate for all interactive UI controls.
 window.PiArmControl = {
+  request(cmd, params = {}) {
+    return new Promise((resolve, reject) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) { reject(new Error('请先连接机械臂')); return; }
+      const id = msgId++;
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('请求超时，请查询运行状态')); }, 22000);
+      pending.set(id, { cmd, timer, resolve, reject });
+      ws.send(JSON.stringify({ type: 'req', msg_id: id, cmd, params }));
+    });
+  },
   repeatMove(cmd, params) {
     return new Promise((resolve, reject) => {
       if (!["move", "movel"].includes(cmd) ||
@@ -1153,7 +1178,7 @@ window.PiArmControl = {
   library(cmd, params = {}) {
     return new Promise((resolve, reject) => {
       if (
-        !["point_list", "point_save", "point_delete"].includes(cmd) ||
+        !["point_list", "point_save", "point_delete", "point_update", "point_export", "point_import"].includes(cmd) ||
         !ws ||
         ws.readyState !== WebSocket.OPEN ||
         !lastState?.points_available

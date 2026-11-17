@@ -75,6 +75,7 @@ def test_rpy_reconstructs_quaternion_at_singularities(pitch):
 
 class Bridge:
     hardware_type='mock'; read_only=True; commissioning=False
+    execution_state={}
     def __init__(self, model, path):
         self.frame_model=model;self.points=PointStore(path);self.state=RobotState()
         self.state.state=RobotState.DISABLED;self.state.state_name='DISABLED'
@@ -105,6 +106,12 @@ def test_disabled_readonly_capture_and_disk_round_trip(model,tmp_path):
     assert state['base_frames']['valid'] and state['points_available']
     assert state['pose']['x']==round(p['pose_mm_deg'][0],3)
     assert call(b,'point_delete',id=p['id'],revision=2)['revision']==3
+
+
+def test_queries_are_available_without_control(model,tmp_path):
+    b=Bridge(model,tmp_path/'points.json')
+    assert call(b,'get_info')['protocol_version']==1
+    assert call(b,'get_state')['robot_state']=='DISABLED'
 
 
 @pytest.mark.parametrize('fault',['stale','moving','task','invalid','disconnected','motor_error','override'])
@@ -156,6 +163,28 @@ def test_point_wire_precision_preserves_disk_and_coordinate_math(model,tmp_path)
     assert b.points.list()['points'][0]['values']==[1.234567]*6
     assert wire['orientation_xyzw']==data['points'][0]['orientation_xyzw']
     assert point_precision({'model_output_positions_rad':[1.234567]})['model_output_positions_rad']==[1.234567]
+
+
+def test_point_update_import_transaction_and_lossless_export(model,tmp_path):
+    b=Bridge(model,tmp_path/'points.json')
+    created=call(b,name='precise',kind='joint',source='manual',values=[1.23456789]*6,revision=0)
+    point=created['points'][0]
+    data=call(b,'point_update',id=point['id'],name='renamed',note='note',revision=1)
+    assert data['points'][0]['id']==point['id'] and data['points'][0]['source']=='manual'
+    assert data['points'][0]['revision']==2
+    exported=json.loads(call(b,'point_export')['content'])
+    assert exported['points'][0]['values']==[1.23456789]*6
+    check=call(b,'point_import',document=exported,revision=2,conflict='skip')
+    assert check['skipped']==1 and b.points.list()==data
+    bad=json.loads(json.dumps(exported));bad['points'].append(dict(point,id='second',name='invalid',values=[True]*6))
+    with pytest.raises(ProtocolError):
+        call(b,'point_import',document=bad,revision=2,conflict='update',commit=True)
+    assert b.points.list()==data
+    incoming=json.loads(json.dumps(exported));incoming['points'][0]['note']='imported'
+    committed=call(b,'point_import',document=incoming,revision=2,conflict='update',commit=True)
+    assert committed['points'][0]['source']=='import'
+    assert committed['points'][0]['id']==point['id']
+    assert b.points.path.with_suffix('.json.v0.5.bak').exists()
 
 
 @pytest.mark.parametrize('enabled',[True,False])

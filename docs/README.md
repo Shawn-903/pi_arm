@@ -5,6 +5,9 @@
 | 资料 | 用途 |
 | --- | --- |
 | [版本管理](versioning.md) | 版本编号、使用与开发的区分、标签发布和版本记录 |
+| [执行服务](execution.md) | 步骤程序、控制会话、暂停停止、协议与持久记录 |
+| [Python SDK](../sdk/python/README.md) | 安装、运动函数、点位、结果与异常 |
+| [设计参考资料](references.md) | 开发时查阅的官方文档 |
 | [CAN 总线通讯协议 V2.6](CAN总线通讯协议V2.6.pdf) | 电机原始协议；文件内封面版本为 V2.36，引用时按命令字/章节核对 |
 | [标定历史](calibration-history/README.md) | 原始测量、ROM 写入审计、历史配置与接受记录 |
 | [绳索模型](../src/pi_arm_transmission/README.md) | 当前生产公式、通道关系、非线性与速度映射 |

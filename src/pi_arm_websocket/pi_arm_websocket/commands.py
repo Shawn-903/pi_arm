@@ -15,7 +15,7 @@ from .points import dispatch_points
 from .presets import PosePresets, JOINT_NAMES, PRESET_JOINT_SPEED_DEG_S
 from .protocol import (
     CODE_COMMAND_FAILED, CODE_INVALID_PARAMS, CODE_STATE_UNAVAILABLE,
-    POINT_COMMANDS, ProtocolError, Request, integer_param, parse_request,
+    POINT_COMMANDS, EXECUTION_COMMANDS, ProtocolError, Request, integer_param, parse_request,
     required_float, required_vector, response,
 )
 from .rotations import DEG_TO_RAD, RAD_TO_DEG, quaternion_from_rpy, rpy_from_quaternion
@@ -38,24 +38,32 @@ class CommandGateway:
             return summary
         return params
 
-    async def handle(self, raw: str) -> str:
+    async def handle(self, raw: str, connection_id='') -> str:
         msg_id = 0
         try:
             request = parse_request(raw)
             msg_id = request.msg_id
-            self.bridge.get_logger().info(
+            quiet = request.command in {'task_get', 'execution_state', 'get_state', 'session_heartbeat',
+                                        'request_get', 'program_list', 'run_list', 'run_get'}
+            if not quiet:
+                self.bridge.get_logger().info(
                 f"WS 请求: msg_id={msg_id} cmd={request.command} "
                 f"params={self._params_for_log(request.params)}"
-            )
-            data = await self.dispatch(request)
+                )
+            data = await self.dispatch(request, connection_id)
             summary = ({'revision': data.get('revision'), 'point_count': len(data.get('points', []))}
                        if request.command in POINT_COMMANDS else
-                       data.get('message') if request.command == 'preview_motion' else data)
-            self.bridge.get_logger().info(
+                       data.get('message') if request.command == 'preview_motion' else
+                       {k:data[k] for k in ('run_id', 'step_id', 'task_id', 'status', 'message') if k in data}
+                       if request.command in EXECUTION_COMMANDS else data)
+            if not quiet:
+                self.bridge.get_logger().info(
                 f"WS 响应成功: msg_id={msg_id} cmd={request.command} "
                 f"data={summary}"
-            )
-            return response(msg_id, 0, "ok", data)
+                )
+            return response(msg_id, 0, "ok", data, precise=(
+                request.command in EXECUTION_COMMANDS | {'get_info', 'get_state'} or
+                bool(request.params.get('request_id'))))
         except ProtocolError as exc:
             self.bridge.get_logger().warning(
                 f"WS 协议/业务失败: msg_id={exc.msg_id or msg_id} "
@@ -66,12 +74,35 @@ class CommandGateway:
             self.bridge.get_logger().error(f"WS 未处理异常: msg_id={msg_id} error={exc}")
             return response(msg_id, CODE_COMMAND_FAILED, f"命令执行失败: {exc}")
 
-    async def dispatch(self, request: Request) -> dict[str, Any]:
+    async def dispatch(self, request: Request, connection_id='') -> dict[str, Any]:
         command, params = request.command, request.params
+        if command in ('get_info', 'get_state'):
+            from .state_payload import robot_state_payload, json_safe
+            if command == 'get_info':
+                return dict(protocol_version=1, version='0.51', hardware_type=self.bridge.hardware_type,
+                            read_only=self.bridge.read_only, commissioning=self.bridge.commissioning,
+                            features=['points'] if self.bridge.read_only or self.bridge.commissioning else
+                            ['sessions', 'programs', 'steps', 'points', 'history'],
+                            units=dict(joints='deg', position='mm', orientation='deg'),
+                            model=self.bridge.frame_model.metadata(),
+                            motion_parameters=dict(angular_acceleration_independent=False,
+                                                   max_joint_speed_deg_s=10, max_output_speed_deg_s=10))
+            state = self.bridge.state_snapshot()
+            return json_safe(dict(robot_state_payload(state), hardware_type=self.bridge.hardware_type,
+                                  base_frames=self.bridge.frame_model.feedback(state.hardware if state else None),
+                                  execution=self.bridge.execution_state))
         if command in POINT_COMMANDS:
             return await asyncio.to_thread(dispatch_points, self.bridge, command, params)
         if self.bridge.read_only:
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "只读排查模式：仅查看反馈，不提供控制服务")
+        if getattr(self.bridge, 'connect_execution', False) and not self.bridge.commissioning:
+            if command in EXECUTION_COMMANDS or ((params.get('session_id') or params.get('request_id')) and
+                    command in ('move', 'movej', 'movel', 'movejs', 'motor_move', 'output_move', 'move_preset')):
+                return await self.bridge.execution(command, params, connection_id)
+            if command in ('stop_motion', 'motor_stop'):
+                client = self.bridge.service_clients.get('execution')
+                if client and client.service_is_ready():
+                    return dict(await self.bridge.execution('execution_stop', params, connection_id), cmd=command)
         if command == "set_zero_reference":
             if not self.bridge.commissioning:
                 raise ProtocolError(CODE_STATE_UNAVAILABLE, "软件标零需要 commissioning 维护模式")

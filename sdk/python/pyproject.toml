@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pi-arm-sdk"
+version = "0.51.0"
+description = "Pi Arm Python motion control client"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["websockets>=15,<18"]
+license = "Apache-2.0"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pi_arm_sdk*"]

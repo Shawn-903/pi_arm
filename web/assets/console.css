@@ -321,6 +321,7 @@ input[type="radio"] {
 }
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
@@ -337,6 +338,9 @@ input[type="radio"] {
   font-weight: 700;
   color: #7f90a6;
   letter-spacing: 1.7px;
+}
+.page-heading {
+  flex-shrink: 0;
 }
 .header-actions {
   display: flex;
@@ -1851,3 +1855,9 @@ body[data-view="commissioning"] .workspace-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* 点位编辑保持在当前工作区，长元数据可换行查看。 */
+.point-edit-dialog {max-width: min(560px, 94vw);border:1px solid #ccd4de;border-radius:12px;padding:22px;}
+.point-edit-dialog label {display:flex;flex-direction:column;gap:5px;margin:12px 0;}
+.point-edit-dialog input {min-width:0;width:100%;}
+.point-edit-dialog button {margin:6px;}
+.point-card pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;}

@@ -1,3 +1,4 @@
+string control_token
 geometry_msgs/PoseStamped target
 float64 max_linear_velocity
 float64 max_linear_acceleration
