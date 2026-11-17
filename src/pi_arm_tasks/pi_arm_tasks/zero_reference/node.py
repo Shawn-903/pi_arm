@@ -31,7 +31,7 @@ class ZeroReferenceNode(Node):
         except (TypeError, ValueError) as error:
             response.code, response.message = 1004, str(error)
             return response
-        if not self._hardware.service_is_ready():
+        if not self._hardware.wait_for_service(timeout_sec=1.0):
             response.code = 2001
             response.message = "software zero requires the commissioning hardware service"
             return response

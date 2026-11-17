@@ -9,6 +9,7 @@
 | [install_dependencies.sh](install_dependencies.sh) | 安装 Ubuntu/ROS 依赖，需要 sudo 和已配置的 Jazzy 软件源 |
 | [build.sh](build.sh) | source ROS、colcon symlink 构建、导出网页模型 |
 | [start_web.sh](start_web.sh) | 正常/mock、`--monitor`、`--commissioning` 启动入口，管理 ROS 与 HTTP 子进程 |
+| [zero_reference.sh](zero_reference.sh) | 一条命令启动标零所需服务、等待静止反馈、保存软件零偏并退出；传入 `--confirm-reference` 确认实物已在参考姿态 |
 | [setup_can.sh](setup_can.sh) | 配置 real/vcan 接口或通过 down 关闭接口；运行前停止占用该接口的服务 |
 | [export_web_model.py](export_web_model.py) | 从 URDF/Xacro 生成网页模型与哈希清单，无损压缩网格 |
 | [build_web_vendor.py](build_web_vendor.py) | 下载并校验固定版本依赖，重建前端 vendor，需要网络 |
@@ -40,7 +41,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | 网关命令、状态或点位逻辑 | 从 [网关测试目录](../src/pi_arm_websocket/test/) 选择对应文件；ROS 调用或共享状态变化时，再覆盖受影响的 mock 路径 |
 | 网页布局、诊断、重复运动等单项功能 | 从下方离线网页测试中选择对应脚本；跨页面共用逻辑变化时覆盖相关页面 |
 | commissioning 电机测试界面、请求或模拟器冻结运动 | `test_web_axis.py` 普通与 `--stall` 场景，使用独立 commissioning/vcan 服务 |
-| 软件标零计算、持久化或任务入口 | 硬件 `test_backend` 中 `SoftwareZero.*` 及相关坐标测试；`test_software_zero_vcan.py` 验证生产后端；任务/网页变化选择客户端和网页专项入口 |
+| 软件标零计算、持久化或任务入口 | 硬件 `test_backend` 中 `SoftwareZero.*` 及相关坐标测试；`test_software_zero_vcan.py` 验证生产后端；`test_zero_once_vcan.py` 验证一键脚本及进程清理；任务/网页变化选择客户端和网页专项入口 |
 | 标定姿态采样任务 | [任务测试](../src/pi_arm_tasks/test/) 检查姿态输入及执行/停止；[test_calibration_motion_mock.py](test_calibration_motion_mock.py) 验证完整 mock 控制链与 CLI，可用 `--case success` 或 `--case interrupt` 单独运行场景 |
 | manager 到位、停止或取消 | [manager 测试目录](../src/pi_arm_manager/test/) 中对应单测；涉及编排、Action 或并发时加 `test_arrival_integration.py` |
 | manager 工作线程、租约或退出顺序 | `test_manager_shutdown.py` 的相关场景；共享动作收尾发生变化时加 `test_arrival_integration.py` |

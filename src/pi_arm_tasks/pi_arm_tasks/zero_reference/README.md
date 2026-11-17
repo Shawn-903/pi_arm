@@ -1,6 +1,38 @@
 # 软件标零任务
 
-在实物处于已知关节姿态时采集编码器读数，计算并保存软件零偏。网页、Python 程序和命令行共用 `/pi_arm/tasks/set_zero_reference` 服务，反馈采样与文件保存由硬件层完成。
+在实物处于已知关节姿态时采集编码器读数，计算并保存软件零偏。可以用一条命令完成，也可以通过网页或 Python 调用。
+
+## 一条命令标零
+
+树莓派上的项目完成构建、CAN 接口就绪后，先停止正在运行的控制或维护服务，将机械臂放到机械零位并保持静止。在仓库根目录执行：
+
+```bash
+bash scripts/zero_reference.sh --confirm-reference
+```
+
+脚本会加载 ROS 和当前工作区环境，启动硬件维护服务与标零服务，等待电机反馈就绪后采集一次零点，保存结果，再关闭本次启动的服务。`--confirm-reference` 表示你已确认实物处于给定姿态；默认参考关节角均为零。
+
+默认使用 `can0`、包内的 `pack_reference_calibration.R10.recorded.yaml` 基础配置，保存到 `$HOME/.local/share/pi_arm/software-zero-can0.yaml`。其他参数可按实际配置指定：
+
+```bash
+bash scripts/zero_reference.sh --confirm-reference \
+  --can-interface can0 \
+  --calibration-file /path/to/base-calibration.yaml \
+  --software-zero-file "$HOME/.local/share/pi_arm/software-zero-can0.yaml"
+```
+
+采集其他已知姿态时，使用 `--reference-deg` 传入角度，单位为度，顺序为 `joint_01, joint_02, joint_04, joint_05, joint_06, joint_09`：
+
+```bash
+bash scripts/zero_reference.sh --confirm-reference \
+  --reference-deg 0 100.7 -85.6 0 0 0
+```
+
+该例将当前实物姿态登记为这组角度。自定义绳索模型用 `--cable-kinematics-file` 指定；服务和静止反馈的等待时间由 `--startup-timeout` 设置，默认 15 秒。
+
+运行日志输出到终端。成功时，最后一行 JSON 给出 `success`、`reference_id`、`software_zero_file` 和 `cleanup_success`，命令退出码为 0。失败时会说明原因并清理本次服务；若返回 `result_unknown: true`，按保存文件中的参考编号核对结果后再操作。按 `Ctrl+C` 可以结束运行，已发出的采集请求会先等待本次结果，再退出。
+
+已经加载 ROS 和工作区环境时，也可直接执行 `ros2 run pi_arm_tasks pi_arm_zero_once --confirm-reference`。完整参数见 `bash scripts/zero_reference.sh --help`。
 
 ## 启动与网页使用
 
@@ -17,11 +49,13 @@ bash scripts/start_web.sh --commissioning \
 
 该入口会启动 `pi_arm_zero_reference` 服务节点。网页“方向测试”中，将实物放到六关节机械零位，勾选确认后点击“采集并保存软件零点”。成功后显示参考编号，并通过 `HardwareState.software_zero_id` 发布。
 
-独立 ROS 程序可先启动 `pi_arm_bringup` 的 `monitor.launch.py`，设置 `commissioning:=true` 并传入相同文件参数，再在另一个已加载环境的终端执行 `ros2 run pi_arm_tasks pi_arm_zero_reference`。
-
 ## 命令行与 Python
 
-命令行使用度，按主动关节顺序传入已确认的参考姿态；默认值为六关节零位：
+接入已运行的维护服务时，使用 `pi_arm_zero` 客户端或 `ZeroReferenceClient`。它们调用 `/pi_arm/tasks/set_zero_reference`，复用服务的配置和保存路径。
+
+上面的网页启动命令已经包含所需服务。独立 ROS 程序也可以先启动 `pi_arm_bringup` 的 `monitor.launch.py`，设置 `commissioning:=true` 并传入相同文件参数，再在另一个已加载环境的终端执行 `ros2 run pi_arm_tasks pi_arm_zero_reference`。
+
+客户端命令行使用度，默认参考姿态为机械零位：
 
 ```bash
 ros2 run pi_arm_tasks pi_arm_zero --confirm-reference

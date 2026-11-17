@@ -21,6 +21,7 @@ setup(
     entry_points={"console_scripts": [
         "pi_arm_zero_reference = pi_arm_tasks.zero_reference.node:main",
         "pi_arm_zero = pi_arm_tasks.zero_reference.cli:main",
+        "pi_arm_zero_once = pi_arm_tasks.zero_reference.standalone:main",
         "pi_arm_calibration_motion = pi_arm_tasks.calibration_motion.cli:main",
     ]},
 )
