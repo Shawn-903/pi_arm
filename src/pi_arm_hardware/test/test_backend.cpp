@@ -149,6 +149,28 @@ TEST(MockBackend, DeactivateClearsMotionAndDisconnects)
   for (const bool fresh : sample.fresh) {
     EXPECT_FALSE(fresh);
   }
+  EXPECT_FALSE(backend.set_motion_armed(true, 1U).success);
+  EXPECT_FALSE(backend.set_motion_armed(false, 0U, 0.0, true).success);
+  EXPECT_TRUE(backend.set_motion_armed(false, 0U).success);
+  backend.activate();
+  EXPECT_TRUE(backend.set_motion_armed(true, 2U).success);
+}
+
+TEST(MockBackend, ReactivationKeepsTeachingMotionInhibited)
+{
+  pi_arm_hardware::MockBackend backend(make_config());
+  backend.configure();
+  backend.activate();
+  pi_arm_hardware::HardwareSample sample;
+  for (int i = 0; i < 3; ++i) {ASSERT_TRUE(backend.read(sample));}
+  ASSERT_TRUE(backend.manage(pi_arm_can::ManagementOperation::MOTOR_RUN, 0).success);
+  ASSERT_TRUE(backend.set_teaching(true).success);
+  backend.deactivate();
+  backend.activate();
+  ASSERT_TRUE(backend.read(sample));
+  EXPECT_TRUE(sample.teaching_active);
+  EXPECT_FALSE(sample.control_permitted);
+  EXPECT_FALSE(backend.set_motion_armed(true, 1U).success);
 }
 
 TEST(MockBackend, RejectsWholeCommandWhenMappedOutputExceedsLimit)

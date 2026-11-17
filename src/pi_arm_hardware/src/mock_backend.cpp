@@ -110,7 +110,7 @@ void MockBackend::activate()
   const bool all_enabled = std::all_of(
     sample_.motor_enabled.begin(), sample_.motor_enabled.end(), [](bool value) {return value;});
   sample_.driver_mode = all_enabled ? "CONTROL" : "MONITORING";
-  sample_.control_permitted = all_enabled;
+  sample_.control_permitted = all_enabled && !sample_.teaching_active;
 }
 
 void MockBackend::deactivate() noexcept
@@ -348,6 +348,9 @@ MotionArmResult MockBackend::set_motion_armed(
   std::lock_guard<std::mutex> lock(mutex_);
   if (!configured_) {
     return {false, false, "mock backend is not configured"};
+  }
+  if ((armed || hold_position) && !active_) {
+    return {false, false, "mock backend is inactive; activate before arming or holding"};
   }
   if (armed && sample_.teaching_active) {return {false, false, "drag teaching active"};}
   if (armed && lease_id == 0U) {

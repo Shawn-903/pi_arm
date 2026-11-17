@@ -34,6 +34,10 @@ public:
     const rclcpp_lifecycle::State & previous_state) override;
   hardware_interface::CallbackReturn on_cleanup(
     const rclcpp_lifecycle::State & previous_state) override;
+  hardware_interface::CallbackReturn on_shutdown(
+    const rclcpp_lifecycle::State & previous_state) override;
+  hardware_interface::CallbackReturn on_error(
+    const rclcpp_lifecycle::State & previous_state) override;
   hardware_interface::CallbackReturn on_activate(
     const rclcpp_lifecycle::State & previous_state) override;
   hardware_interface::CallbackReturn on_deactivate(
@@ -66,6 +70,9 @@ private:
   std::vector<double> command_velocities_;
   HardwareSample latest_sample_;
   std::mutex sample_mutex_;
+  // Lifecycle transitions must wait for any in-flight management/hold RPC.
+  // The control loop does not take this mutex.
+  std::mutex service_mutex_;
   std::atomic_bool hardware_active_{false};
 
   double state_publish_rate_hz_{10.0};

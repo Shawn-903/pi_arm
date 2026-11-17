@@ -43,6 +43,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | manager 到位、停止或取消 | [manager 测试目录](../src/pi_arm_manager/test/) 中对应单测；涉及编排、Action 或并发时加 `test_arrival_integration.py` |
 | manager 工作线程、租约或退出顺序 | `test_manager_shutdown.py` 的相关场景；共享动作收尾发生变化时加 `test_arrival_integration.py` |
 | 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
+| backend 或硬件插件停用、退出、资源释放 | `test_backend_lifecycle_vcan.py`，覆盖真实插件生命周期、租约门禁和 SocketCAN 资源；按影响补对应停止/断连回归 |
 | CAN 断线重连、接口迟到或重建 | `test_can_recovery_vcan.py`，验证反馈恢复、旧授权失效和停止未确认状态保留 |
 | 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
 | ROS 接口、构建或依赖 | 重建受影响包及消费者，运行对应单测和受影响集成路径；范围跨包时扩大到依赖包 |

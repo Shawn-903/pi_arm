@@ -193,6 +193,7 @@ private:
   std::atomic_bool reboot_reference_uncertain_{false};
   pi_arm_transmission::Vector6 last_joint_positions_rad_{};
   std::atomic_bool position_initialized_{false};
+  std::atomic_bool active_{false};
   std::atomic_bool control_permitted_{false};
   std::atomic_uint64_t feedback_generation_{0U};
   std::atomic_uint64_t motion_generation_{0U};

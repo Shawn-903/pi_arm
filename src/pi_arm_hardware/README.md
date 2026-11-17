@@ -33,6 +33,8 @@ ros2_control 的 `SystemInterface` 插件包，通过六轴 Backend 将关节命
 
 `/pi_arm/hardware_state` 发布原始数据与原因；`/pi_arm/hardware/*` 管理服务供 manager 调用。只读模式不暴露写入服务；commissioning 服务在 `/pi_arm/commissioning/*`。
 
+正常控制 backend 停用后保留 CAN 反馈读取，但禁止重新取得运动租约、建立位置保持或切换示教。再次激活后仍需新的运动租约；恢复反馈不会自动恢复旧授权。插件的激活、停用与管理服务串行处理。cleanup、shutdown 和 error 回调先结束服务线程，再停止运动、关闭 CAN 线程/socket 并释放接口独占锁；停止应答缺失时日志保留 `STOP UNCONFIRMED`，资源释放不代表已确认电机停止。
+
 ## 停止并保持
 
 内部 `SetMotionArmed(armed=false, hold_position=true, lease_id=0)` 表示取消轨迹并保持当前编码器位置；非零 lease 的 hold 仍表示正常到位后保留最终目标。停止抓取的是原始协议位置，不需要用关节反解重新构造目标。角度/速度反馈不得超过 100 ms，状态反馈沿用新鲜度配置；不对已下使能电机发送 A4，也不以 0x88 恢复旧目标。
@@ -56,3 +58,5 @@ manager 的活动任务仍立即产生 RUNNING；空闲时才由反馈运动标�
 ## 验证
 
 `test/test_backend.cpp`、`test/test_motion_write_gate.cpp` 覆盖后端与租约；`test/test_motion_detector.cpp` 覆盖静止噪声、低速、持续速度、稳定期与缓存/失效反馈。`test/vcan_backend_probe.cpp`、`test/vcan_reboot_probe.cpp`、`test/vcan_motion_probe.cpp` 由 [vcan 脚本](../../scripts/README.md) 编译/调用，验证生产 RealBackend；不应将探针接到实机 CAN。
+
+[test_backend_lifecycle_vcan.py](../../scripts/test_backend_lifecycle_vcan.py) 验证停用后的租约门禁、重新激活、插件 shutdown/error/cleanup、停止应答缺失及重复清理。启用 `BUILD_TESTING` 构建后，使用空闲的虚拟 `vcan0` 和 ROS 域 100 运行：`ROS_DOMAIN_ID=100 python3 scripts/test_backend_lifecycle_vcan.py --probe build/pi_arm_hardware/vcan_lifecycle_probe --log-dir /tmp/backend-lifecycle`。探针在生命周期回调后保留插件对象，检查 CAN socket 与独占锁是否已释放。

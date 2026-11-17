@@ -295,12 +295,27 @@ hardware_interface::CallbackReturn PiArmSystem::on_cleanup(const rclcpp_lifecycl
   // Join the service executor thread before touching the backend so no manage()
   // call can run concurrently with cleanup().
   stop_auxiliary_node();
-  backend_->cleanup();
+  hardware_active_.store(false);
+  if (backend_) {backend_->cleanup();}
   return hardware_interface::CallbackReturn::SUCCESS;
+}
+
+hardware_interface::CallbackReturn PiArmSystem::on_shutdown(const rclcpp_lifecycle::State & state)
+{
+  return on_cleanup(state);
+}
+
+hardware_interface::CallbackReturn PiArmSystem::on_error(const rclcpp_lifecycle::State & state)
+{
+  on_cleanup(state);
+  // An initialization failure may leave no backend to configure again.
+  return backend_ ? hardware_interface::CallbackReturn::SUCCESS :
+         hardware_interface::CallbackReturn::FAILURE;
 }
 
 hardware_interface::CallbackReturn PiArmSystem::on_activate(const rclcpp_lifecycle::State &)
 {
+  std::lock_guard<std::mutex> service_lock(service_mutex_);
   try {
     backend_->activate();
     command_positions_ = state_positions_;
@@ -322,6 +337,7 @@ hardware_interface::CallbackReturn PiArmSystem::on_activate(const rclcpp_lifecyc
 
 hardware_interface::CallbackReturn PiArmSystem::on_deactivate(const rclcpp_lifecycle::State &)
 {
+  std::lock_guard<std::mutex> service_lock(service_mutex_);
   backend_->deactivate();
   hardware_active_.store(false);
   {
@@ -385,6 +401,7 @@ void PiArmSystem::start_auxiliary_node()
     "/pi_arm/hardware/set_teaching",
     [this](const std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Request> request,
       std::shared_ptr<pi_arm_interfaces::srv::SetTeaching::Response> response) {
+      std::lock_guard<std::mutex> service_lock(service_mutex_);
       const auto result = backend_->set_teaching(request->enabled);
       response->success = result.success; response->code = result.code; response->message = result.message;
     });
@@ -394,6 +411,7 @@ void PiArmSystem::start_auxiliary_node()
       const std::shared_ptr<SetMotionArmed::Request> request,
       std::shared_ptr<SetMotionArmed::Response> response)
     {
+      std::lock_guard<std::mutex> service_lock(service_mutex_);
       const auto result = backend_->set_motion_armed(
         request->armed, request->lease_id, request->max_output_velocity, request->hold_position);
       response->success = result.success;
@@ -449,6 +467,7 @@ void PiArmSystem::create_management_service(
         const std::shared_ptr<ManageMotor::Request> request,
         std::shared_ptr<ManageMotor::Response> response)
       {
+        std::lock_guard<std::mutex> service_lock(service_mutex_);
         {
           std::lock_guard<std::mutex> sample_lock(sample_mutex_);
           latest_sample_.management_operation = pi_arm_can::to_string(operation);

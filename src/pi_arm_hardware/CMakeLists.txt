@@ -82,6 +82,9 @@ install(
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  add_executable(vcan_lifecycle_probe test/vcan_lifecycle_probe.cpp)
+  target_link_libraries(vcan_lifecycle_probe pi_arm_hardware)
+  ament_target_dependencies(vcan_lifecycle_probe hardware_interface rclcpp rclcpp_lifecycle)
   ament_add_gtest(test_motion_detector test/test_motion_detector.cpp)
   if(TARGET test_motion_detector)
     target_include_directories(test_motion_detector PRIVATE include)

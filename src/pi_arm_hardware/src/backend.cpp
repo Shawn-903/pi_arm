@@ -100,19 +100,21 @@ void RealBackend::activate()
   if (!driver_ || !driver_->running()) {
     throw std::runtime_error("CAN driver is not running");
   }
+  active_.store(true);
 }
 
 void RealBackend::deactivate() noexcept
 {
+  active_.store(false);
   control_permitted_.store(false);
-  set_motion_armed(false, 0U);
+  const auto stopped = set_motion_armed(false, 0U);
+  if (!stopped.success) {log_write_reject("deactivate: %s", stopped.message.c_str());}
 }
 
 void RealBackend::cleanup() noexcept
 {
   if (axis_test_active_) {stop_axis_test("stopped: process shutdown");}
-  control_permitted_.store(false);
-  set_motion_armed(false, 0U);
+  deactivate();
   if (driver_) {
     driver_->stop();
     driver_.reset();
@@ -415,7 +417,7 @@ bool RealBackend::read(HardwareSample & sample) noexcept
       sample.error_message = sample.kinematics_error_message;
     }
     sample.teaching_active = teaching_active_.load();
-    sample.control_permitted = sample.connected &&
+    sample.control_permitted = active_.load() && sample.connected &&
       generation == driver_->connection_generation() && !sample.teaching_active &&
       config_.allow_real_control && calibration_.valid && sample.kinematics_valid &&
       all_enabled && all_fresh && !any_motor_error && !stopping && !stop_failed;
@@ -576,6 +578,10 @@ MotionArmResult RealBackend::stop_and_hold(const std::vector<std::uint8_t> & mot
 MotionArmResult RealBackend::set_motion_armed(
   const bool armed, const std::uint64_t lease_id, const double max_output_velocity, const bool hold_position) noexcept
 {
+  // Feedback remains readable while inactive, but cannot reactivate motion.
+  if ((armed || hold_position) && !active_.load()) {
+    return {false, false, "backend is inactive; activate before arming or holding"};
+  }
   if (hold_position && !armed && lease_id == 0U) {
     std::vector<std::uint8_t> ids;
     for (const auto & actuator : config_.actuators) {ids.push_back(actuator.motor_id);}
@@ -679,6 +685,7 @@ bool RealBackend::write(
   const std::vector<double> & positions_rad,
   const std::vector<double> & velocities_rad_s) noexcept
 {
+  if (!active_.load()) {return true;}
   if (config_.commissioning) {return false;}
   if (!driver_ || positions_rad.size() != kAxisCount ||
     velocities_rad_s.size() != kAxisCount ||
@@ -811,7 +818,7 @@ bool RealBackend::write(
     }
     std::unique_lock<std::mutex> motion_lock(motion_mutex_);
     if (!motion_write_gate_.armed() || motion_write_gate_.active_lease_id() != lease_id ||
-      !control_permitted_.load()) {return true;}
+      !active_.load() || !control_permitted_.load()) {return true;}
     if (!driver_->set_mode(pi_arm_can::DriverMode::CONTROL)) {return true;}
     if (!driver_->enqueue_position_batch(commands, generation)) {
       motion_lock.unlock();
@@ -975,7 +982,7 @@ ManagementResult RealBackend::manage(
 
 ManagementResult RealBackend::set_teaching(const bool enabled) noexcept
 {
-  if (config_.read_only || config_.commissioning || !config_.allow_real_control || !driver_) {
+  if (!active_.load() || config_.read_only || config_.commissioning || !config_.allow_real_control || !driver_) {
     return {false, 2001, "drag teaching requires normal writable hardware"};
   }
   if (enabled) {

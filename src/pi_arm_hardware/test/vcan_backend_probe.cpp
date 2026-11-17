@@ -30,6 +30,8 @@ int main(int argc, char **argv) {
   std::string op;
   while(std::getline(std::cin,op)) {
     if(op=="quit")break;
+    if(op=="deactivate") b.deactivate();
+    if(op=="activate") b.activate();
     pi_arm_hardware::HardwareSample s;
     std::this_thread::sleep_for(100ms);
     const auto begin = std::chrono::steady_clock::now();
