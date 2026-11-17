@@ -6,7 +6,7 @@ import math
 
 import rclpy
 
-from .client import TaskClient
+from .client import ZeroReferenceClient
 
 
 def main():
@@ -18,9 +18,9 @@ def main():
     rclpy.init()
     node = rclpy.create_node("pi_arm_zero_client")
     try:
-        client = TaskClient(node)
+        client = ZeroReferenceClient(node)
         if not client.wait_for_service():
-            raise RuntimeError("pi_arm_tasks is unavailable")
+            raise RuntimeError("zero-reference service is unavailable")
         future = client.set_zero_reference(
             [math.radians(value) for value in args.reference_deg],
             reference_pose_confirmed=args.confirm_reference,

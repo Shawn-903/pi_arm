@@ -11,7 +11,7 @@ import subprocess
 
 import rclpy
 from pi_arm_interfaces.msg import HardwareState
-from pi_arm_tasks import TaskClient
+from pi_arm_tasks.zero_reference import ZeroReferenceClient
 from rclpy.qos import qos_profile_sensor_data
 
 from test_software_zero_vcan import wait
@@ -27,7 +27,7 @@ def main():
     try:
         wait(node, lambda: samples and all(samples[-1].motor_fresh))
         assert samples[-1].commissioning and samples[-1].can_interface == 'vcan0', 'virtual maintenance service required'
-        client = TaskClient(node)
+        client = ZeroReferenceClient(node)
         assert client.wait_for_service()
         future = client.set_zero_reference([0.0] * 6, reference_pose_confirmed=True)
         wait(node, future.done)
@@ -35,7 +35,7 @@ def main():
         assert result.success, result.message
         wait(node, lambda: samples[-1].software_zero_id == result.reference_id)
         assert max(abs(value) for value in samples[-1].positions) < 1e-8
-        print('PASS Python TaskClient: confirmed reference applied through task service', flush=True)
+        print('PASS Python ZeroReferenceClient: confirmed reference applied through task service', flush=True)
 
         output = subprocess.check_output([
             'ros2', 'run', 'pi_arm_tasks', 'pi_arm_zero', '--confirm-reference',

@@ -7,6 +7,7 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/pi_arm_tasks"]),
         ("share/pi_arm_tasks", ["package.xml", "README.md"]),
+        ("share/pi_arm_tasks/zero_reference", ["pi_arm_tasks/zero_reference/README.md"]),
     ],
     install_requires=["setuptools"],
     tests_require=["pytest"],
@@ -16,7 +17,7 @@ setup(
     description="Reusable tasks using Pi Arm ROS services and actions.",
     license="Apache-2.0",
     entry_points={"console_scripts": [
-        "pi_arm_tasks = pi_arm_tasks.node:main",
-        "pi_arm_zero = pi_arm_tasks.cli:main",
+        "pi_arm_zero_reference = pi_arm_tasks.zero_reference.node:main",
+        "pi_arm_zero = pi_arm_tasks.zero_reference.cli:main",
     ]},
 )

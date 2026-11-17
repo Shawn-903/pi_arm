@@ -1,5 +1,1 @@
-"""Reusable task clients. Hardware ownership stays in pi_arm_hardware."""
-
-from .client import TaskClient
-
-__all__ = ["TaskClient"]
+"""由具体子包提供机械臂应用任务。"""

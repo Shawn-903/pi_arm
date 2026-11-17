@@ -1,4 +1,4 @@
-"""Task orchestration without a CAN connection or a second copy of zero offsets."""
+"""校验软件标零请求，串行调用硬件采样服务并返回保存结果。"""
 
 import threading
 
@@ -11,9 +11,9 @@ from pi_arm_interfaces.srv import SetZeroReference
 from .client import zero_request
 
 
-class TasksNode(Node):
+class ZeroReferenceNode(Node):
     def __init__(self):
-        super().__init__("pi_arm_tasks")
+        super().__init__("pi_arm_zero_reference")
         self._busy = threading.Lock()
         self._group = ReentrantCallbackGroup()
         self._hardware = self.create_client(
@@ -60,7 +60,7 @@ class TasksNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = TasksNode()
+    node = ZeroReferenceNode()
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
     try:

@@ -1,4 +1,4 @@
-"""Python entry point shared by programs and the command-line tool."""
+"""软件标零请求构造和 Python 客户端。"""
 
 import math
 
@@ -17,7 +17,7 @@ def zero_request(reference_joint_positions_rad, reference_pose_confirmed):
     )
 
 
-class TaskClient:
+class ZeroReferenceClient:
     def __init__(self, node):
         self._zero = node.create_client(SetZeroReference, "/pi_arm/tasks/set_zero_reference")
 
@@ -28,5 +28,5 @@ class TaskClient:
         """Return a ROS future; spin the caller's node and inspect response.success."""
         request = zero_request(reference_joint_positions_rad, reference_pose_confirmed)
         if not self._zero.service_is_ready():
-            raise RuntimeError("pi_arm_tasks service is unavailable; start commissioning first")
+            raise RuntimeError("zero-reference service is unavailable; start commissioning first")
         return self._zero.call_async(request)
