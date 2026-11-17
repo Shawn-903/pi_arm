@@ -4,7 +4,6 @@
 Source an isolated install; starts ONLY manager with fake feedback/controller/arm
 services. Never launches a CAN driver, opens CAN, or executes MoveIt trajectories.
 """
-import copy
 import math
 import os
 from pathlib import Path
