@@ -1,8 +1,8 @@
 # pi_arm_moveit_config
 
-MoveIt 2 的语义模型、运动规划、逆运动学和执行接口配置包。模型几何来自 [pi_arm_description](../pi_arm_description/README.md)，不单独定义电机方向或绳索零偏。
+提供 MoveIt 2 的规划组、逆运动学、运动规划和轨迹执行配置，机械模型来自 [pi_arm_description](../pi_arm_description/README.md)。正常启动时由 bringup 加载，manager 使用这些配置规划关节运动和末端直线运动。
 
-## 文件与边界
+## 配置文件
 
 | 文件 | 作用 |
 | --- | --- |
@@ -15,14 +15,14 @@ MoveIt 2 的语义模型、运动规划、逆运动学和执行接口配置包�
 | [moveit_controllers.yaml](config/moveit_controllers.yaml) | 六轴 JTC 执行接口映射 |
 | [move_group.launch.py](launch/move_group.launch.py)、[moveit_rviz.launch.py](launch/moveit_rviz.launch.py) | 规划节点与可视化入口；正常服务由 bringup 装配 |
 
-manager 的 MoveJ 使用规划，MoveL 使用 Pilz LIN；DirectMove、输出轴和预设姿态是另一条受限插值路径，不经 MoveIt 避障。端点 IK 可解不代表 LIN 路径可行；模型碰撞检查也不包含未建模的现场障碍。
+manager 的 MoveJ 调用关节空间规划，MoveL 调用 Pilz LIN 生成末端直线路径。IK 预览求解目标位姿对应的关节角；LIN 预览计算整条直线路径。规划中的碰撞检查使用 URDF 碰撞体和当前规划场景。
 
-SRDF 的排除对包含相邻连杆及共享关节附近永久重叠的简化碰撞包围体。修改结构、碰撞体或工具后应重新检查，而不是通过持续扩大排除列表绕过碰撞失败。当前 tool0 是无工具的法兰中心。
+SRDF 配置规划组、随动关节和碰撞排除对。排除表记录相邻连杆及共享关节附近固定重叠的碰撞体组合，随机械结构和碰撞模型一同维护。规划坐标系为 `base_link`，控制点 `tool0` 位于法兰中心。
 
 ## 验证与维护
 
-常规启动见 [根 README](../../README.md)。独立启动规划/RViz 前加载构建环境并隔离 ROS 域，避免连接错误的控制器。通过 mock 的 `test_web_interactive.py`、`test_web_control_spaces.py` 和 `test_web_presets.py` 检查规划及正常控制集成，参数见 [scripts](../../scripts/README.md)。
+常规启动见 [根 README](../../README.md)。独立启动规划/RViz 时，先加载构建环境并设置测试用 ROS 域。mock 的 `test_web_interactive.py`、`test_web_control_spaces.py` 和 `test_web_presets.py` 检查规划及控制集成，参数见 [scripts](../../scripts/README.md)。
 
 树莓派安装的 MoveIt 2.12.4 在退出时，会先卸载控制器插件和默认能力插件，再销毁仍引用这些库的 ROS 回调对象，从而触发段错误。`move_group.launch.py` 针对该版本设置进程局部的 `LD_PRELOAD`，让这两个已安装的插件库保留到进程退出，并保留调用方原有的预加载项。该兼容处理只作用于此规划入口；其他 MoveIt 版本沿用原启动方式，升级后需重新检查退出行为。
 
-退出回归使用独立 ROS 域，只启动 mock 配置的规划进程：`python3 scripts/test_moveit_shutdown.py`；加 `--signal SIGTERM` 检查终止信号路径。脚本核验 `move_group` 子进程正常退出，不能仅凭 `ros2 launch` 返回 0 判断通过。
+退出回归在独立 ROS 域启动 mock 配置的规划进程：`python3 scripts/test_moveit_shutdown.py`；加 `--signal SIGTERM` 检查终止信号路径。测试结果取自 `move_group` 子进程的退出状态。

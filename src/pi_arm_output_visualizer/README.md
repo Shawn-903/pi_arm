@@ -1,6 +1,6 @@
 # pi_arm_output_visualizer
 
-输出轴角驱动的离线 RViz 显示包。将六个**模型输出轴角**经生产绳索反解转换为主动关节状态，不打开 SocketCAN、不控制电机。
+用于离线查看输出轴角对应的机械臂姿态。程序通过 `pi_arm_transmission` 的绳索模型计算关节角，并在 RViz 中显示机械臂。可用滑块输入角度，也可通过 ROS 话题发送角度数据。
 
 ```text
 输出轴滑块 → /pi_arm/model_output_shaft_states
@@ -12,9 +12,9 @@
 
 输入为 `sensor_msgs/JointState`，名称固定为 `motor_01_output` 到 `motor_06_output`，单位 rad。输出关节顺序为 `joint_01, joint_02, joint_04, joint_05, joint_06, joint_09`。
 
-输入必须是加过软件偏移后的 model_output：`phi = raw_output + offset`。不能直接发布 ROM 相对角或协议角。滑块范围从 [cable_kinematics.yaml](../pi_arm_description/config/cable_kinematics.yaml) 生成，是理论输出包络而非实机独立轴可达保证。
+输入为加过软件偏移的模型输出轴角：`phi = raw_output + offset`。滑块范围根据 [cable_kinematics.yaml](../pi_arm_description/config/cable_kinematics.yaml) 中的模型参数生成。
 
-整组输入有轴超限或反解无效（如腕部 asin 定义域不满足）时拒绝整帧，保持最后有效 RViz 姿态；不独立裁剪某个电机来掩盖问题。
+每帧按完整的一组角度处理。有轴超限或反解无效（如腕部 asin 定义域不满足）时，节点报告原因，RViz 保持上一帧有效姿态。
 
 ## 文件与使用
 
@@ -29,8 +29,8 @@
 ROS_DOMAIN_ID=82 ros2 launch pi_arm_output_visualizer output_shaft_visualizer.launch.py
 ```
 
-可设置 `use_gui:=false`，由外部只读仿真源发送完整六轴状态。不要与实机或 description/display GUI 在同一域同时发布 `/joint_states`。
+默认打开滑块和 RViz，拖动滑块即可观察对应关节姿态。设置 `use_gui:=false` 后，可由外部程序向 `/pi_arm/model_output_shaft_states` 发送完整六轴状态。与其他机械臂节点并行运行时，为本显示程序设置独立的 `ROS_DOMAIN_ID`。
 
 ## 验证
 
-`test/test_output_shaft_mapper.cpp` 检查映射与拒绝行为，`test/test_visualizer_assets.py` 检查生成资源，运行见 [scripts](../../scripts/README.md)。这套显示用于核验软件映射，不证明实际方向、绳索张力或可动范围。
+`test/test_output_shaft_mapper.cpp` 检查角度映射和无效输入处理，`test/test_visualizer_assets.py` 检查生成资源。运行方式见 [scripts](../../scripts/README.md)。

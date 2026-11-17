@@ -25,11 +25,11 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 ## 协议
 
 请求格式：`{"type":"req","msg_id":1,"cmd":"point_list","params":{}}`。
-响应：`type=rsp`，通过 `msg_id` 对应请求。`code=0` 表示请求成功，`ms` 是文字说明（沿用的字段名，不是毫秒），`data` 是结果数据。状态为 `type=state`，包含任务、硬件许可、坐标与能力字段，前端按能力开放功能。
+响应：`type=rsp`，通过 `msg_id` 对应请求。`code=0` 表示请求成功，`ms` 保存文字说明，`data` 保存结果数据。状态为 `type=state`，包含任务、硬件许可、坐标与能力字段，前端按能力开放功能。
 
 | 命令 | 路由/语义 |
 | --- | --- |
-| `motor_move` / `move` | 单关节 / 完整六关节目标，经 DirectMove；不是裸电机协议控制 |
+| `motor_move` / `move` | 单关节 / 完整六关节目标，经 DirectMove 执行 |
 | `output_move` | 六个模型输出轴角，经绳索反解和 DirectMove |
 | `move_preset` | 打包 / 零位，前端可设置关节速度，仍受输出轴限速约束 |
 | `set_zero_reference` | commissioning 软件标零；`reference_joint_positions_deg` 为六关节参考姿态，`reference_pose_confirmed` 必须为 true。经 `pi_arm_tasks` 统一执行，返回参考编号 |
@@ -39,24 +39,24 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 | `stop_motion` / `motor_stop` | 普通模式取消当前任务并请求保持当前位置；`motor_stop` 同样停止整条任务。commissioning 模式转给 AxisTest 停止服务 |
 | `set_teaching` | 显式进入/退出实机拖拽示教 |
 | `axis_test` / `axis_test_heartbeat` / `axis_test_stop` | commissioning 专用单轴测试 |
-| `point_list` / `point_save` / `point_delete` | 点位库读取/存储/删除，不发运动 |
+| `point_list` / `point_save` / `point_delete` | 点位库读取、存储和删除 |
 
-网页目标使用 °、mm；ROS 动作转为 rad、m。RPY 使用固定轴 XYZ，即 `Rz(yaw) Ry(pitch) Rx(roll)`，坐标 base_link、控制点 tool0。预览轨迹 TCP 路径使用 m，不可按 mm 再传入渲染。具体必填字段及限制以 protocol/commands 实现和 `test/` 为准。
+网页目标使用 °、mm，网关转换为 ROS 动作的 rad、m。RPY 使用固定轴 XYZ，即 `Rz(yaw) Ry(pitch) Rx(roll)`，坐标系为 base_link，控制点为 tool0。返回的预览轨迹 TCP 路径使用 m，渲染时按米制读取。请求字段定义见 `protocol.py` 和 `commands.py`，调用示例可查阅 `test/`。
 
 依赖方向为 `gateway → commands / ros_bridge / state_payload`。commands 与 ros_bridge 通过状态、服务和动作接口协作；state_payload 只转换传入的状态快照。入口仍是 `pi_arm_websocket.gateway:main`，原有 `gateway.RosBridge`、`gateway.CommandGateway` 和旋转换算函数的导入方式继续可用。
 
-运动响应里的 task_id 表示“已接受”，终态见后续 state。接受后迟迟拿不到任务号会取消并确认；接受响应晚到也处理取消，不允许返回普通失败却留下无人跟踪的运动。
+运动响应中的 `task_id` 用于跟踪任务，后续 `state` 提供执行进度和终态。目标接受或任务号获取超时时，网关会处理迟到响应，并请求取消已接受的目标。
 
 ## 点位数据与精度
 
 默认文件是 `~/.local/share/pi_arm/points-real.json` / `points-mock.json`，也可指定 `points_file`；最多 500 个点、2 MiB、名称唯一。变更携带库 `revision`，并发冲突要求刷新；损坏文件保留原内容并报错。
 
-点位包含类型、来源、values、坐标系/单位、关节顺序、模型哈希、标定 ID、时间等。反馈来源要求有效新鲜静止的服务端数据，附原始协议角和 ROS 时间；模型预览不是实测。保存不代表目标可执行。
+点位包含类型、来源、values、坐标系/单位、关节顺序、模型哈希、标定 ID、时间等。选择反馈来源时，服务端采集有效、新鲜、静止的数据，并附原始协议角和 ROS 时间；选择模型预览来源时，保存当前预览目标。执行点位时由 manager 检查限位及规划条件。
 
-点位与常用角度/XYZ/RPY 的输出保留最多三位小数；磁盘原始存档、ROS/CAN、弧度诊断、四元数和时间不因显示精度而舍入。base_frames 使用同帧 FK，不依赖另一时刻的 TF 缓存。
+点位与常用角度/XYZ/RPY 的网页输出保留最多三位小数；磁盘原始存档、ROS/CAN、弧度诊断、四元数和时间保留内部精度。`base_frames` 使用同一帧关节反馈计算 FK。
 
-完整操作与备份方式见 [web/README.md](../../web/README.md)。重复循环由浏览器调度，网关不提供后台循环队列，也没有普通任务的断线自动停止；commissioning 另有心跳。
+重复循环由浏览器调度，每段运动通过现有动作接口执行。完整操作、断连处理和点位备份见 [web/README.md](../../web/README.md)。
 
 ## 验证
 
-`test/` 覆盖请求校验、模式门禁、单位、预览、任务超时、点位持久化/并发/损坏保护、FK 等。离线 UI 与 mock 端到端入口见 [scripts/README.md](../../scripts/README.md)。当前不提供身份鉴权或 TLS，前端角色不是权限边界。
+`test/` 覆盖请求校验、模式门禁、单位、预览、任务超时、点位持久化/并发/损坏保护、FK 等。离线 UI 与 mock 端到端入口见 [scripts/README.md](../../scripts/README.md)。

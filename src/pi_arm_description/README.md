@@ -1,6 +1,6 @@
 # pi_arm_description
 
-机械臂模型与执行器配置的源包。URDF/Xacro 描述连杆几何、关节坐标、限位和 ros2_control 映射；STL 用于显示，碰撞形状由 URDF 单独定义。网页模型从这里生成，不维护另一套装配关系。
+机械臂模型与执行器配置的源包，供 ros2_control、MoveIt、RViz 和网页显示使用。URDF/Xacro 描述连杆几何、关节坐标、限位和硬件映射；STL 提供外观网格，URDF 中的碰撞形状用于规划检查。网页模型由这里的源文件生成。
 
 ## 文件
 
@@ -22,14 +22,14 @@ Xacro 参数包括 `backend`（默认 mock）、`can_interface`、`bitrate`、`c
 | J5 | joint_06 | ±60° | joint_07 = joint_06 |
 | J6 | joint_09 | ±180° | 无 |
 
-URDF `origin` 定义父到关节零位变换，`axis` 是该局部坐标系中的轴，不能按屏幕左右直接判正负。`visual` 的网格坐标与 `collision` 的碰撞形状也不能混用。基座为 `base_link`，当前控制点为法兰中心 `tool0`，没有附加工具坐标偏置。
+URDF `origin` 定义父坐标系到关节零位的变换，`axis` 定义关节在局部坐标系中的转轴。`visual` 设置显示网格，`collision` 设置碰撞形状。基座坐标系为 `base_link`，控制点 `tool0` 位于法兰中心。
 
-mimic 表示随动关节：它的角度由另一关节按指定比例和偏移计算。表中的随动关系是运动学假设，不是独立电机指令。J3/J4/J5 的主动关节角与整段机构总弯曲角也不同。腕部总弯曲核验见 [transmission](../pi_arm_transmission/README.md#腕部实机核验)。
+mimic 表示随动关节：它的角度由另一关节按指定比例和偏移计算。整段机构姿态由主动关节和随动关节共同决定；腕部总弯曲角的计算见 [transmission](../pi_arm_transmission/README.md#腕部实机核验)。
 
-协议安装方向/比值与绳索通道的区别见 [硬件配置](../pi_arm_hardware/config/README.md)。仅修改模型显示方向而不核验实物，可能掩盖真正的绳索映射问题。
+电机安装方向、减速比和绳索通道的配置方法见 [硬件配置](../pi_arm_hardware/config/README.md)。
 
 ## 使用与验证
 
-加载构建环境后，独立显示可执行 `ros2 launch pi_arm_description display.launch.py`；与实机并行时使用独立 ROS_DOMAIN_ID，避免 `/joint_states` 和模型描述冲突。该 GUI 不控制电机。
+加载构建环境后，执行 `ros2 launch pi_arm_description display.launch.py` 打开关节滑块和 RViz，调整滑块查看机械臂姿态。与其他机械臂节点并行运行时设置独立的 `ROS_DOMAIN_ID`。
 
 `test/test_description_configuration.py` 验证配置；`scripts/export_web_model.py` 生成 `web/model/`，由构建/网页启动自动调用；`scripts/test_web_viewer.py` 用独立矩阵 FK 核验各 link 和 mimic。正式操作见 [根 README](../../README.md)，网页显示见 [web](../../web/README.md)。

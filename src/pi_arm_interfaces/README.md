@@ -19,7 +19,7 @@ ROS 2 公共接口定义包。硬件、manager、任务包和网关通过这里�
 | [MoveJs](action/MoveJs.action) | `/pi_arm/movejs` | 带时间的六关节轨迹 |
 | [MoveL](action/MoveL.action) | `/pi_arm/movel` | base_link 下 tool0 目标，Pilz LIN |
 
-动作反馈提供任务号，接受目标并不代表执行成功；终态与到位核验共同决定结果。`max_output_velocity=0` 选择默认 5°/s，非零使用 rad/s。关节顺序见 [源码索引](../README.md)。
+调用动作后，从反馈取得任务号，通过终态和到位核验结果判断完成情况。`max_output_velocity=0` 选择默认 5°/s，非零使用 rad/s。关节顺序见 [源码索引](../README.md)。
 
 ## 服务
 
@@ -28,10 +28,10 @@ ROS 2 公共接口定义包。硬件、manager、任务包和网关通过这里�
 | [ManageMotor](srv/ManageMotor.srv) | 按服务名使能/关闭/清错/重启；通常 ID 0 表示全部，但重启只接受 1–6 |
 | [SetMotionArmed](srv/SetMotionArmed.srv) | 硬件内部写入租约、输出轴限速；`armed=false, hold_position=true` 时，非零 lease 保留到位目标，零 lease 停止并保持当前编码器位置 |
 | [SetTeaching](srv/SetTeaching.srv) | 显式进入拖拽示教或退出并保持当前位置 |
-| [StopMotion](srv/StopMotion.srv) | 正常停止并保持当前位置，成功需确认保持；故障/失联不能保证保持 |
+| [StopMotion](srv/StopMotion.srv) | 取消当前运动并保持当前位置，返回保持确认结果或失败原因 |
 | [AxisTest](srv/AxisTest.srv) | commissioning 专用 start/heartbeat/stop，步进与速度单位为 °、°/s |
 | [SetZeroReference](srv/SetZeroReference.srv) | 确认已知实物姿态并采集软件零点，参考关节角使用 rad。前端/Python 任务入口为 `/pi_arm/tasks/set_zero_reference`，转调维护模式的 `/pi_arm/commissioning/set_zero_reference`；调用方式见 [任务包](../pi_arm_tasks/README.md) |
-| [PreviewMotion](srv/PreviewMotion.srv) | joint/output/ik/lin 只读预览，不执行；返回轨迹仅供显示 |
+| [PreviewMotion](srv/PreviewMotion.srv) | 根据 joint/output/ik/lin 请求计算目标和轨迹，供前端预览 |
 
 `SetMotionArmed` 的租约是一次运动的临时写入许可，用 `lease_id` 关联任务与清理请求。正常到位释放该许可时保留最终目标；用户停止使用零 lease 捕获当前位置。该服务由控制链内部协调，上层程序通过动作或 `StopMotion` 发起操作。
 

@@ -16,24 +16,24 @@ CAN ID 为 `0x140 + motor_id`，六轴 ID 1–6、DLC 8。主要命令：
 | 0xA4 | 带速度上限的位置控制，协议位置单位为度 |
 | 0x81 | 停止，保留运行状态/角度参考；确认停止应答 |
 | 0x80 / 0x88 | 关闭 / 运行；0x80 会清除转动圈数，0x88 可能恢复旧目标 |
-| 0x9B | 清错误标志，不等于重启 |
+| 0x9B | 清除错误标志 |
 | 0x07 | 电机重启，无 ACK，必须等待后续轮询确认状态 |
 | 0x19 | 将当前位置写为 ROM 零点，重新上电后核验 |
 
-完整依据见 [原始 CAN 协议](../../docs/CAN总线通讯协议V2.6.pdf)。速度字段以协议度/秒表示、向下取整；不能把 UI 的输出轴速度直接填入协议字段。比值和方向由 [硬件坐标层](../pi_arm_hardware/config/README.md) 转换。
+完整依据见 [原始 CAN 协议](../../docs/CAN总线通讯协议V2.6.pdf)。速度字段以协议度/秒表示并向下取整，输出轴速度经减速比和安装方向换算后写入该字段。换算方法见 [硬件坐标层](../pi_arm_hardware/config/README.md)。
 
 ## 连接与恢复
 
-接口尚未出现或 SocketCAN 收发失败时，驱动记录连接状态和错误，每秒尝试重新连接；上层硬件节点继续发布诊断。接口恢复后重新读取电机反馈。恢复期间保留同一接口的进程独占锁，避免另一个 Pi Arm 进程同时接管。
+接口尚未出现或 SocketCAN 收发失败时，驱动记录连接状态和错误，每秒尝试重新连接；上层硬件节点继续发布诊断。接口恢复后重新读取电机反馈，恢复期间保持对该 CAN 接口的独占使用。
 
 通信故障会丢弃待发指令，使旧运动授权失效。恢复后先检查新反馈；若故障发生时正在控制电机或停止尚未确认，需要再次执行“停止”，确认停止后再发起新任务。
 
 ## ROM 工具与独占
 
-`ros2 run pi_arm_can pi_arm_rom_zero_cli --help` 查看参数。默认仅核验六轴反馈和静止、不写 0x19；`--execute` 才请求实际写入，真实 CAN 不允许 `--yes` 跳过交互确认。同一接口不得同时运行控制服务和该工具。
+执行 `ros2 run pi_arm_can pi_arm_rom_zero_cli --help` 查看参数。工具默认以 dry-run 模式核验六轴反馈和静止状态；指定 `--execute` 后执行 ROM 写零，真实 CAN 上还需交互确认。使用前先停止占用该接口的控制服务。
 
-标零后保留人工完整断电/上电流程，再确认反馈与姿态、生成新参考；不能仅凭六个 ACK 认定零点生效。标定步骤见 [配置 README](../pi_arm_hardware/config/README.md)。
+ROM 写零后完整断电、上电，再核对反馈和姿态并生成新参考。操作步骤见 [配置 README](../pi_arm_hardware/config/README.md)。
 
 ## 验证
 
-`test/test_pi_arm_can.cpp` 覆盖帧编码与解析；`test/test_vcan_motor_emulator.py` 检查模拟器协议。虚拟总线停止、重启与 ROM 场景见 [scripts/README.md](../../scripts/README.md)。这些结果不等价于实机停止距离、启动时间或零点保留验证。
+`test/test_pi_arm_can.cpp` 覆盖帧编码与解析；`test/test_vcan_motor_emulator.py` 检查模拟器协议。虚拟总线停止、重启与 ROM 场景见 [scripts/README.md](../../scripts/README.md)。

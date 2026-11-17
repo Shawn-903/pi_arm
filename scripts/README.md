@@ -9,13 +9,13 @@
 | [install_dependencies.sh](install_dependencies.sh) | 安装 Ubuntu/ROS 依赖，需要 sudo 和已配置的 Jazzy 软件源 |
 | [build.sh](build.sh) | source ROS、colcon symlink 构建、导出网页模型 |
 | [start_web.sh](start_web.sh) | 正常/mock、`--monitor`、`--commissioning` 启动入口，管理 ROS 与 HTTP 子进程 |
-| [setup_can.sh](setup_can.sh) | real/vcan/down；修改网络接口，运行中的物理 CAN 不能随意重配 |
+| [setup_can.sh](setup_can.sh) | 配置 real/vcan 接口或通过 down 关闭接口；运行前停止占用该接口的服务 |
 | [export_web_model.py](export_web_model.py) | 从 URDF/Xacro 生成网页模型与哈希清单，无损压缩网格 |
-| [build_web_vendor.py](build_web_vendor.py) | 固定依赖校验后重建前端 vendor，维护时需网络，正常运行无需使用 |
-| [rebind_cable_directions.py](rebind_cable_directions.py) | 受限的离线方向/腕部通道重新绑定，保留原始测量、不写 CAN/ROM |
-| [vcan_motor_emulator.py](vcan_motor_emulator.py) | 仅虚拟 CAN 模拟器，支持帧跟踪及冻结运动 |
+| [build_web_vendor.py](build_web_vendor.py) | 下载并校验固定版本依赖，重建前端 vendor，需要网络 |
+| [rebind_cable_directions.py](rebind_cable_directions.py) | 根据指定方向/腕部通道生成新的绑定文件，保留原始测量 |
+| [vcan_motor_emulator.py](vcan_motor_emulator.py) | 虚拟 CAN 电机模拟器，支持帧跟踪及冻结运动 |
 
-CAN HAT 驱动/设备树安装不在现有脚本能力内。空的旧安装占位脚本已移除，不能把 `setup_can.sh` 当作驱动安装器。
+配置物理 CAN 前，先安装板卡驱动和设备树配置，确认系统已识别目标接口。
 
 ## 包测试
 
@@ -35,8 +35,8 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 
 | 修改类型 | 相关检查或测试入口 |
 | --- | --- |
-| 文档、注释、编辑器配置 | 差异、相对链接、配置解析与作用范围；不启动 ROS 或浏览器 |
-| CAN 接口配置脚本 | `sudo python3 scripts/test_setup_can.py`，用临时替身记录 ip/modprobe 调用，检查无效参数无副作用、接口类型和配置顺序；不操作真实接口 |
+| 文档、注释、编辑器配置 | 静态检查差异、相对链接、参数及作用范围；注释修改核对可执行内容一致 |
+| CAN 接口配置脚本 | `sudo python3 scripts/test_setup_can.py`，用临时替身记录 ip/modprobe 调用，检查无效参数处理、接口类型和配置顺序 |
 | 网关命令、状态或点位逻辑 | 从 [网关测试目录](../src/pi_arm_websocket/test/) 选择对应文件；ROS 调用或共享状态变化时，再覆盖受影响的 mock 路径 |
 | 网页布局、诊断、重复运动等单项功能 | 从下方离线网页测试中选择对应脚本；跨页面共用逻辑变化时覆盖相关页面 |
 | commissioning 电机测试界面、请求或模拟器冻结运动 | `test_web_axis.py` 普通与 `--stall` 场景，使用独立 commissioning/vcan 服务 |
@@ -45,14 +45,14 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | manager 工作线程、租约或退出顺序 | `test_manager_shutdown.py` 的相关场景；共享动作收尾发生变化时加 `test_arrival_integration.py` |
 | 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
 | backend 或硬件插件停用、退出、资源释放 | `test_backend_lifecycle_vcan.py`，覆盖真实插件生命周期、租约门禁和 SocketCAN 资源；按影响补对应停止/断连回归 |
-| 硬件插件初始化配置 | `test_system_configuration`，检查关节数量、有效配置导出和非法参数；使用 mock，不打开 CAN |
+| 硬件插件初始化配置 | `test_system_configuration`，使用 mock 检查关节数量、有效配置导出和非法参数 |
 | CAN 断线重连、接口迟到或重建 | `test_can_recovery_vcan.py`，验证反馈恢复、旧授权失效和停止未确认状态保留 |
 | 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
 | ROS 接口、构建或依赖 | 重建受影响包及消费者，运行对应单测和受影响集成路径；范围跨包时扩大到依赖包 |
 | MoveIt 生命周期或插件加载方式 | `test_moveit_shutdown.py` 的 SIGINT/SIGTERM 路径，以及正常 mock 规划、执行和退出 |
 | 网页模型导出或三维显示 | `test_web_viewer.py`；改变模型源时同时检查对应 description / transmission 测试 |
 
-冒烟检查是快速确认受影响的关键入口还能走通，例如启动测试用 mock、连接网关、读取状态并正常退出；按改动选择这些步骤即可，不额外建立一套重复测试。运动停止、写入许可等修改仍需上述相关断言，不能仅凭启动成功验收。
+冒烟检查用于快速确认受影响的关键入口，例如启动 mock、连接网关、读取状态并正常退出。按改动选择步骤；涉及停止、写入许可等行为时，使用表中对应测试核验结果。
 
 全量测试用于建立基线，或改动范围确实覆盖全系统时；已有合并、发布要求仍需完成：
 
@@ -61,11 +61,11 @@ colcon test --event-handlers console_direct+
 colcon test-result --verbose
 ```
 
-同一批相关检查通过后，只要代码、依赖、环境没有相关变化，也没有新发现的问题，就停止验证；不因提交或合并重复运行。优先复用已有测试，仅为新增行为、已确认缺陷或明确覆盖缺口补测试。记录测试入口、环境和结果，不以测试数量作为完成标准。
+相关检查通过后结束本批验证；出现新的相关代码、依赖、环境变化或问题时，再补对应检查。优先复用已有测试，为新增行为、已确认缺陷或覆盖缺口补充断言。提交记录注明测试入口、环境和结果。
 
 ## 离线网页测试
 
-需要 Python Playwright、Chromium，部分脚本复用 NumPy FK。可在独立 Python 虚拟环境安装，不改变 ROS Python 环境：
+需要 Python Playwright、Chromium，部分脚本使用 NumPy 计算 FK。依赖安装在独立 Python 虚拟环境中：
 
 ```bash
 python3 -m venv --system-site-packages /tmp/pi-arm-web-tests
@@ -74,9 +74,9 @@ pip install playwright numpy
 python -m playwright install chromium
 ```
 
-若缺少 venv 或浏览器系统动态库，先补齐对应系统依赖；不要将临时安装目录加入 Git。可支持 `--browser-path` 的脚本见各自 `--help`。三维相关测试需先构建，或 source ROS 后运行 `python3 scripts/export_web_model.py`。
+若缺少 venv 或浏览器系统动态库，先补齐系统依赖。浏览器路径参数见各脚本的 `--help`。三维相关测试需先构建，或 source ROS 后运行 `python3 scripts/export_web_model.py`。
 
-以下脚本拦截全部 WebSocket 或使用本地合成反馈，不连接实机：
+以下脚本通过 WebSocket 拦截或本地合成反馈构造测试场景：
 
 | 脚本 | 覆盖内容 |
 | --- | --- |
@@ -100,16 +100,16 @@ python3 scripts/test_web_console.py
 
 ## mock 端到端测试
 
-[MoveIt 退出回归](test_moveit_shutdown.py) 使用已加载工作区中的规划入口，固定 mock 配置，不启动硬件驱动或发送运动请求。默认使用空闲 ROS 域 91，可通过 `--domain-id` 调整：
+[MoveIt 退出回归](test_moveit_shutdown.py) 使用已加载工作区中的 mock 规划入口。默认 ROS 域为 91，可通过 `--domain-id` 选择空闲域：
 
 ```bash
 python3 scripts/test_moveit_shutdown.py
 python3 scripts/test_moveit_shutdown.py --signal SIGTERM
 ```
 
-脚本等待规划器就绪，发送退出信号，并检查 `move_group` 子进程正常结束；崩溃时即使 launch 返回 0 也会判失败。
+脚本等待规划器就绪后发送退出信号，以 `move_group` 子进程的退出状态判断结果。
 
-先在独立终端按根 README 启动 `ROS_DOMAIN_ID=81`、HTTP 8001、WS 8766 的 mock。根据各脚本要求使用新启动、零位且未使能的实例；不要把有前序任务/使能状态的实例当作干净环境。
+先在独立终端按根 README 启动 `ROS_DOMAIN_ID=81`、HTTP 8001、WS 8766 的 mock。根据各脚本要求，准备新启动、处于零位且未使能的实例。
 
 ```bash
 python3 scripts/test_web_mock.py --url 'http://127.0.0.1:8001/control.html?ws=ws://127.0.0.1:8766'
@@ -120,7 +120,7 @@ python3 scripts/test_web_teaching.py --ws ws://127.0.0.1:8766
 python3 scripts/test_web_recovery.py --ws ws://127.0.0.1:8766
 ```
 
-这些测试会发模拟运动/使能/恢复命令，并检查后端类型；点位测试还会写入测试点位，启动 mock 时指定临时 `points_file`。不要修改检查使其指向实机。
+这些测试发送模拟运动、使能和恢复命令，并核对后端类型。点位测试会写入点位数据，启动 mock 时指定临时 `points_file`。
 
 ## vcan 与合成 ROS 验证
 
@@ -141,9 +141,9 @@ python3 scripts/test_rebind_cable_directions.py
 sudo bash -c 'source /opt/ros/jazzy/setup.bash && source install/setup.bash && PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_can_recovery_vcan.py'
 ```
 
-`test_motion_safety_vcan.py` 和 `test_reboot_vcan.py` 自行启动模拟器并调用生产 RealBackend，固定/核验 vcan0，不需要另启实机服务。它们应顺序运行，不能与其他驱动或模拟器争用 vcan0。`test_rebind_cable_directions.py` 是离线文件测试。
+`test_motion_safety_vcan.py` 和 `test_reboot_vcan.py` 自行启动模拟器并调用生产 RealBackend，使用 vcan0。运行前停止占用该虚拟接口的服务，并依次执行这两个脚本。`test_rebind_cable_directions.py` 是离线文件测试。
 
-[运动反馈回归](test_motion_feedback_vcan.py) 使用单独的 `vcan_motion`，核验生产 RealBackend 的静止抖动、零速度读数下的缓慢位移、腕部通道映射、掉线恢复和无效运动学。它只产生虚拟查询/反馈帧，拒绝非 vcan 接口，并断言没有使能、位置或标零命令。source 要验证的 install（支持隔离 overlay），再执行：
+[运动反馈回归](test_motion_feedback_vcan.py) 使用单独的 `vcan_motion`，通过虚拟查询/反馈帧核验生产 RealBackend 的静止抖动、零速度读数下的缓慢位移、腕部通道映射、掉线恢复和无效运动学。source 要验证的 install（支持隔离 overlay），再执行：
 
 ```bash
 sudo ip link add vcan_motion type vcan
@@ -152,13 +152,13 @@ python3 scripts/test_motion_feedback_vcan.py
 sudo ip link delete vcan_motion
 ```
 
-运行中的实机使用现有 `build/install` 时，可在 `/tmp` 指定独立 `colcon --log-base ... build --build-base ... --install-base ...` 编译测试硬件包；不要覆盖运行中的库。正式加载修复仍按根 README 停止、构建、重新启动。
+与现有服务并行开发时，可在 `/tmp` 指定独立 `colcon --log-base ... build --build-base ... --install-base ...` 编译测试硬件包。正式更新按根 README 停止服务、构建并重新启动。
 
-[测试到位与停止集成](test_arrival_integration.py) 在隔离 ROS 域 82 启动真实 manager 与合成硬件/控制器服务，不开 CAN、不执行真实 MoveIt 轨迹：`ROS_DOMAIN_ID=82 python3 scripts/test_arrival_integration.py`。覆盖到位复核、运动/等待停止、Action 取消、迟到响应、保持失败与故障优先级。不要让其他服务占用这个域。
+[测试到位与停止集成](test_arrival_integration.py) 在独立 ROS 域 82 启动生产 manager 与合成硬件/控制器服务：`ROS_DOMAIN_ID=82 python3 scripts/test_arrival_integration.py`。覆盖到位复核、运动/等待停止、Action 取消、迟到响应、保持失败与故障优先级，运行前确认该域空闲。
 
 [manager 退出回归](test_manager_shutdown.py) 使用同类合成服务，在隔离 ROS 域 98 检查退出时的动作终态、租约释放、目标取消和进程退出码。加载待测工作区后，按改动选择 `--case`：`active`、`arming`、`late_accept`、`expired_accept`、`planning`、`preview`、`stop_failure` 或 `idle`。例如：`ROS_DOMAIN_ID=98 python3 scripts/test_manager_shutdown.py --case active --log-dir /tmp/manager-shutdown`。
 
-以下是需要预先配置对应 vcan 服务的专项入口，不是直接对当前实机运行的快捷命令：
+以下专项测试需先按表中条件准备 vcan 服务：
 
 | 脚本 | 前置条件 |
 | --- | --- |
@@ -166,7 +166,7 @@ sudo ip link delete vcan_motion
 | [test_normal_motion_vcan.py](test_normal_motion_vcan.py) | 普通 real Backend 绑定 vcan0、模拟器、匹配的虚拟标定，等 JTC active；默认 WS 8766 |
 | [test_web_axis.py](test_web_axis.py) | commissioning vcan0、HTTP 8001/WS 8766；`--stall` 配合 `--freeze-motion` |
 
-专项虚拟标定不能复制到实机运行。`test_web_axis.py` 核验电机测试速度默认 5°/s、上限 10°/s，以及请求和导出记录中的实际速度。普通场景检查到达目标后收到 0x81 停止确认；`--stall` 场景检查持续心跳、操作员停止保持和断线停止保持，不能把“停止未确认”当成成功。
+`test_web_axis.py` 核验电机测试速度默认 5°/s、上限 10°/s，以及请求和导出记录中的实际速度。普通场景检查到达目标后的 0x81 停止确认；`--stall` 场景检查持续心跳、操作员停止保持和断线停止保持。
 
 两个场景分别启动干净的 commissioning 服务和模拟器，再运行下面对应的命令。普通场景使用默认模拟器，停滞场景使用 `vcan_motor_emulator.py vcan0 --freeze-motion`；冻结运动只阻止编码器位置跟随目标，仍返回正确的 A4 应答。
 
@@ -186,8 +186,8 @@ python3 scripts/test_software_zero_clients.py
 python3 scripts/test_web_software_zero.py
 ```
 
-前者验证 Python `TaskClient` 和命令行的服务调用与单位转换；后者验证网页确认、返回结果、参考编号和原始编码器读数不变。两者都拒绝非 vcan0 的反馈；它们会改变测试实例的软件参考，不应指向现场服务。零点数据、测试用基础标定及一次性启动工具留在临时目录，不复制为实机参考。
+前者验证 Python `TaskClient` 和命令行的服务调用与单位转换；后者验证网页确认、返回结果、参考编号，以及操作前后原始编码器读数一致。这两个脚本在 vcan0 测试实例中更新软件参考，零点数据、测试用基础标定和一次性启动工具保存在临时目录。
 
 ## 维护规范
 
-修改脚本时明确硬件/端口/ROS 域、依赖和副作用；运动回归默认拒绝物理 CAN。生成记录用临时目录或操作者指定导出路径，不覆盖实机点位和标定。测试通过记录要说明是离线、mock、vcan 还是现场，不把模拟精度当作实机测量。
+脚本说明应列明接口、端口、ROS 域、依赖和写入的数据。自动运动回归使用 mock 或虚拟 CAN；生成记录放在临时目录或指定导出路径。验证记录注明离线、mock、vcan 或现场环境及对应结果。
