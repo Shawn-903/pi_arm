@@ -82,6 +82,15 @@ install(
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_system_configuration test/test_system_configuration.cpp)
+  if(TARGET test_system_configuration)
+    target_link_libraries(test_system_configuration pi_arm_hardware)
+    ament_target_dependencies(test_system_configuration hardware_interface rclcpp)
+    target_compile_definitions(test_system_configuration PRIVATE
+      PI_ARM_TEST_CABLE_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/test/cable_kinematics.yaml"
+    )
+    target_compile_options(test_system_configuration PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
   add_executable(vcan_lifecycle_probe test/vcan_lifecycle_probe.cpp)
   target_link_libraries(vcan_lifecycle_probe pi_arm_hardware)
   ament_target_dependencies(vcan_lifecycle_probe hardware_interface rclcpp rclcpp_lifecycle)

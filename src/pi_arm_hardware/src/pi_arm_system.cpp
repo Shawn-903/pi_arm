@@ -130,8 +130,8 @@ hardware_interface::CallbackReturn PiArmSystem::on_init(
     return hardware_interface::CallbackReturn::ERROR;
   }
   try {
-    if (info_.joints.empty()) {
-      throw std::invalid_argument("pi_arm_hardware requires at least one active joint");
+    if (info_.joints.size() != backend_config_.joint_feedback_tolerances_rad.size()) {
+      throw std::invalid_argument("pi_arm_hardware requires exactly six active joints");
     }
     joint_names_.clear();
     for (const auto & joint : info_.joints) {
@@ -143,9 +143,7 @@ hardware_interface::CallbackReturn PiArmSystem::on_init(
       }
       joint_names_.push_back(joint.name);
     }
-    if (!parse_configuration()) {
-      return hardware_interface::CallbackReturn::ERROR;
-    }
+    parse_configuration();
 
     const std::size_t joint_count = joint_names_.size();
     state_positions_.assign(joint_count, 0.0);
@@ -175,7 +173,7 @@ hardware_interface::CallbackReturn PiArmSystem::on_init(
   }
 }
 
-bool PiArmSystem::parse_configuration()
+void PiArmSystem::parse_configuration()
 {
   const auto & parameters = info_.hardware_parameters;
   backend_name_ = string_parameter_or(parameters, "backend", "real");
@@ -244,7 +242,6 @@ bool PiArmSystem::parse_configuration()
           joint.parameters, joint.name, "protocol_angle_ratio"),
         required_joint_parameter<int>(joint.parameters, joint.name, "motor_direction")});
   }
-  return true;
 }
 
 std::vector<hardware_interface::StateInterface> PiArmSystem::export_state_interfaces()

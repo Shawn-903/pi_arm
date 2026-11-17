@@ -53,7 +53,7 @@ private:
   rclcpp::Service<pi_arm_interfaces::srv::SetTeaching>::SharedPtr teaching_service_;
   using SetMotionArmed = pi_arm_interfaces::srv::SetMotionArmed;
 
-  bool parse_configuration();
+  void parse_configuration();
   void start_auxiliary_node();
   void stop_auxiliary_node() noexcept;
   void publish_hardware_state();
