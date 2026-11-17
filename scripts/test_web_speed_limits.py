@@ -36,6 +36,8 @@ def main():
             state = fixture([0]*6)
             page.evaluate('s=>{window.fake=s;window.tick=setInterval(()=>handleMessage(fake),100);handleMessage(s)}', state)
             page.wait_for_function('!document.getElementById("moveZeroPose").disabled')
+            page.locator('#teachTab-target').click()
+            page.locator('#targetUtilities > summary').click()
             ids = ['outputSpeedLimit', 'multiSpeed', 'angularSpeed', 'presetSpeed',
                    'motorTestSpeed', 'jointTestSpeed', *[f'speed{i}' for i in range(1, 7)]]
             for name in ids:

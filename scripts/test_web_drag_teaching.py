@@ -29,6 +29,7 @@ def main():
         page.goto((Path(__file__).resolve().parents[1]/'web/control.html').as_uri())
         page.locator('#connectBtn').click()
         page.wait_for_function('lastState?.teaching_available')
+        page.locator('#teachTab-drag').click()
         button=page.locator('#dragTeachingBtn')
         assert button.is_enabled()
         page.once('dialog',lambda d:d.dismiss())

@@ -25,6 +25,8 @@ def main():
         page.on('websocket', lambda ws: ws.on('framesent', lambda raw: sent.append(json.loads(raw))))
         page.goto(args.url)
         page.locator('#connectBtn').click()
+        page.locator('#teachTab-target').click()
+        page.locator('#modelOptions > summary').click()
         page.wait_for_function('lastState?.state_available && PiArmViewer.snapshot().valid', timeout=120000)
         assert page.evaluate('lastState.hardware_type') == 'mock', 'REFUSE REAL HARDWARE'
         page.wait_for_function('lastState.preview_modes?.length === 4')

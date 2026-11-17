@@ -89,6 +89,16 @@ function log(message, payload) {
 
 let connectionState = "closed";
 
+function createRequestId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  // 局域网 HTTP 页面没有 randomUUID，getRandomValues 仍可用于生成请求编号。
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
+}
+
 function refreshControlGate() {
   const connected = connectionState === "connected";
   const fresh = connected && lastState && Date.now() - lastStateAt < 1500;
@@ -399,7 +409,7 @@ function sendCommand(cmd, params = {}, options = {}) {
     try {
       params = {
         ...params,
-        request_id: params.request_id || crypto.randomUUID(),
+        request_id: params.request_id || createRequestId(),
         output_speed_limit: options.repeat ? params.output_speed_limit : readPositiveFloat("outputSpeedLimit"),
         ...(cmd === "move_preset" ? { max_speed: readPositiveFloat("presetSpeed") } : {}),
       };
@@ -1137,6 +1147,7 @@ init();
 
 // Single transport and the same motion gate for all interactive UI controls.
 window.PiArmControl = {
+  requestId: createRequestId,
   request(cmd, params = {}) {
     return new Promise((resolve, reject) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) { reject(new Error('请先连接机械臂')); return; }

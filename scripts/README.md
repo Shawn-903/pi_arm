@@ -83,6 +83,7 @@ python -m playwright install chromium
 | 脚本 | 覆盖内容 |
 | --- | --- |
 | [test_web_console.py](test_web_console.py) | 导航、布局、门禁、软件停止与故障恢复控件 |
+| [test_web_pendant.py](test_web_pendant.py) | 三类逐轴步进、受理锁定、只读/控制权/过期准入、步骤选择/排序/循环与跨步骤输入校验 |
 | [test_web_diagnostics.py](test_web_diagnostics.py) | 故障展示和诊断导出 |
 | [test_web_drag_teaching.py](test_web_drag_teaching.py) | 示教按钮、请求及保持状态 |
 | [test_web_preview_races.py](test_web_preview_races.py) | 迟到预览、手势取消与竞争 |

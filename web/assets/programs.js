@@ -20,26 +20,38 @@
   const nav = document.createElement('button');
   nav.className = 'nav-item';
   nav.dataset.viewTarget = 'programs';
-  nav.innerHTML = '<span class="nav-icon" aria-hidden="true">▤</span>步骤程序<span class="nav-index">PG</span>';
-  nav.title = '步骤程序';
-  nav.setAttribute('aria-label', '步骤程序');
-  document.querySelector('[data-view-target="points"]').after(nav);
+  nav.innerHTML = '<span class="nav-icon" aria-hidden="true">▤</span>在线编程';
+  nav.title = '在线编程';
+  nav.setAttribute('aria-label', '在线编程');
+  document.querySelector('[data-view-target="workbench"]').after(nav);
   nav.addEventListener('click', () => window.PiArmConsole.showView('programs'));
   const panel = document.createElement('section');
   panel.className = 'view-panel';
   panel.dataset.viewPanel = 'programs';
   panel.hidden = true;
-  panel.innerHTML = `<div id="programRunning" class="card" hidden></div><div class="card program-editor"><h2>步骤程序</h2>
-    <p>保存运动、等待和有限循环。启动时固定本次目标与参数，网页断线后继续执行。</p>
-    <div class="program-toolbar"><label>已保存程序<select id="programSelect"><option value="">请选择</option></select></label>
-      <button id="programRefresh">刷新</button><button id="programNew">新建</button><button id="programLoad">载入</button>
-      <button id="programDelete">删除</button></div>
-    <label>程序名称<input id="programName" maxlength="80" value="新程序"></label>
-    <div id="programSteps"></div><button id="programAdd">添加步骤</button>
-    <div class="program-toolbar"><button id="programSave">保存</button><button id="programValidate">校验</button>
-      <button class="btn-primary" id="programStart">启动程序</button><button id="programExport">导出 JSON</button>
-      <label class="file-label">导入 JSON<input id="programImport" type="file" accept=".json,application/json"></label></div>
-    <p id="programStatus" role="status"></p></div>`;
+  panel.innerHTML = `<div id="programRunning" class="card" hidden></div>
+    <div class="card program-editor">
+      <div class="program-filebar">
+        <select id="programSelect" aria-label="已保存程序"><option value="">已保存程序</option></select>
+        <button id="programRefresh">刷新</button><button id="programLoad">打开</button>
+        <button id="programNew">新建</button><button id="programSave">保存</button><button id="programDelete">删除</button>
+        <label class="file-label">导入 JSON<input id="programImport" type="file" accept=".json,application/json" aria-label="导入程序"></label>
+        <button id="programExport">导出 JSON</button>
+      </div>
+      <div class="program-titlebar"><label>程序<input id="programName" maxlength="80" value="新程序"></label><span id="programStepCount">0 个步骤</span></div>
+      <div class="program-studio">
+        <aside class="instruction-palette" aria-label="添加指令"><h3>指令</h3>
+          <button data-program-add="move">＋ 关节直接运动</button><button data-program-add="movej">＋ MoveJ</button>
+          <button data-program-add="movel">＋ MoveL</button><button id="programAdd">＋ 等待</button>
+          <button data-program-add="repeat">＋ 有限循环</button><p>点击添加指令，再选择步骤编辑参数。</p>
+        </aside>
+        <div id="programSteps"><div id="programOutline" class="program-outline" aria-label="程序步骤"></div>
+          <section id="programInspector" class="program-inspector" aria-label="步骤参数"></section></div>
+      </div>
+      <div class="program-runbar"><button class="btn-primary" id="programStart">▶ 启动程序</button><button id="programValidate">校验程序</button>
+        <p>启动时固定本次步骤与目标；页面断开后继续执行。</p></div>
+      <p id="programStatus" role="status">从左侧添加指令，或打开已保存的程序。</p>
+    </div>`;
   document.querySelector('[data-view-panel="points"]').after(panel);
   const execution = document.createElement('section');
   execution.className = 'execution-bar';
@@ -47,23 +59,12 @@
     <div><button id="executionPause" disabled>暂停</button><button id="executionResume" disabled>继续</button>
     <button id="executionStop" class="btn-red">停止</button></div>`;
   $('viewContent').before(execution);
-  const jog = document.createElement('div');
-  jog.className = 'card finite-step';
-  jog.innerHTML =
-    `<h3>有限步进</h3><p>使用最新静止反馈生成一次目标，完成后停在目标位置。</p><div class="program-toolbar">
-    <label>空间<select id="stepSpace"><option value="joint">关节（°）</option><option value="position">基坐标位置（mm）</option><option value="orientation">绕基坐标轴旋转（°）</option></select></label>
-    <label>轴<select id="stepAxis"></select></label><label>步长<input id="stepDelta" type="number" min="0.001" step="any" value="1"></label>
-    <button id="stepMinus">− 一步</button><button id="stepPlus">+ 一步</button></div><p id="stepStatus" role="status"></p>`;
-  document.querySelector('[data-view-panel="workbench"]').prepend(jog);
   const history = document.createElement('div');
-  history.className = 'card';
-  history.innerHTML = `<h3>树莓派运行记录</h3><button id="historyRefresh">刷新记录</button>
-    <div id="historyList" class="program-history"></div><pre id="historyDetail"></pre>`;
+  history.className = 'card history-card';
+  history.innerHTML =
+    `<div class="history-heading"><h3>运行历史</h3><button id="historyRefresh">刷新记录</button></div>
+    <div class="history-workspace"><div id="historyList" class="program-history"><p>刷新后显示树莓派保存的运行记录。</p></div><pre id="historyDetail">选择一条记录查看步骤、结果和停止确认。</pre></div>`;
   document.querySelector('[data-view-panel="records"]').prepend(history);
-  const css = document.createElement('style');
-  css.textContent =
-    `.execution-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;background:var(--panel,#fff);border:1px solid #bfd2e0;border-radius:12px;margin-bottom:16px;flex-wrap:wrap}.execution-bar span{display:block;margin-top:6px}.program-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:14px 0}.program-toolbar label{display:flex;flex-direction:column;gap:5px}.program-editor{padding:20px}.program-row{padding:12px;border:1px solid #cbd5e1;border-radius:8px;margin:12px 0;min-width:0}.program-row.current-step{border:2px solid #159482;background:#e8faf5}.program-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.program-values label{display:flex;flex-direction:column;min-width:0}.program-values input{width:100%;min-width:0}.program-repeat{padding-left:12px;border-left:3px solid #cbd5e1}.program-row select,.program-row input{max-width:100%}.program-history button{margin:6px}#historyDetail{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}.finite-step{padding:16px;margin-bottom:16px}.field-error{display:block;color:#b42318;font-size:12px}input[aria-invalid=true]{outline:2px solid #b42318}.file-label input{max-width:210px}@media(max-width:600px){.program-values{grid-template-columns:repeat(2,minmax(0,1fr))}.program-toolbar{align-items:stretch}.execution-bar{align-items:stretch}.program-editor{padding:10px}}`;
-  document.head.append(css);
   const labels = {
     move: '关节直接运动',
     movej: 'MoveJ 关节运动',
@@ -109,6 +110,7 @@
     input.addEventListener('input', () => {
       validate();
       change(input.value.trim() ? Number(input.value) : NaN);
+      renderOutline();
     });
     label.append(input);
     return label;
@@ -148,115 +150,233 @@
     return b;
   }
 
-  function renderRows(parent, list, nested = false, path = '') {
-    list.forEach((row, index) => {
-      const box = document.createElement('article');
-      box.className = 'program-row';
-      box.dataset.path = path + index;
-      const head = document.createElement('div');
-      head.className = 'program-toolbar';
-      const select = document.createElement('select');
-      for (const [type, label] of Object.entries(labels))
-        if (!nested || type !== 'repeat') select.add(new Option(label, type));
-      select.value = row.type;
-      select.addEventListener('change', () => {
-        list[index] = newRow(select.value);
-        render();
-      });
-      head.append(select, button('上移', () => {
-          if (index) {
-            [list[index - 1], list[index]] = [list[index], list[index - 1]];
-            render();
-          }
-        }),
-        button('下移', () => {
-          if (index + 1 < list.length) {
-            [list[index + 1], list[index]] = [list[index], list[index + 1]];
-            render();
-          }
-        }),
-        button('删除步骤', () => {
-          list.splice(index, 1);
-          render();
-        }));
-      box.append(head);
-      if (row.type === 'repeat') {
-        box.append(field('循环次数', row.count, v => row.count = v, {
-          min: 1,
-          max: 10000,
-          step: '1'
-        }));
-        const body = document.createElement('div');
-        body.className = 'program-repeat';
-        renderRows(body, row.steps, true, path + index + '.');
-        box.append(body, button('添加循环内步骤', () => {
-          row.steps.push(newRow('wait'));
-          render();
-        }));
-      } else if (row.type === 'wait') box.append(field('等待秒数', row.seconds, v => row.seconds = v, {
-        min: 0
-      }));
-      else {
-        const target = document.createElement('select');
-        target.add(new Option('手动目标', ''));
-        points.filter(p => p.kind === (row.type === 'movel' ? 'cartesian' : 'joint')).forEach(p =>
-          target.add(new Option(p.name, p.id)));
-        if (row.point_id && !points.some(p => p.id === row.point_id)) target.add(new Option('已引用点位 ' +
-          row.point_id, row.point_id));
-        target.value = row.point_id || '';
-        target.addEventListener('change', () => {
-          if (target.value) row.point_id = target.value;
-          else delete row.point_id;
+  let selectedRow = null;
+
+  function locate(row, list = program.steps, nested = false, path = '') {
+    for (let index = 0; index < list.length; index++) {
+      if (list[index] === row) return {
+        list,
+        index,
+        nested,
+        path: path + index
+      };
+      if (list[index].type === 'repeat') {
+        const found = locate(row, list[index].steps, true, path + index + '.');
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  function summary(row) {
+    if (row.type === 'wait') return `${row.seconds} 秒`;
+    if (row.type === 'repeat') return `${row.count} 次 · ${row.steps.length} 个子步骤`;
+    if (row.point_id) return points.find(p => p.id === row.point_id)?.name || '已引用点位';
+    return (row.params?.targets || row.params?.target || []).map(n => Number.isFinite(n) ? Number(n.toFixed(
+      2)) : '—').join(' / ');
+  }
+
+  function renderOutline() {
+    const outline = $('programOutline');
+    outline.replaceChildren();
+
+    function rows(list, path = '', nested = false) {
+      list.forEach((row, index) => {
+        const item = button('', () => {
+          selectedRow = row;
           render();
         });
-        box.append(target);
-        row.params ||= newRow(row.type).params;
-        if (!row.point_id) {
-          const values = document.createElement('div');
-          values.className = 'program-values';
-          const key = row.type === 'move' ? 'targets' : 'target';
-          row.params[key] ||= [0, 0, 0, 0, 0, 0];
-          row.params[key].forEach((v, i) => values.append(field(row.type === 'movel' ? ['X mm', 'Y mm',
-            'Z mm', 'Rx °', 'Ry °', 'Rz °'
-          ][i] : `J${i+1} °`, v, n => row.params[key][i] = n)));
-          box.append(values);
-        }
-        const params = document.createElement('div');
-        params.className = 'program-toolbar';
-        const names = row.type === 'move' ? {
-          max_speed: '关节速度 °/s'
-        } : row.type === 'movej' ? {
-          vel: '关节速度 °/s',
-          acc: '加速度 °/s²'
-        } : {
-          linear_vel: '直线速度 mm/s',
-          linear_acc: '直线加速度 mm/s²',
-          angular_vel: '角速度 °/s'
-        };
-        names.output_speed_limit = '输出轴限速 °/s';
-        for (const [key, label] of Object.entries(names)) params.append(field(label, row.params[key] ??
-          2, n => row.params[key] = n, {
-            min: key === 'output_speed_limit' ? 1 / 6 : 0.001,
-            max: ['max_speed', 'vel', 'angular_vel', 'output_speed_limit'].includes(key) ? 10 : null
-          }));
-        box.append(params);
-      }
-      parent.append(box);
+        item.className = 'program-row';
+        item.dataset.path = path + index;
+        item.dataset.nested = String(nested);
+        item.setAttribute('aria-pressed', String(row === selectedRow));
+        const number = document.createElement('span');
+        number.className = 'step-number';
+        number.textContent = nested ? '↳' : String(index + 1).padStart(2, '0');
+        const body = document.createElement('span');
+        const title = document.createElement('strong');
+        title.textContent = labels[row.type];
+        const detail = document.createElement('small');
+        detail.textContent = summary(row);
+        body.append(title, detail);
+        item.append(number, body);
+        outline.append(item);
+        if (row.type === 'repeat') rows(row.steps, path + index + '.', true);
+      });
+    }
+    rows(program.steps);
+    $('programStepCount').textContent =
+      `${program.steps.length} 个步骤${program.id ? ' · 版本 ' + revision : ' · 尚未保存'}`;
+    if (!program.steps.length) {
+      const empty = document.createElement('div');
+      empty.className = 'program-empty';
+      empty.innerHTML = '<strong>编排一段运动</strong>从左侧选择运动、等待或有限循环';
+      outline.append(empty);
+    }
+  }
+
+  function renderInspector() {
+    const box = $('programInspector');
+    box.replaceChildren();
+    const position = locate(selectedRow);
+    if (!position) {
+      box.innerHTML = '<h3>步骤参数</h3><p>选择一个步骤查看和修改参数。</p>';
+      return;
+    }
+    const {
+      list,
+      index,
+      nested
+    } = position, row = selectedRow;
+    const title = document.createElement('h3');
+    title.textContent = `步骤 ${position.path.split('.').map(n => Number(n) + 1).join('.')} · 参数`;
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', '指令类型');
+    for (const [type, label] of Object.entries(labels))
+      if (!nested || type !== 'repeat') select.add(new Option(label, type));
+    select.value = row.type;
+    select.onchange = () => {
+      selectedRow = list[index] = newRow(select.value);
+      render();
+    };
+    const tools = document.createElement('div');
+    tools.className = 'program-toolbar';
+    const up = button('↑ 上移', () => {
+      [list[index - 1], list[index]] = [list[index], list[index - 1]];
+      render();
     });
+    up.disabled = index === 0;
+    const down = button('↓ 下移', () => {
+      [list[index + 1], list[index]] = [list[index], list[index + 1]];
+      render();
+    });
+    down.disabled = index === list.length - 1;
+    tools.append(up, down, button('删除步骤', () => {
+      list.splice(index, 1);
+      selectedRow = list[Math.min(index, list.length - 1)] || program.steps[0];
+      render();
+    }));
+    box.append(title, select, tools);
+    if (row.type === 'repeat') {
+      box.append(field('循环次数', row.count, n => row.count = n, {
+        min: 1,
+        max: 10000,
+        step: '1'
+      }));
+      const add = button('＋ 添加循环内步骤', () => {
+        selectedRow = newRow('wait');
+        row.steps.push(selectedRow);
+        render();
+      });
+      add.className = 'program-toolbar';
+      box.append(add);
+    } else if (row.type === 'wait') {
+      box.append(field('等待时间（s）', row.seconds, n => row.seconds = n, {
+        min: 0
+      }));
+      const note = document.createElement('p');
+      note.textContent = '等待可暂停计时；继续后完成剩余时间。';
+      box.append(note);
+    } else {
+      const targetLabel = document.createElement('label');
+      targetLabel.textContent = '目标来源';
+      const target = document.createElement('select');
+      target.setAttribute('aria-label', '步骤目标来源');
+      target.add(new Option('手动输入目标', ''));
+      points.filter(p => p.kind === (row.type === 'movel' ? 'cartesian' : 'joint')).forEach(p => target.add(
+        new Option(p.name, p.id)));
+      if (row.point_id && !points.some(p => p.id === row.point_id)) target.add(new Option('点位不可用 · ' + row
+        .point_id, row.point_id));
+      target.value = row.point_id || '';
+      target.onchange = () => {
+        if (target.value) row.point_id = target.value;
+        else delete row.point_id;
+        render();
+      };
+      targetLabel.append(target);
+      box.append(targetLabel);
+      row.params ||= newRow(row.type).params;
+      if (!row.point_id) {
+        const values = document.createElement('div');
+        values.className = 'program-values';
+        const key = row.type === 'move' ? 'targets' : 'target';
+        row.params[key] ||= [0, 0, 0, 0, 0, 0];
+        row.params[key].forEach((v, i) => values.append(field(row.type === 'movel' ? ['X mm', 'Y mm',
+          'Z mm', 'Rx °', 'Ry °', 'Rz °'
+        ][i] : `J${i+1} °`, v, n => row.params[key][i] = n)));
+        box.append(values);
+      } else {
+        const values = document.createElement('p');
+        values.textContent = points.find(p => p.id === row.point_id)?.values.map(n => Number(n.toFixed(3)))
+          .join(' / ') || '请检查点位库';
+        box.append(values);
+      }
+      const params = document.createElement('div');
+      params.className = 'program-toolbar program-params';
+      const names = row.type === 'move' ? {
+        max_speed: '关节速度 °/s'
+      } : row.type === 'movej' ? {
+        vel: '关节速度 °/s',
+        acc: '加速度 °/s²'
+      } : {
+        linear_vel: '直线速度 mm/s',
+        linear_acc: '直线加速度 mm/s²',
+        angular_vel: '角速度 °/s',
+        angular_acc: '角加速度 °/s²'
+      };
+      names.output_speed_limit = '输出轴限速 °/s';
+      for (const [key, label] of Object.entries(names)) params.append(field(label, row.params[key] ?? 2,
+        n => row.params[key] = n, {
+          min: key === 'output_speed_limit' ? 1 / 6 : 0.001,
+          max: ['max_speed', 'vel', 'angular_vel', 'output_speed_limit'].includes(key) ? 10 : null
+        }));
+      box.append(params);
+    }
   }
 
   function render() {
     $('programName').value = program.name;
-    $('programSteps').replaceChildren();
-    renderRows($('programSteps'), program.steps);
+    if (!locate(selectedRow)) selectedRow = program.steps[0];
+    renderOutline();
+    renderInspector();
   }
 
   function documentValue() {
+    const invalidRow = (list) => {
+      for (const row of list) {
+        if (row.type === 'repeat') {
+          if (!Number.isInteger(row.count) || row.count < 1 || row.count > 10000) return row;
+          const child = invalidRow(row.steps);
+          if (child) return child;
+        } else if (row.type === 'wait') {
+          if (!Number.isFinite(row.seconds) || row.seconds < 0) return row;
+        } else {
+          const params = row.params || {};
+          const target = params.targets || params.target;
+          if (!row.point_id && (!Array.isArray(target) || target.length !== 6 || target.some(v => !Number
+              .isFinite(v)))) return row;
+          for (const [key, value] of Object.entries(params)) {
+            if (Array.isArray(value)) continue;
+            if (!Number.isFinite(value) || value <= 0) return row;
+            if (['max_speed', 'vel', 'angular_vel', 'output_speed_limit'].includes(key) && value > 10)
+              return row;
+            if (key === 'output_speed_limit' && value < 1 / 6) return row;
+          }
+        }
+      }
+      return null;
+    };
+    const bad = invalidRow(program.steps);
+    if (bad) {
+      selectedRow = bad;
+      render();
+    }
     const invalid = panel.querySelector('[aria-invalid=true]');
     if (invalid) {
       invalid.focus();
       throw Error('请先修正标红字段');
     }
+    if (bad) throw Error('请检查当前步骤的目标与参数');
     program.name = $('programName').value.trim();
     if (!program.name) {
       $('programName').focus();
@@ -291,7 +411,7 @@
   async function start(document) {
     const result = await rpc('program_start', {
       program: document,
-      request_id: crypto.randomUUID()
+      request_id: window.PiArmControl.requestId()
     });
     message('程序已启动 · ' + result.run_id);
     return result;
@@ -299,9 +419,19 @@
   $('programName').addEventListener('input', () => {
     program.name = $('programName').value;
   });
-  $('programAdd').onclick = () => {
-    program.steps.push(newRow('wait'));
+
+  function addInstruction(type) {
+    const place = locate(selectedRow);
+    selectedRow = newRow(type);
+    if (place && !(place.nested && type === 'repeat')) place.list.splice(place.index + 1, 0, selectedRow);
+    else program.steps.push(selectedRow);
     render();
+  }
+  panel.querySelectorAll('[data-program-add]').forEach(b => {
+    b.onclick = () => addInstruction(b.dataset.programAdd);
+  });
+  $('programAdd').onclick = () => {
+    addInstruction('wait');
   };
   $('programNew').onclick = () => {
     program = {
@@ -371,31 +501,6 @@
       ['executionStop', 'execution_stop']
     ]) $(id).onclick = () => action(() => rpc(cmd));
 
-  function axes() {
-    const joint = $('stepSpace').value === 'joint';
-    $('stepAxis').replaceChildren();
-    (joint ? ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'] : ['X', 'Y', 'Z']).forEach((v, i) => $('stepAxis').add(
-      new Option(v, i)));
-  }
-  $('stepSpace').onchange = axes;
-  axes();
-  for (const [id, sign] of [
-      ['stepMinus', -1],
-      ['stepPlus', 1]
-    ]) $(id).onclick = () => action(async () => {
-    const input = $('stepDelta');
-    if (!input.value.trim() || !input.checkValidity()) {
-      input.focus();
-      throw Error('步长应大于零');
-    }
-    const result = await rpc('step_move', {
-      space: $('stepSpace').value,
-      axis: Number($('stepAxis').value),
-      delta: sign * Number(input.value),
-      request_id: crypto.randomUUID()
-    });
-    $('stepStatus').textContent = '步进已受理 · ' + result.step_id;
-  });
   $('historyRefresh').onclick = () => action(async () => {
     const result = await rpc('run_list');
     $('historyList').replaceChildren();
@@ -411,10 +516,10 @@
             `${data.run.name}\n运行编号：${data.run.run_id}\n结果：${statuses[data.run.status]||data.run.status}\n停止确认：${data.run.stop_confirmed?'已确认':'无确认记录'}\n${data.run.message||''}\n\n` +
             data.steps.map(s =>
               `步骤 ${s.index} · ${labels[s.type]||s.type} · ${statuses[s.status]||s.status}\n任务 ${s.task_id||'—'} · 耗时 ${Number(s.elapsed_s||0).toFixed(3)} s\n${s.params?'目标 / 参数：'+JSON.stringify(s.params):'等待 '+s.seconds+' s'}\n${s.message||''}`
-              ).join('\n\n');
+            ).join('\n\n');
         })),
         ...['json', 'csv'].map(format => button('导出 ' + format.toUpperCase(), () => action(
-      async () => {
+          async () => {
             const data = await rpc('run_export', {
               run_id: run.run_id,
               format
@@ -445,7 +550,7 @@
     }
     const frozen = runSnapshot?.run_id === run?.run_id ? runSnapshot : null;
     const current = (run?.step_index || 1) - 1;
-    $('programRunning').hidden = !frozen;
+    $('programRunning').hidden = !frozen || !active;
     const key = frozen ? `${frozen.run_id}:${current}:${active}` : '';
     if (frozen && key !== renderedRun) {
       const title = document.createElement('h3');
@@ -484,6 +589,7 @@
     start,
     download,
     setLibrary(library) {
+      if (JSON.stringify(points) === JSON.stringify(library.points)) return;
       points = library.points;
       render();
     },
@@ -504,7 +610,7 @@
       $('executionResume').disabled = !active || run.status !== 'PAUSED';
       $('executionStop').disabled = gate.connectionState !== 'connected' || next?.read_only;
       $('programStart').disabled = !gate.permitted;
-      $('stepMinus').disabled = $('stepPlus').disabled = !gate.permitted;
+      window.PiArmPendant?.refresh(next, gate);
       renderExecution(run, active);
     }
   };

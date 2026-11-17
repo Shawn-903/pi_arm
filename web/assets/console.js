@@ -1,10 +1,10 @@
 /* Presentation only. All motion commands remain in control.js and the ROS gate. */
 (() => {
   const titles = {
-    workbench: "操作工作台",
-    points: "点位示教",
+    workbench: "机械臂示教",
+    points: "点位管理",
     records: "运行记录",
-    programs: "步骤程序",
+    programs: "在线编程",
     diagnostics: "开发诊断",
     commissioning: "方向测试",
   };

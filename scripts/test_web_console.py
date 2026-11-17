@@ -61,6 +61,7 @@ def main():
             assert page.locator('[data-view-target="diagnostics"]').is_hidden()
         assert sent==[], 'Navigation must not emit robot commands'
         page.set_viewport_size(dict(width=1440,height=1000))
+        page.locator('#teachTab-target').click()
         for tab in ('single','multi','cartesian','outputControlCard'):
             page.locator(f'[data-tab="{tab}"]').click()
             assert page.locator('#'+tab).is_visible()
@@ -79,7 +80,7 @@ def main():
         page.wait_for_function('pending.size > 0')
         assert len(sent)==1 and sent[0]['cmd']=='stop_motion'
         page.evaluate('r=>handleMessage({type:"rsp",msg_id:r.msg_id,code:0,ms:"ok",data:{}})',sent[-1])
-        page.locator('[data-view-target="workbench"]').click()
+        page.locator('[data-view-target="diagnostics"]').click()
         assert page.locator('#rebootMotorBtn').is_enabled(), 'FAULT must allow recovery without kinematics'
         page.locator('#recoveryMotorId').select_option('2')
         page.locator('#rebootMotorBtn').click()

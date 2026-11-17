@@ -60,7 +60,7 @@ def main():
             page.locator("#exportDiagnosticBtn").click()
         data = json.loads(Path(download.value.path()).read_text())
         assert data["state"]["kinematics_error"]["value"] == -8.146277666983426
-        page.locator('[data-view-target="workbench"]').click()
+        page.locator('[data-view-target="diagnostics"]').click()
         page.evaluate('''handleMessage({...lastState, read_only:false, commissioning:false,
           robot_state:"DISCONNECTED", motor_fresh:[true,true,true,true,true,false],
           motor_in_motion:[false,false,false,false,false,false], task:{status:0}, reboot_available:true})''')
@@ -93,6 +93,8 @@ def main():
                    reason:"方向测试模式未启动整臂轨迹控制器；标定尚未确认"},
           zero:{target_joint_angles_deg:[0,0,0,0,0,0],available:false,reason:"标定尚未确认"}}})''')
         page.locator('[data-view-target="workbench"]').click()
+        page.locator('#teachTab-target').click()
+        page.locator('#targetUtilities > summary').click()
         assert page.locator('#movePackingPose').is_visible() and page.locator('#movePackingPose').is_disabled()
         assert page.locator('#moveZeroPose').is_visible() and page.locator('#moveZeroPose').is_disabled()
         assert '100.700' in page.locator('#packingPoseStatus').inner_text()

@@ -71,6 +71,7 @@ def main():
                 page.locator('#connectBtn').click()
                 page.evaluate('s=>{window.fake=s;window.tick=setInterval(()=>handleMessage(fake),100);handleMessage(fake)}', state)
                 page.locator('[data-view-target="points"]').click()
+                page.locator('#repeatTools > summary').click()
                 page.wait_for_function('document.querySelectorAll(".point-card").length===3')
             load('?legacy=1')
             assert page.locator('#repeatStartPoint option').count() == 1

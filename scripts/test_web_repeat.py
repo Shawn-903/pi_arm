@@ -98,6 +98,7 @@ def main():
                 state,
             )
             page.locator('[data-view-target="points"]').click()
+            page.locator('#repeatTools > summary').click()
             page.wait_for_function('document.getElementById("repeatStartPoint").options.length===3')
             page.locator("#repeatStartPoint").select_option("0")
             page.locator("#repeatTargetPoint").select_option("1")

@@ -1,842 +1,941 @@
-<!doctype html>
-
+<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
-    <meta charset="utf-8" />
-    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <meta content="light" name="color-scheme" />
-    <title>Pi Arm · 机械臂工作台</title>
-    <link href="assets/console.css?v=V0.51" rel="stylesheet" />
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <meta content="light" name="color-scheme"/>
+    <title>
+      Pi Arm · 机械臂示教
+    </title>
+    <link href="assets/console.css?v=V0.52" rel="stylesheet"/>
+    <link href="assets/pendant.css?v=V0.52" rel="stylesheet"/>
   </head>
   <body data-role="operator" data-view="workbench">
-    <a class="skip-link" href="#viewContent">跳至操作区</a>
+    <a class="skip-link" href="#viewContent">
+      跳至操作区
+    </a>
     <aside aria-label="工作台导航" class="sidebar">
-      <a aria-label="Pi Arm 工作台" class="brand" href="control.html"
-        ><span class="brand-mark">π</span
-        ><span>Pi Arm<small>ROBOT WORKSPACE</small></span></a
-      >
-      <div class="sidebar-caption">控制中心</div>
+      <a aria-label="Pi Arm 工作台" class="brand" href="control.html">
+        <span class="brand-mark">
+          π
+        </span>
+        <span>
+          Pi Arm
+          <small>
+            ROBOT CONTROL
+          </small>
+        </span>
+      </a>
       <nav class="nav-list">
-        <button
-          aria-current="page"
-          class="nav-item active"
-          data-view-target="workbench"
-        >
-          <span class="nav-icon">⌘</span>操作工作台<span class="nav-index"
-            >01</span
-          >
+        <button aria-current="page" class="nav-item active" data-view-target="workbench">
+          <span class="nav-icon">
+            ⌘
+          </span>
+          机械臂示教
         </button>
         <button class="nav-item" data-view-target="points">
-          <span class="nav-icon"
-            ><svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.7"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="6" />
-              <path d="M12 2v5m0 10v5M2 12h5m10 0h5" /></svg></span
-          >点位示教<span class="nav-index">PT</span>
+          <span class="nav-icon">
+            <svg aria-hidden="true" fill="none" height="20" stroke="currentColor" stroke-width="1.7" viewbox="0 0 24 24" width="20">
+              <circle cx="12" cy="12" r="6">
+              </circle>
+              <path d="M12 2v5m0 10v5M2 12h5m10 0h5">
+              </path>
+            </svg>
+          </span>
+          点位管理
         </button>
         <button class="nav-item" data-view-target="records">
-          <span class="nav-icon">≡</span>运行记录<span class="nav-index"
-            >02</span
-          >
+          <span class="nav-icon">
+            ≡
+          </span>
+          运行记录
         </button>
-        <button
-          class="nav-item"
-          data-developer=""
-          data-view-target="diagnostics"
-          hidden=""
-        >
-          <span class="nav-icon">◇</span>开发诊断<span class="nav-index"
-            >03</span
-          >
+        <button class="nav-item" data-developer="" data-view-target="diagnostics" hidden="">
+          <span class="nav-icon">
+            ◇
+          </span>
+          开发诊断
+          <span class="nav-index">
+            03
+          </span>
         </button>
-        <button
-          class="nav-item"
-          data-developer=""
-          data-view-target="commissioning"
-          hidden=""
-        >
-          <span class="nav-icon">⊙</span>方向测试<span class="nav-index"
-            >04</span
-          >
+        <button class="nav-item" data-developer="" data-view-target="commissioning" hidden="">
+          <span class="nav-icon">
+            ⊙
+          </span>
+          方向测试
+          <span class="nav-index">
+            04
+          </span>
         </button>
       </nav>
       <div class="sidebar-bottom">
-        <span class="sidebar-dot"></span>六自由度 · 绳索传动<small
-          >ROS 2 Jazzy / Pi Arm R1</small
-        >
+        <span class="sidebar-dot">
+        </span>
+        六自由度 · 绳索传动
+        <small>
+          ROS 2 Jazzy / Pi Arm R1
+        </small>
         <div class="version-note">
-          Pi Arm V0.51<br />操作台 · 程序 · Python SDK
+          Pi Arm V0.52
         </div>
       </div>
     </aside>
     <div class="workspace">
       <header class="topbar">
+        <div class="header-state" id="headerState">
+          <span aria-hidden="true" class="state-light">
+          </span>
+          <strong id="consoleMode" title="运行环境">
+            未连接
+          </strong>
+          <strong id="consoleRobotState" title="机械臂状态">
+            未连接
+          </strong>
+          <strong id="consoleFreshness" title="反馈状态">
+            未连接
+          </strong>
+        </div>
         <div class="page-heading">
-          <span class="eyebrow">PI ARM / CONTROL</span>
-          <h1 id="pageTitle">操作工作台</h1>
+          <h1 id="pageTitle">
+            机械臂示教
+          </h1>
         </div>
         <div class="header-actions">
-          <label class="role-picker"
-            >界面视图<select aria-label="界面视图" id="viewRole">
-              <option value="operator">使用者</option>
-              <option value="developer">开发者</option>
-            </select></label
-          >
+          <label class="role-picker">
+            界面视图
+            <select aria-label="界面视图" id="viewRole">
+              <option value="operator">
+                使用者
+              </option>
+              <option value="developer">
+                开发者
+              </option>
+            </select>
+          </label>
           <div class="stop-wrap">
-            <button
-              class="btn-stop"
-              data-cmd="stop_motion"
-              disabled=""
-              id="globalStop"
-            >
-              <span aria-hidden="true">■</span> 停止运动</button
-            ><span>软件停止 · 非物理急停</span>
+            <button class="btn-stop" data-cmd="stop_motion" disabled="" id="globalStop">
+              <span aria-hidden="true">
+                ■
+              </span>
+              停止运动
+            </button>
+            <span>
+              软件停止 · 非物理急停
+            </span>
           </div>
         </div>
       </header>
       <section aria-label="连接与控制状态" class="connection-card">
         <fieldset>
-          <legend>WebSocket 连接</legend>
+          <legend>
+            连接
+          </legend>
           <div class="endpoint-row">
-            <label for="wsUrl">地址</label>
-            <input
-              id="wsUrl"
-              placeholder="ws://树莓派IP:8765"
-              type="text"
-              value=""
-            />
-            <button class="btn-primary" id="connectBtn">连接</button>
-            <button class="btn-red" id="disconnectBtn">断开</button>
-            <span id="safetyState">未连接 / 禁止运动</span>
+            <span class="endpoint-hint">
+              WebSocket
+            </span>
+            <label for="wsUrl">
+              控制器
+            </label>
+            <input id="wsUrl" placeholder="ws://树莓派IP:8765" type="text" value=""/>
+            <button class="btn-primary" id="connectBtn">
+              连接
+            </button>
+            <button class="btn-red" id="disconnectBtn">
+              断开
+            </button>
+            <span id="safetyState">
+              未连接 / 禁止运动
+            </span>
           </div>
         </fieldset>
+        <div aria-label="整臂控制" class="power-actions" id="powerActions">
+          <button class="btn-primary" data-cmd="enable_motor" data-motor-id="0">
+            使能
+          </button>
+          <button class="btn-red" data-cmd="disable_motor" data-motor-id="0">
+            失能
+          </button>
+        </div>
       </section>
-      <div class="mode-strip">
-        <div>
-          <span class="metric-label">运行环境</span
-          ><strong id="consoleMode">未连接</strong>
-        </div>
-        <div>
-          <span class="metric-label">机械臂状态</span
-          ><strong id="consoleRobotState">等待连接</strong>
-        </div>
-        <div>
-          <span class="metric-label">反馈状态</span
-          ><strong id="consoleFreshness">暂无数据</strong>
-        </div>
-        <div>
-          <span class="metric-label">控制坐标</span
-          ><strong>base_link <span class="arrow">→</span> tool0</strong>
-        </div>
-      </div>
       <div class="notice" id="operatorNotice" role="status">
-        <span class="notice-icon">i</span
-        ><span id="operatorHint"
-          >连接机械臂后查看状态；使能并就绪后可发送运动。</span
-        ><button class="text-button" id="inspectNotice">查看诊断 ↗</button>
+        <span class="notice-icon">
+          i
+        </span>
+        <span id="operatorHint">
+          连接后查看反馈，使能并就绪后可执行运动。
+        </span>
+        <button class="text-button" id="inspectNotice">
+          查看诊断 ↗
+        </button>
       </div>
       <main id="viewContent" tabindex="-1">
-        <div class="workspace-grid">
+        <div class="workspace-grid pendant-workspace">
           <div class="primary-content">
-            <section class="view-panel" data-view-panel="workbench">
-              <div id="viewerWorkbenchSlot">
-                <section
-                  class="card robot-viewer"
-                  id="robotViewer"
-                  aria-label="机械臂三维视图"
-                >
+            <section class="view-panel teach-workspace" data-view-panel="workbench">
+              <section aria-label="示教操作" class="teach-controls card">
+                <div class="teach-heading">
+                  <h2>
+                    示教操作
+                  </h2>
+                  <span>
+                    base_link → tool0
+                  </span>
+                </div>
+                <div aria-label="示教方式" class="teach-tabs" role="tablist">
+                  <button aria-controls="teach-step" aria-selected="true" data-teach-tab="step" id="teachTab-step" role="tab">
+                    步进示教
+                  </button>
+                  <button aria-controls="teach-target" aria-selected="false" data-teach-tab="target" id="teachTab-target" role="tab">
+                    目标运动
+                  </button>
+                  <button aria-controls="teach-drag" aria-selected="false" data-teach-tab="drag" id="teachTab-drag" role="tab">
+                    拖拽示教
+                  </button>
+                </div>
+                <div aria-labelledby="teachTab-step" id="teach-step" role="tabpanel">
+                </div>
+                <div aria-labelledby="teachTab-target" hidden="" id="teach-target" role="tabpanel">
+                  <fieldset id="normalMotionControls">
+                    <legend>
+                      编辑目标
+                    </legend>
+                    <label>
+                      输出轴限速（°/s）
+                      <input id="outputSpeedLimit" max="10" min="0.16666666666666666" step="any" type="number" value="5"/>
+                    </label>
+                    <div class="tabs">
+                      <div class="tab-head" role="tablist">
+                        <button aria-controls="single" aria-selected="false" class="tab-button" data-tab="single" id="tab-single" role="tab">
+                          单关节
+                        </button>
+                        <button aria-controls="multi" aria-selected="true" class="tab-button active" data-tab="multi" id="tab-multi" role="tab">
+                          六关节
+                        </button>
+                        <button aria-controls="outputControlCard" aria-selected="false" class="tab-button" data-tab="outputControlCard" id="tab-outputControlCard" role="tab">
+                          输出轴
+                        </button>
+                        <button aria-controls="cartesian" aria-selected="false" class="tab-button" data-tab="cartesian" id="tab-cartesian" role="tab">
+                          末端位姿
+                        </button>
+                      </div>
+                      <section aria-labelledby="tab-single" class="tab-panel" id="single" role="tabpanel">
+                        <div class="motor-list" id="motorList">
+                        </div>
+                      </section>
+                      <section aria-labelledby="tab-multi" class="tab-panel active" id="multi" role="tabpanel">
+                        <fieldset>
+                          <legend>
+                            六关节目标 · 相对关节角（°）
+                          </legend>
+                          <div class="joint-grid" id="multiJointGrid">
+                          </div>
+                        </fieldset>
+                        <fieldset class="param-card" id="jointParamCard">
+                          <legend>
+                            关节直接运动参数
+                          </legend>
+                          <div class="joint-param-grid">
+                            <div class="joint-row">
+                              <label for="multiSpeed">
+                                关节速度(°/s)
+                              </label>
+                              <input id="multiSpeed" max="10" min="0.01" step="any" type="number" value="5"/>
+                            </div>
+                          </div>
+                        </fieldset>
+                        <div class="toolbar">
+                          <button id="copyJointTargets">
+                            使用当前关节角
+                          </button>
+                          <button class="btn-green" data-motion="true" id="multiMoveBtn">
+                            执行关节运动
+                          </button>
+                          <button class="btn-red" id="multiStopBtn">
+                            停止
+                          </button>
+                        </div>
+                        <p>
+                          直接关节运动 · 目标单位 °
+                        </p>
+                      </section>
+                      <section aria-labelledby="tab-cartesian" class="tab-panel" id="cartesian" role="tabpanel">
+                        <p>
+                          末端法兰 tool0 相对 base_link。XYZ 使用 mm，姿态为固定轴
+                      RPY（°），R = Rz · Ry · Rx。
+                        </p>
+                        <div class="pose-control-row">
+                          <fieldset>
+                            <legend>
+                              位置控制
+                            </legend>
+                            <div class="pose-control-grid">
+                              <div class="joint-row">
+                                <label for="targetX">
+                                  X(mm)
+                                </label>
+                                <input id="targetX" step="any" type="number" value="0"/>
+                              </div>
+                              <div class="joint-row">
+                                <label for="targetY">
+                                  Y(mm)
+                                </label>
+                                <input id="targetY" step="any" type="number" value="0"/>
+                              </div>
+                              <div class="joint-row">
+                                <label for="targetZ">
+                                  Z(mm)
+                                </label>
+                                <input id="targetZ" step="any" type="number" value="0"/>
+                              </div>
+                            </div>
+                          </fieldset>
+                          <fieldset>
+                            <legend>
+                              姿态控制
+                            </legend>
+                            <div class="pose-control-grid">
+                              <div class="joint-row">
+                                <label for="targetRx">
+                                  RX(°)
+                                </label>
+                                <input id="targetRx" step="any" type="number" value="0"/>
+                              </div>
+                              <div class="joint-row">
+                                <label for="targetRy">
+                                  RY(°)
+                                </label>
+                                <input id="targetRy" step="any" type="number" value="0"/>
+                              </div>
+                              <div class="joint-row">
+                                <label for="targetRz">
+                                  RZ(°)
+                                </label>
+                                <input id="targetRz" step="any" type="number" value="0"/>
+                              </div>
+                            </div>
+                          </fieldset>
+                        </div>
+                        <fieldset class="param-card" id="lineParamCard">
+                          <legend>
+                            直线插补的参数
+                          </legend>
+                          <div class="line-param-grid">
+                            <div class="joint-row">
+                              <label for="endSpeed">
+                                末端速度(mm/s)
+                              </label>
+                              <input id="endSpeed" step="any" type="number" value="5"/>
+                            </div>
+                            <div class="joint-row">
+                              <label for="lineAccel">
+                                加速度(mm/s²)
+                              </label>
+                              <input id="lineAccel" min="0.001" step="any" type="number" value="10"/>
+                            </div>
+                            <div class="joint-row">
+                              <label for="angularSpeed">
+                                角速度(°/s)
+                              </label>
+                              <input id="angularSpeed" max="10" min="0.001" step="any" type="number" value="5"/>
+                            </div>
+                            <div class="joint-row">
+                              <label for="angularAccel">
+                                角加速度(°/s²)
+                              </label>
+                              <input id="angularAccel" min="0.001" step="any" type="number" value="2"/>
+                            </div>
+                          </div>
+                        </fieldset>
+                        <div class="toolbar">
+                          <button id="copyCartesianTarget">
+                            使用当前位姿
+                          </button>
+                          <button class="btn-green" data-motion="true" id="cartesianMoveBtn">
+                            执行直线运动
+                          </button>
+                          <button class="btn-red" data-cmd="stop_motion">
+                            停止
+                          </button>
+                        </div>
+                        <p>
+                          仅使用末端位姿目标，经 IK
+                      与直线规划后执行；不读取六关节目标。
+                        </p>
+                      </section>
+                      <fieldset aria-labelledby="tab-outputControlCard" class="tab-panel" id="outputControlCard" role="tabpanel">
+                        <legend>
+                          输出轴目标（模型零位，规定正方向）
+                        </legend>
+                        <div class="joint-grid" id="outputTargetGrid">
+                        </div>
+                        <button id="copyOutputTargets">
+                          读取当前输出角
+                        </button>
+                        <button data-motion="true" id="moveOutputTargets">
+                          运动到输出轴目标
+                        </button>
+                        <p>
+                          单位
+                      °；六轴目标先通过绳索反解检查标准关节限位，再进入整臂轨迹控制。此处是输出轴目标控制，不是原始电机协议角点动。
+                        </p>
+                      </fieldset>
+                    </div>
+                    <details class="panel-fold">
+                      <summary>
+                        运动参数说明
+                      </summary>
+                      <p>
+                        默认 5°/s，最高 10°/s。对下一次输出轴、关节、预设姿态及笛卡尔运动生效；执行中修改不影响当前任务。驱动按减速比落实限速，速度按协议分辨率向下取整。
+                      </p>
+                      <p>
+                        起点允许反馈容差，运动目标必须在标准限位内。若起点超出标准范围，起始过渡及未选轴的保持目标会取最近合法边界；笛卡尔直线从该合法起点规划。
+                      </p>
+                    </details>
+                  </fieldset>
+                  <p class="loaded-point" hidden="" id="loadedPointStatus" role="status">
+                  </p>
+                  <details class="panel-fold" id="targetUtilities">
+                    <summary>
+                      整组目标与预设姿态
+                    </summary>
+                    <fieldset>
+                      <legend>
+                        总体控制
+                      </legend>
+                      <div class="overall-buttons">
+                        <button class="btn-red" data-cmd="stop_motion">
+                          停止运动
+                        </button>
+                        <button class="btn-primary" data-motion="true" id="moveAllBtn">
+                          按单关节目标全部运动
+                        </button>
+                        <button id="copyCurrentBtn">
+                          读取当前角度为目标
+                        </button>
+                        <button class="btn-primary" data-cmd="reset_motor" data-motor-id="0">
+                          清除所有电机错误（0x9B）
+                        </button>
+                      </div>
+                    </fieldset>
+                    <fieldset id="presetPosePanel">
+                      <legend>
+                        预设姿态
+                      </legend>
+                      <label>
+                        打包 / 零位关节速度（°/s）
+                        <input id="presetSpeed" max="10" min="0.01" step="any" type="number" value="5"/>
+                      </label>
+                      <p>
+                        执行整臂关节运动，关节速度默认 5°/s、最高 10°/s，可在此调整，同时受网页输出轴限速约束。打包目标来自后端标定；零位目标为六个主动关节角
+                  0°。这两个按钮不会重设电机零点。
+                      </p>
+                      <div class="endpoint-row">
+                        <button class="btn-primary" data-preset="packing" disabled="" id="movePackingPose">
+                          运动到打包姿态
+                        </button>
+                        <button class="btn-primary" data-preset="zero" disabled="" id="moveZeroPose">
+                          运动到零位姿态
+                        </button>
+                        <button class="btn-red" data-cmd="stop_motion">
+                          停止运动
+                        </button>
+                      </div>
+                      <p>
+                        目标角顺序：joint_01、joint_02、joint_04、joint_05、joint_06、joint_09。
+                      </p>
+                      <div id="packingPoseStatus" role="status">
+                        打包姿态：等待连接
+                      </div>
+                      <div id="zeroPoseStatus" role="status">
+                        零位姿态：等待连接
+                      </div>
+                    </fieldset>
+                  </details>
+                </div>
+                <div aria-labelledby="teachTab-drag" hidden="" id="teach-drag" role="tabpanel">
+                  <div class="overall-buttons">
+                    <button aria-pressed="false" class="btn-secondary" id="dragTeachingBtn">
+                      进入拖拽示教
+                    </button>
+                    <span id="dragTeachingStatus" role="status">
+                      连接后查看示教状态
+                    </span>
+                  </div>
+                  <p class="hint">
+                    正常运动到位后保持位置。拖拽示教会释放全部电机力矩，请先支撑机械臂；停止拖动后结束示教，将在当前位置保持。
+                  </p>
+                  <p>
+                    结束拖拽后，再到“点位管理”记录当前反馈。
+                  </p>
+                </div>
+              </section>
+              <div class="teach-model" id="viewerWorkbenchSlot">
+                <section aria-label="机械臂三维视图" class="card robot-viewer" id="robotViewer">
                   <div class="section-heading">
                     <div>
-                      <span class="eyebrow">ROBOT / DIGITAL VIEW</span>
-                      <h2>三维机械臂</h2>
+                      <span class="eyebrow">
+                        LIVE / PREVIEW
+                      </span>
+                      <h2>
+                        机械臂视图
+                      </h2>
                     </div>
-                    <span class="pill" id="viewerStatus" role="status"
-                      >正在加载模型</span
-                    >
+                    <span class="pill" id="viewerStatus" role="status">
+                      正在加载模型
+                    </span>
+                    <span class="quiet-label">
+                      基坐标 / 工具端点
+                    </span>
                   </div>
-                  <div class="viewer-toolbar" aria-label="模型视角">
+                  <div aria-label="模型视角" class="viewer-toolbar">
                     <div class="viewer-views">
-                      <button data-camera-view="iso" aria-label="三维等轴视角">
+                      <button aria-label="三维等轴视角" data-camera-view="iso">
                         三维
                       </button>
-                      <button data-camera-view="front">正视</button>
-                      <button data-camera-view="side">侧视</button>
-                      <button data-camera-view="top">俯视</button>
-                      <button id="viewerFit">居中</button>
+                      <button data-camera-view="front">
+                        正视
+                      </button>
+                      <button data-camera-view="side">
+                        侧视
+                      </button>
+                      <button data-camera-view="top">
+                        俯视
+                      </button>
+                      <button id="viewerFit">
+                        居中
+                      </button>
                     </div>
                     <div class="viewer-toggles">
-                      <label
-                        ><input
-                          type="checkbox"
-                          id="viewerAxes"
-                          checked
-                        />坐标轴</label
-                      >
-                      <label
-                        ><input
-                          type="checkbox"
-                          id="viewerGrid"
-                          checked
-                        />网格</label
-                      >
+                      <label>
+                        <input checked="" id="viewerAxes" type="checkbox"/>
+                        坐标轴
+                      </label>
+                      <label>
+                        <input checked="" id="viewerGrid" type="checkbox"/>
+                        网格
+                      </label>
                     </div>
                   </div>
                   <div class="viewer-stage" id="viewerStage">
-                    <div
-                      id="viewerCanvas"
-                      aria-label="拖动旋转，滚轮缩放，右键平移；点击连杆选择关节"
-                    ></div>
-                    <div class="viewer-stamp">
-                      <span id="viewerSource">URDF / 等待加载</span
-                      ><small>Z ↑ · base_link · m</small>
+                    <div aria-label="拖动旋转，滚轮缩放，右键平移；点击连杆选择关节" id="viewerCanvas">
                     </div>
-                    <div
-                      class="viewer-loading"
-                      id="viewerLoading"
-                      role="status"
-                    >
+                    <div class="viewer-stamp">
+                      <span id="viewerSource">
+                        URDF / 等待加载
+                      </span>
+                      <small>
+                        Z ↑ · base_link · m
+                      </small>
+                    </div>
+                    <div class="viewer-loading" id="viewerLoading" role="status">
                       正在准备三维资源…
                     </div>
                     <div class="viewer-legend">
-                      <span class="legend-feedback">模型反馈</span
-                      ><span class="legend-target">目标预览</span
-                      ><span>X 红 / Y 绿 / Z 蓝 · 路径橙色</span>
+                      <span class="legend-feedback">
+                        模型反馈
+                      </span>
+                      <span class="legend-target">
+                        目标预览
+                      </span>
+                      <span>
+                        X 红 / Y 绿 / Z 蓝 · 路径橙色
+                      </span>
                     </div>
-                  </div>
-                  <div
-                    class="viewer-joints"
-                    id="viewerJoints"
-                    aria-label="选择显示关节"
-                  ></div>
-                  <div class="viewer-detail">
-                    <span id="viewerSelection">点击连杆或 J1–J6 查看关节</span
-                    ><button id="viewerLocate" class="text-button" disabled>
-                      定位控制面板 ↗
-                    </button>
-                  </div>
-                  <div class="viewer-preview">
-                    <label for="viewerPreview">叠加预览</label>
-                    <select id="viewerPreview">
-                      <option value="interactive">交互目标 / 后端预览</option>
-                      <option value="none" selected>不显示目标</option>
-                      <option value="single">六轴目标 · 单关节面板</option>
-                      <option value="multi">六轴目标 · 多关节面板</option>
-                      <option value="zero">零位姿态</option>
-                      <option value="packing">打包姿态 · 当前标定</option>
-                    </select>
-                    <span id="viewerPreviewStatus">预览不下发运动</span>
                   </div>
                   <div class="interactive-panel" id="interactivePanel">
-                    <div class="interactive-toolbar">
-                      <label
-                        >鼠标操作
-                        <select id="modelInteraction">
-                          <option value="orbit">旋转视角</option>
-                          <option value="joint">拖动关节</option>
-                        </select></label
-                      >
-                      <label class="release-toggle"
-                        ><input
-                          type="checkbox"
-                          id="releaseExecute"
-                          autocomplete="off"
-                        />松手执行单轴运动</label
-                      >
-                    </div>
-                    <p id="gestureStatus" role="status">
-                      选择连杆或 J1–J6
-                      后，在“拖动关节”模式左右拖动模型区域。向右增大角度，0.2°/像素。默认仅预览。
-                    </p>
+                    <details class="panel-fold" id="modelOptions">
+                      <summary>
+                        模型交互与预览设置
+                      </summary>
+                      <div aria-label="选择显示关节" class="viewer-joints" id="viewerJoints">
+                      </div>
+                      <div class="viewer-detail">
+                        <span id="viewerSelection">
+                          点击连杆或 J1–J6 查看关节
+                        </span>
+                        <button class="text-button" disabled="" id="viewerLocate">
+                          编辑此关节 ↗
+                        </button>
+                      </div>
+                      <div class="viewer-preview">
+                        <label for="viewerPreview">
+                          叠加预览
+                        </label>
+                        <select id="viewerPreview">
+                          <option value="interactive">
+                            交互目标 / 后端预览
+                          </option>
+                          <option selected="" value="none">
+                            不显示目标
+                          </option>
+                          <option value="single">
+                            六轴目标 · 单关节面板
+                          </option>
+                          <option value="multi">
+                            六轴目标 · 多关节面板
+                          </option>
+                          <option value="zero">
+                            零位姿态
+                          </option>
+                          <option value="packing">
+                            打包姿态 · 当前标定
+                          </option>
+                        </select>
+                        <span id="viewerPreviewStatus">
+                          仅预览
+                        </span>
+                      </div>
+                      <div class="interactive-toolbar">
+                        <label>
+                          鼠标操作
+                          <select id="modelInteraction">
+                            <option value="orbit">
+                              旋转视角
+                            </option>
+                            <option value="joint">
+                              拖动关节
+                            </option>
+                          </select>
+                        </label>
+                        <label class="release-toggle">
+                          <input autocomplete="off" id="releaseExecute" type="checkbox"/>
+                          松手执行单轴运动
+                        </label>
+                      </div>
+                      <p id="gestureStatus" role="status">
+                        选择关节后左右拖动，默认仅预览。
+                      </p>
+                    </details>
                     <div class="preview-actions">
-                      <button id="previewJoint" data-preview="joint">
+                      <button data-preview="joint" id="previewJoint">
                         关节路径预览
                       </button>
-                      <button id="previewOutput" data-preview="output">
+                      <button data-preview="output" id="previewOutput">
                         输出轴反解 / 路径
                       </button>
-                      <button id="previewIK" data-preview="ik">
+                      <button data-preview="ik" id="previewIK">
                         笛卡尔 IK
                       </button>
-                      <button id="previewLIN" data-preview="lin">
+                      <button data-preview="lin" id="previewLIN">
                         LIN 路径规划
                       </button>
-                      <button id="clearPreview" class="text-button">
+                      <button class="text-button" id="clearPreview">
                         清除预览
                       </button>
                     </div>
                     <p id="planningStatus" role="status">
-                      选择下方控制面板的目标后计算；预览不发送运动。
+                      编辑目标后可计算预览。
                     </p>
-                    <div
-                      id="previewJointResult"
-                      class="preview-joint-result"
-                    ></div>
-                    <div id="pathPlayback" class="path-playback" hidden>
-                      <button id="playPreview">回放 · 10 s</button>
-                      <input
-                        id="pathScrub"
-                        type="range"
-                        min="0"
-                        max="200"
-                        value="200"
-                        step="1"
-                        aria-label="规划路径回放进度"
-                      />
-                      <output id="pathTime">--</output>
+                    <div class="preview-joint-result" id="previewJointResult">
                     </div>
-                    <small
-                      >橙线：tool0
-                      路径。回放仅用于查看；执行按钮会从最新反馈重新生成轨迹。关节
-                      / 输出轴插值不检查碰撞。</small
-                    >
-                  </div>
-                  <div class="viewer-footer">
-                    <span id="viewerTcp">模型 tool0：--</span
-                    ><span>模型反馈与目标独立显示，运动结果请查看任务状态</span>
+                    <div class="path-playback" hidden="" id="pathPlayback">
+                      <button id="playPreview">
+                        回放 · 10 s
+                      </button>
+                      <input aria-label="规划路径回放进度" id="pathScrub" max="200" min="0" step="1" type="range" value="200"/>
+                      <output id="pathTime">
+                        --
+                      </output>
+                    </div>
+                    <small>
+                      橙线为末端路径。执行时从最新反馈重新规划；关节 / 输出轴插值不检查碰撞。
+                    </small>
                   </div>
                   <p class="viewer-note" id="viewerNote">
-                    模型由编码器经绳索运动学推算，请与实机姿态对照。拖动旋转 ·
-                    滚轮缩放 · 右键平移。
+                    拖动旋转 · 滚轮缩放 · 右键平移
                   </p>
+                  <div class="viewer-footer">
+                    <span id="viewerTcp">
+                      模型 tool0：--
+                    </span>
+                    <span>
+                      反馈蓝色 · 目标青绿 · 路径橙色
+                    </span>
+                  </div>
+                  <fieldset class="pose-feedback">
+                    <legend>
+                      当前末端反馈 · mm / °
+                    </legend>
+                    <div class="readonly-grid">
+                      <label>
+                        X (mm)
+                      </label>
+                      <input aria-label="X 位置 mm" id="endX" readonly="" type="text" value="--"/>
+                      <label>
+                        Y (mm)
+                      </label>
+                      <input aria-label="Y 位置 mm" id="endY" readonly="" type="text" value="--"/>
+                      <label>
+                        Z (mm)
+                      </label>
+                      <input aria-label="Z 位置 mm" id="endZ" readonly="" type="text" value="--"/>
+                    </div>
+                    <div class="readonly-grid">
+                      <label>
+                        RX (°)
+                      </label>
+                      <input aria-label="RX 姿态 °" id="endRx" readonly="" type="text" value="--"/>
+                      <label>
+                        RY (°)
+                      </label>
+                      <input aria-label="RY 姿态 °" id="endRy" readonly="" type="text" value="--"/>
+                      <label>
+                        RZ (°)
+                      </label>
+                      <input aria-label="RZ 姿态 °" id="endRz" readonly="" type="text" value="--"/>
+                    </div>
+                  </fieldset>
                 </section>
               </div>
-              <section aria-label="实时关节概览" class="joint-overview card">
+              <section aria-label="实时关节概览" class="joint-overview card teach-feedback">
                 <div class="section-heading">
                   <div>
-                    <span class="eyebrow">LIVE FEEDBACK</span>
-                    <h2>机械臂概览</h2>
+                    <h2>
+                      当前关节反馈
+                    </h2>
                   </div>
-                  <span class="quiet-label">模型反解 · 单位 °</span>
+                  <span class="quiet-label">
+                    °
+                  </span>
                 </div>
-                <div class="joint-overview-grid" id="jointOverview"></div>
+                <div class="joint-overview-grid" id="jointOverview">
+                </div>
                 <div class="overview-footer">
-                  <span id="overviewState">连接后显示实时角度</span
-                  ><span>6 AXES</span>
+                  <span id="overviewState">
+                    连接后显示实时角度
+                  </span>
+                  <span>
+                    6 AXES
+                  </span>
+                  <button class="text-button" id="openPoints">
+                    保存为点位 ↗
+                  </button>
                 </div>
               </section>
-              <fieldset>
-                <legend>总体控制</legend>
-                <div class="overall-buttons">
-                  <button id="dragTeachingBtn" class="btn-secondary" aria-pressed="false">进入拖拽示教</button>
-                  <span id="dragTeachingStatus" role="status">连接后查看示教状态</span>
-                </div>
-                <p class="hint">正常运动到位后保持位置。拖拽示教会释放全部电机力矩，请先支撑机械臂；停止拖动后结束示教，将在当前位置保持。</p>
-                <div class="overall-buttons">
-                  <button
-                    class="btn-primary"
-                    data-cmd="enable_motor"
-                    data-motor-id="0"
-                  >
-                    所有电机使能
-                  </button>
-                  <button
-                    class="btn-red"
-                    data-cmd="disable_motor"
-                    data-motor-id="0"
-                  >
-                    所有电机关闭
-                  </button>
-                  <button class="btn-red" data-cmd="stop_motion">
-                    停止运动
-                  </button>
-                  <button
-                    class="btn-primary"
-                    data-motion="true"
-                    id="moveAllBtn"
-                  >
-                    按单关节目标全部运动
-                  </button>
-                  <button id="copyCurrentBtn">读取当前角度为目标</button>
-                  <button
-                    class="btn-primary"
-                    data-cmd="reset_motor"
-                    data-motor-id="0"
-                  >
-                    清除所有电机错误（0x9B）
-                  </button>
-                </div>
-              </fieldset>
-              <fieldset id="motorRecoveryPanel">
-                <legend>电机故障恢复</legend>
-                <div class="overall-buttons">
-                  <label
-                    >CAN 电机
-                    <select id="recoveryMotorId" aria-label="故障恢复电机">
-                      <option value="1">CAN 1</option>
-                      <option value="2">CAN 2</option>
-                      <option value="3">CAN 3</option>
-                      <option value="4">CAN 4</option>
-                      <option value="5">CAN 5</option>
-                      <option value="6">CAN 6</option>
-                    </select></label
-                  >
-                  <button
-                    id="clearMotorFaultBtn"
-                    data-cmd="reset_motor"
-                    data-motor-id="1"
-                  >
-                    清除所选错误 · 0x9B
-                  </button>
-                  <button
-                    id="rebootMotorBtn"
-                    data-cmd="reboot_motor"
-                    data-motor-id="1"
-                  >
-                    重启所选电机 · 0x07
-                  </button>
-                </div>
-                <p>
-                  清错需要所选电机反馈有效且静止；重启需要六轴反馈有效、整臂静止。
-                  重启会短暂掉线并释放所选电机力矩，请先支撑机械臂。完成后保持关闭，需另行使能。
-                </p>
-                <p id="recoveryGate" role="status">连接后检查恢复条件</p>
-                <p id="recoveryResult" role="status">
-                  0x9B 清除错误标志；0x07 重启驱动，不重新置零。运动学 /
-                  标定错误不能靠重启修复。
-                </p>
-              </fieldset>
-              <fieldset id="normalMotionControls">
-                <legend>运动目标与参数</legend>
-                <label
-                  >输出轴速度上限（°/s）
-                  <input
-                    id="outputSpeedLimit"
-                    min="0.16666666666666666"
-                    step="any"
-                    type="number"
-                    value="5"
-                    max="10"
-                  />
-                </label>
-                <p>
-                  默认 5°/s，最高 10°/s。对下一次输出轴、关节、预设姿态及笛卡尔运动生效；执行中修改不影响当前任务。驱动按减速比落实限速，速度按协议分辨率向下取整。
-                </p>
-                <p>
-                  起点允许反馈容差，运动目标必须在标准限位内。若起点超出标准范围，起始过渡及未选轴的保持目标会取最近合法边界；笛卡尔直线从该合法起点规划。
-                </p>
-                <div class="tabs">
-                  <div class="tab-head" role="tablist">
-                    <button
-                      aria-controls="single"
-                      aria-selected="true"
-                      class="tab-button active"
-                      data-tab="single"
-                      id="tab-single"
-                      role="tab"
-                    >
-                      单关节控制
-                    </button>
-                    <button
-                      aria-controls="multi"
-                      aria-selected="false"
-                      class="tab-button"
-                      data-tab="multi"
-                      id="tab-multi"
-                      role="tab"
-                    >
-                      多关节控制
-                    </button>
-                    <button
-                      aria-controls="outputControlCard"
-                      aria-selected="false"
-                      class="tab-button"
-                      data-tab="outputControlCard"
-                      id="tab-outputControlCard"
-                      role="tab"
-                    >
-                      输出轴控制
-                    </button>
-                    <button
-                      aria-controls="cartesian"
-                      aria-selected="false"
-                      class="tab-button"
-                      data-tab="cartesian"
-                      id="tab-cartesian"
-                      role="tab"
-                    >
-                      笛卡尔控制
-                    </button>
-                  </div>
-                  <section
-                    aria-labelledby="tab-single"
-                    class="tab-panel active"
-                    id="single"
-                    role="tabpanel"
-                  >
-                    <div class="motor-list" id="motorList"></div>
-                  </section>
-                  <section
-                    aria-labelledby="tab-multi"
-                    class="tab-panel"
-                    id="multi"
-                    role="tabpanel"
-                  >
-                    <fieldset>
-                      <legend>六关节目标 · 相对关节角（°）</legend>
-                      <div class="joint-grid" id="multiJointGrid"></div>
-                    </fieldset>
-                    <fieldset class="param-card" id="jointParamCard">
-                      <legend>关节直接运动参数</legend>
-                      <div class="joint-param-grid">
-                        <div class="joint-row">
-                          <label for="multiSpeed">关节速度(°/s)</label>
-                          <input
-                            id="multiSpeed"
-                            min="0.01"
-                            step="any"
-                            type="number"
-                            value="5"
-                            max="10"
-                          />
-                        </div>
-                      </div>
-                    </fieldset>
-                    <div class="toolbar">
-                      <button id="copyJointTargets">读取当前六关节角</button
-                      ><button
-                        class="btn-green"
-                        data-motion="true"
-                        id="multiMoveBtn"
-                      >
-                        执行六关节运动</button
-                      ><button class="btn-red" id="multiStopBtn">停止</button>
-                    </div>
-                    <p>仅使用 J1–J6 目标，按关节空间插值；不读取笛卡尔目标。</p>
-                  </section>
-                  <section
-                    aria-labelledby="tab-cartesian"
-                    class="tab-panel"
-                    id="cartesian"
-                    role="tabpanel"
-                  >
-                    <p>
-                      末端法兰 tool0 相对 base_link。XYZ 使用 mm，姿态为固定轴
-                      RPY（°），R = Rz · Ry · Rx。
-                    </p>
-                    <div class="pose-control-row">
-                      <fieldset>
-                        <legend>位置控制</legend>
-                        <div class="pose-control-grid">
-                          <div class="joint-row">
-                            <label for="targetX">X(mm)</label>
-                            <input
-                              id="targetX"
-                              step="any"
-                              type="number"
-                              value="0"
-                            />
-                          </div>
-                          <div class="joint-row">
-                            <label for="targetY">Y(mm)</label>
-                            <input
-                              id="targetY"
-                              step="any"
-                              type="number"
-                              value="0"
-                            />
-                          </div>
-                          <div class="joint-row">
-                            <label for="targetZ">Z(mm)</label>
-                            <input
-                              id="targetZ"
-                              step="any"
-                              type="number"
-                              value="0"
-                            />
-                          </div>
-                        </div>
-                      </fieldset>
-                      <fieldset>
-                        <legend>姿态控制</legend>
-                        <div class="pose-control-grid">
-                          <div class="joint-row">
-                            <label for="targetRx">RX(°)</label>
-                            <input
-                              id="targetRx"
-                              step="any"
-                              type="number"
-                              value="0"
-                            />
-                          </div>
-                          <div class="joint-row">
-                            <label for="targetRy">RY(°)</label>
-                            <input
-                              id="targetRy"
-                              step="any"
-                              type="number"
-                              value="0"
-                            />
-                          </div>
-                          <div class="joint-row">
-                            <label for="targetRz">RZ(°)</label>
-                            <input
-                              id="targetRz"
-                              step="any"
-                              type="number"
-                              value="0"
-                            />
-                          </div>
-                        </div>
-                      </fieldset>
-                    </div>
-
-                    <fieldset class="param-card" id="lineParamCard">
-                      <legend>直线插补的参数</legend>
-                      <div class="line-param-grid">
-                        <div class="joint-row">
-                          <label for="endSpeed">末端速度(mm/s)</label>
-                          <input
-                            id="endSpeed"
-                            step="any"
-                            type="number"
-                            value="5"
-                          />
-                        </div>
-                        <div class="joint-row">
-                          <label for="lineAccel">加速度(mm/s²)</label>
-                          <input
-                            id="lineAccel"
-                            min="0.001"
-                            step="any"
-                            type="number"
-                            value="10"
-                          />
-                        </div>
-                        <div class="joint-row">
-                          <label for="angularSpeed">角速度(°/s)</label>
-                          <input
-                            id="angularSpeed"
-                            min="0.001"
-                            step="any"
-                            type="number"
-                            value="5"
-                            max="10"
-                          />
-                        </div>
-                        <div class="joint-row">
-                          <label for="angularAccel">角加速度(°/s²)</label>
-                          <input
-                            id="angularAccel"
-                            min="0.001"
-                            step="any"
-                            type="number"
-                            value="2"
-                          />
-                        </div>
-                      </div>
-                    </fieldset>
-                    <div class="toolbar">
-                      <button id="copyCartesianTarget">读取当前末端位姿</button
-                      ><button
-                        class="btn-green"
-                        data-motion="true"
-                        id="cartesianMoveBtn"
-                      >
-                        执行笛卡尔直线</button
-                      ><button class="btn-red" data-cmd="stop_motion">
-                        停止
-                      </button>
-                    </div>
-                    <p>
-                      仅使用末端位姿目标，经 IK
-                      与直线规划后执行；不读取六关节目标。
-                    </p>
-                  </section>
-                  <fieldset
-                    aria-labelledby="tab-outputControlCard"
-                    class="tab-panel"
-                    id="outputControlCard"
-                    role="tabpanel"
-                  >
-                    <legend>输出轴目标（模型零位，规定正方向）</legend>
-                    <div class="joint-grid" id="outputTargetGrid"></div>
-                    <button id="copyOutputTargets">读取当前输出角</button>
-                    <button data-motion="true" id="moveOutputTargets">
-                      运动到输出轴目标
-                    </button>
-                    <p>
-                      单位
-                      °；六轴目标先通过绳索反解检查标准关节限位，再进入整臂轨迹控制。此处是输出轴目标控制，不是原始电机协议角点动。
-                    </p>
-                  </fieldset>
-                </div>
-              </fieldset>
-              <p
-                id="loadedPointStatus"
-                class="loaded-point"
-                role="status"
-                hidden
-              ></p>
-              <details class="base-frame-panel" open>
-                <summary>各关节坐标系相对 base_link 的位姿</summary>
-                <p>
-                  J1–J6 的 URDF 子坐标系；XYZ 为 mm，RPY 为
-                  °。这是坐标系姿态，不是关节自身转角。由当前编码器 /
-                  绳索反解推算。
-                </p>
-                <div class="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>关节 / 坐标系</th>
-                        <th>X</th>
-                        <th>Y</th>
-                        <th>Z</th>
-                        <th>Roll</th>
-                        <th>Pitch</th>
-                        <th>Yaw</th>
-                      </tr>
-                    </thead>
-                    <tbody id="baseFrameBody"></tbody>
-                  </table>
-                </div>
-                <p id="baseFrameStatus">等待有效反馈</p>
-              </details>
-              <fieldset id="presetPosePanel">
-                <legend>预设姿态</legend>
-                <label>打包 / 零位关节速度（°/s）
-                  <input id="presetSpeed" type="number" min="0.01" max="10" step="any" value="5" />
-                </label>
-                <p>
-                  执行整臂关节运动，关节速度默认 5°/s、最高 10°/s，可在此调整，同时受网页输出轴限速约束。打包目标来自后端标定；零位目标为六个主动关节角
-                  0°。这两个按钮不会重设电机零点。
-                </p>
-                <div class="endpoint-row">
-                  <button
-                    class="btn-primary"
-                    data-preset="packing"
-                    disabled=""
-                    id="movePackingPose"
-                  >
-                    运动到打包姿态
-                  </button>
-                  <button
-                    class="btn-primary"
-                    data-preset="zero"
-                    disabled=""
-                    id="moveZeroPose"
-                  >
-                    运动到零位姿态
-                  </button>
-                  <button class="btn-red" data-cmd="stop_motion">
-                    停止运动
-                  </button>
-                </div>
-                <p>
-                  目标角顺序：joint_01、joint_02、joint_04、joint_05、joint_06、joint_09。
-                </p>
-                <div id="packingPoseStatus" role="status">
-                  打包姿态：等待连接
-                </div>
-                <div id="zeroPoseStatus" role="status">零位姿态：等待连接</div>
-              </fieldset>
             </section>
-            <section class="view-panel" data-view-panel="points" hidden>
+            <section class="view-panel" data-view-panel="points" hidden="">
               <div class="section-heading">
                 <div>
-                  <span class="eyebrow">TEACHING POINTS</span>
-                  <h2>点位示教</h2>
+                  <span class="eyebrow">
+                    TEACHING POINTS
+                  </span>
+                  <h2>
+                    点位管理
+                  </h2>
                 </div>
-                <button id="refreshPoints">刷新列表</button>
+                <button id="refreshPoints">
+                  刷新列表
+                </button>
               </div>
               <p class="section-description">
-                手动录入、记录实机反馈，或保存模型预览目标。点位保存在树莓派；保存和加载都不会使机械臂运动。
+                载入点位只更新运动目标。点位保存在树莓派，可供程序和脚本使用。
               </p>
               <div class="teaching-grid">
-                <fieldset class="repeat-panel" id="repeatPanel">
-                  <legend>重复定位测试</legend>
-                  <p>每轮：起始点 → 到位等待 → 目标点 → 到位等待并记录。最后停在目标点保持。两点需为同一类型，笛卡尔点位使用直线运动。</p>
-                  <div class="repeat-grid">
-                    <label>起始点<select id="repeatStartPoint"><option value="">等待连接并加载点位…</option></select></label>
-                    <label>目标点<select id="repeatTargetPoint"><option value="">等待连接并加载点位…</option></select></label>
-                    <label>循环次数<input id="repeatCycles" type="number" min="1" max="1000" step="1" value="10" /></label>
-                    <label>每次到点等待（s）<input id="repeatDwell" type="number" min="0" max="3600" step="0.1" value="3" /></label>
-                    <label>关节 / 姿态速度（°/s）<input id="repeatSpeed" type="number" min="0.01" max="10" step="any" value="5" /></label>
-                    <label>输出轴速度上限（°/s）<input id="repeatOutputSpeed" type="number" min="0.16666666666666666" max="10" step="any" value="5" /></label>
-                    <label id="repeatLinearLabel" hidden>直线速度（mm/s）<input id="repeatLinearSpeed" type="number" min="0.01" max="100" step="any" value="5" /></label>
-                  </div>
-                  <p id="repeatSelection">请选择已保存的两个点位</p>
+                <fieldset class="point-library">
+                  <legend>
+                    已保存点位
+                  </legend>
                   <div class="point-actions">
-                    <button class="btn-primary" id="repeatStart" disabled>开始循环运动</button>
-                    <button id="repeatTrial" disabled>试跑 5 轮并测周期</button>
-                    <button class="btn-red" id="repeatStop" disabled>停止测试与运动</button>
-                    <button id="repeatExport" disabled>导出测试 JSON</button>
-                    <button id="repeatCsv" disabled>导出记录 CSV</button>
+                    <button id="exportPoints">
+                      导出 JSON
+                    </button>
+                    <span id="pointCount">
+                      0 个点位
+                    </span>
                   </div>
-                  <progress id="repeatProgress" max="10" value="0" aria-label="完成循环数"></progress>
-                  <p id="repeatStatus" role="status" aria-live="polite">尚未开始</p>
-                  <p id="repeatSummary">目标点记录：0 次</p>
-                  <div class="repeat-timing">
-                    <h3>循环周期 · 秒</h3>
-                    <p id="repeatTimingSummary">周期统计：尚未开始。</p>
-                    <p>试跑会按所选点位、速度和等待时间实际运动 5 轮。首轮包含初始就位，5 轮得到 4 个完整的目标点记录间隔；普通循环也会统计。下表显示最近 10 轮，导出保留全部记录。</p>
-                    <div class="repeat-timing-scroll" tabindex="0" role="region" aria-label="循环计时记录">
-                      <table>
-                        <thead><tr><th scope="col">轮次</th><th scope="col">本轮耗时</th><th scope="col">目标点记录间隔</th><th scope="col">目标到位时刻*</th><th scope="col">目标记录时刻*</th></tr></thead>
-                        <tbody id="repeatTimingRows"></tbody>
-                      </table>
-                    </div>
-                    <p>* 相对本组测试开始的秒数；树莓派核验到位后计时，等待结束时记录。耗时使用单调时钟，记录时间使用 UTC。</p>
-                    <p>激光跟踪仪只采稳定点时，优先按其稳定条件触发，并确认每次停留只采一次、能够区分起始点与目标点。此页面未连接跟踪仪；平均周期仅供估计节拍，同周期独立采样仍会漂移。</p>
+                  <div class="point-list" id="pointList">
                   </div>
-                  <p>到位后开始等待，测试使用此处速度并受输出轴限速约束。树莓派独立执行；页面刷新或断线后继续，重新连接可查看当前运行，也可在运行记录中导出。</p>
-                  <p>记录来自编码器与绳索模型，不能替代外部量具测得的末端重复定位精度。记录包含点位、参考编号、到位误差和时间，便于与实测对照。</p>
                 </fieldset>
-                <fieldset>
-                  <legend>录入点位</legend>
+                <fieldset class="point-entry">
+                  <legend>
+                    录入点位
+                  </legend>
                   <div class="point-meta">
-                    <label
-                      >名称<input
-                        id="pointName"
-                        maxlength="80"
-                        placeholder="例如：重复定位 A" /></label
-                    ><label
-                      >类型<select id="pointKind">
-                        <option value="joint">六关节点位 · °</option>
-                        <option value="cartesian">笛卡尔点位 · mm / °</option>
-                      </select></label
-                    >
+                    <label>
+                      名称
+                      <input id="pointName" maxlength="80" placeholder="例如：重复定位 A"/>
+                    </label>
+                    <label>
+                      类型
+                      <select id="pointKind">
+                        <option value="joint">
+                          六关节点位 · °
+                        </option>
+                        <option value="cartesian">
+                          笛卡尔点位 · mm / °
+                        </option>
+                      </select>
+                    </label>
                   </div>
-                  <label
-                    >备注<input
-                      id="pointNote"
-                      maxlength="1000"
-                      placeholder="测试编号、接近方向、测量条件"
-                  /></label>
-                  <div class="joint-grid" id="pointValues"></div>
+                  <label>
+                    备注
+                    <input id="pointNote" maxlength="1000" placeholder="测试编号、接近方向、测量条件"/>
+                  </label>
+                  <div class="joint-grid" id="pointValues">
+                  </div>
                   <div class="point-actions">
                     <button class="btn-primary" id="saveManualPoint">
-                      保存手动输入</button
-                    ><button id="capturePoint">记录当前实机反馈</button
-                    ><button id="saveModelPoint">保存模型预览目标</button>
+                      保存手动输入
+                    </button>
+                    <button id="capturePoint">
+                      记录当前反馈
+                    </button>
+                    <button id="saveModelPoint">
+                      记录模型目标
+                    </button>
                   </div>
                   <p>
-                    实机示教：在总体控制中进入“拖拽示教”，支撑并搬动机械臂，静止后记录点位；结束示教后在当前位置保持。模型示教：关闭“松手执行”，拖动关节后保存预览。
+                    反馈点在机械臂静止后采集；手动点和模型点按各自来源保存。
                   </p>
-                  <p id="pointStatus" role="status">连接后加载点位库</p>
-                </fieldset>
-                <fieldset>
-                  <legend>已保存点位</legend>
-                  <div class="point-actions">
-                    <button id="exportPoints">导出 JSON 备份</button
-                    ><span id="pointCount">0 个点位</span>
-                  </div>
-                  <div id="pointList" class="point-list"></div>
+                  <p id="pointStatus" role="status">
+                    连接后加载点位库
+                  </p>
                 </fieldset>
               </div>
+              <details class="panel-fold" id="repeatTools">
+                <summary>
+                  A / B 重复定位测试
+                </summary>
+                <fieldset class="repeat-panel" id="repeatPanel">
+                  <legend>
+                    重复定位测试
+                  </legend>
+                  <div class="repeat-grid">
+                    <label>
+                      起始点
+                      <select id="repeatStartPoint">
+                        <option value="">
+                          等待连接并加载点位…
+                        </option>
+                      </select>
+                    </label>
+                    <label>
+                      目标点
+                      <select id="repeatTargetPoint">
+                        <option value="">
+                          等待连接并加载点位…
+                        </option>
+                      </select>
+                    </label>
+                    <label>
+                      循环次数
+                      <input id="repeatCycles" max="1000" min="1" step="1" type="number" value="10"/>
+                    </label>
+                    <label>
+                      每次到点等待（s）
+                      <input id="repeatDwell" max="3600" min="0" step="0.1" type="number" value="3"/>
+                    </label>
+                    <label>
+                      关节 / 姿态速度（°/s）
+                      <input id="repeatSpeed" max="10" min="0.01" step="any" type="number" value="5"/>
+                    </label>
+                    <label>
+                      输出轴速度上限（°/s）
+                      <input id="repeatOutputSpeed" max="10" min="0.16666666666666666" step="any" type="number" value="5"/>
+                    </label>
+                    <label hidden="" id="repeatLinearLabel">
+                      直线速度（mm/s）
+                      <input id="repeatLinearSpeed" max="100" min="0.01" step="any" type="number" value="5"/>
+                    </label>
+                  </div>
+                  <p id="repeatSelection">
+                    请选择已保存的两个点位
+                  </p>
+                  <div class="point-actions">
+                    <button class="btn-primary" disabled="" id="repeatStart">
+                      开始循环运动
+                    </button>
+                    <button disabled="" id="repeatTrial">
+                      试跑 5 轮并测周期
+                    </button>
+                    <button class="btn-red" disabled="" id="repeatStop">
+                      停止测试与运动
+                    </button>
+                    <button disabled="" id="repeatExport">
+                      导出测试 JSON
+                    </button>
+                    <button disabled="" id="repeatCsv">
+                      导出记录 CSV
+                    </button>
+                  </div>
+                  <progress aria-label="完成循环数" id="repeatProgress" max="10" value="0">
+                  </progress>
+                  <p aria-live="polite" id="repeatStatus" role="status">
+                    尚未开始
+                  </p>
+                  <p id="repeatSummary">
+                    目标点记录：0 次
+                  </p>
+                  <div class="repeat-timing">
+                    <h3>
+                      循环周期 · 秒
+                    </h3>
+                    <p id="repeatTimingSummary">
+                      周期统计：尚未开始。
+                    </p>
+                    <p>
+                      试跑会按所选点位、速度和等待时间实际运动 5 轮。首轮包含初始就位，5 轮得到 4 个完整的目标点记录间隔；普通循环也会统计。下表显示最近 10 轮，导出保留全部记录。
+                    </p>
+                    <div aria-label="循环计时记录" class="repeat-timing-scroll" role="region" tabindex="0">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th scope="col">
+                              轮次
+                            </th>
+                            <th scope="col">
+                              本轮耗时
+                            </th>
+                            <th scope="col">
+                              目标点记录间隔
+                            </th>
+                            <th scope="col">
+                              目标到位时刻*
+                            </th>
+                            <th scope="col">
+                              目标记录时刻*
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody id="repeatTimingRows">
+                        </tbody>
+                      </table>
+                    </div>
+                    <p>
+                      * 相对本组测试开始的秒数；树莓派核验到位后计时，等待结束时记录。耗时使用单调时钟，记录时间使用 UTC。
+                    </p>
+                    <p>
+                      激光跟踪仪只采稳定点时，优先按其稳定条件触发，并确认每次停留只采一次、能够区分起始点与目标点。此页面未连接跟踪仪；平均周期仅供估计节拍，同周期独立采样仍会漂移。
+                    </p>
+                  </div>
+                  <details class="panel-fold">
+                    <summary>
+                      测试说明
+                    </summary>
+                    <p>
+                      每轮：起始点 → 到位等待 → 目标点 → 到位等待并记录。最后停在目标点保持。两点需为同一类型，笛卡尔点位使用直线运动。
+                    </p>
+                    <p>
+                      到位后开始等待，测试使用此处速度并受输出轴限速约束。树莓派独立执行；页面刷新或断线后继续，重新连接可查看当前运行，也可在运行记录中导出。
+                    </p>
+                    <p>
+                      记录来自编码器与绳索模型，不能替代外部量具测得的末端重复定位精度。记录包含点位、参考编号、到位误差和时间，便于与实测对照。
+                    </p>
+                  </details>
+                </fieldset>
+              </details>
             </section>
             <section class="view-panel" data-view-panel="records" hidden="">
               <div class="section-heading">
                 <div>
-                  <span class="eyebrow">ACTIVITY</span>
-                  <h2>运行记录</h2>
+                  <span class="eyebrow">
+                    ACTIVITY
+                  </span>
+                  <h2>
+                    运行记录
+                  </h2>
                 </div>
                 <button class="btn-secondary" id="clearLog">
                   清空页面日志
@@ -846,43 +945,52 @@
                 查看请求、接受响应与任务终态。请求被接受不代表运动已完成。
               </p>
               <fieldset>
-                <legend>测试结果</legend>
-                <div id="taskState" role="status">暂无运动任务</div>
-                <div class="status-error" id="diagnosticState"></div>
-                <div
-                  aria-live="polite"
-                  id="commandLog"
-                  role="log"
-                  style="
+                <legend>
+                  测试结果
+                </legend>
+                <div id="taskState" role="status">
+                  暂无运动任务
+                </div>
+                <div class="status-error" id="diagnosticState">
+                </div>
+                <div aria-live="polite" id="commandLog" role="log" style="
                     max-height: 180px;
                     overflow: auto;
                     overflow-wrap: anywhere;
-                  "
-                ></div>
+                  ">
+                </div>
               </fieldset>
             </section>
             <section class="view-panel" data-view-panel="diagnostics" hidden="">
               <div class="section-heading">
                 <div>
-                  <span class="eyebrow">ENGINEERING</span>
-                  <h2>状态与坐标诊断</h2>
+                  <span class="eyebrow">
+                    ENGINEERING
+                  </span>
+                  <h2>
+                    状态与坐标诊断
+                  </h2>
                 </div>
-                <span class="quiet-label">开发者视图</span>
+                <span class="quiet-label">
+                  开发者视图
+                </span>
               </div>
               <div class="calibration-card">
-                <span class="metric-label">当前标定</span
-                ><strong id="consoleCalibration">未加载</strong>
+                <span class="metric-label">
+                  当前标定
+                </span>
+                <strong id="consoleCalibration">
+                  未加载
+                </strong>
                 <p>
                   关节角来自绳索模型，不是独立关节传感器。结合实测判断方向与精度。
                 </p>
               </div>
               <fieldset>
-                <legend>实机排查 / 坐标换算链</legend>
-                <div
-                  id="diagnosticSummary"
-                  role="status"
-                  style="white-space: pre-wrap"
-                >
+                <legend>
+                  实机排查 / 坐标换算链
+                </legend>
+                <div id="diagnosticSummary" role="status" style="white-space: pre-wrap">
                   连接后显示硬件状态
                 </div>
                 <p>
@@ -896,17 +1004,34 @@
                     <table aria-label="坐标换算诊断表">
                       <thead>
                         <tr>
-                          <th>CAN ID</th>
-                          <th>协议角(°)</th>
-                          <th>原始输出轴(rad)</th>
-                          <th>软件偏置(rad)</th>
-                          <th>模型输出轴(rad)</th>
-                          <th>电机错误码</th>
-                          <th>反馈年龄(s)</th>
-                          <th>反馈有效</th>
+                          <th>
+                            CAN ID
+                          </th>
+                          <th>
+                            协议角(°)
+                          </th>
+                          <th>
+                            原始输出轴(rad)
+                          </th>
+                          <th>
+                            软件偏置(rad)
+                          </th>
+                          <th>
+                            模型输出轴(rad)
+                          </th>
+                          <th>
+                            电机错误码
+                          </th>
+                          <th>
+                            反馈年龄(s)
+                          </th>
+                          <th>
+                            反馈有效
+                          </th>
                         </tr>
                       </thead>
-                      <tbody id="coordinateBody"></tbody>
+                      <tbody id="coordinateBody">
+                      </tbody>
                     </table>
                   </div>
                 </div>
@@ -915,55 +1040,235 @@
                 </button>
               </fieldset>
               <fieldset>
-                <legend>原始电机状态（CAN ID 1～6）</legend>
+                <legend>
+                  原始电机状态（CAN ID 1～6）
+                </legend>
                 <div class="table-scroll">
                   <table aria-label="原始电机状态表">
                     <thead>
                       <tr>
-                        <th>CAN ID</th>
-                        <th>协议角度(°)</th>
-                        <th>使能</th>
-                        <th>错误</th>
-                        <th>新鲜</th>
+                        <th>
+                          CAN ID
+                        </th>
+                        <th>
+                          协议角度(°)
+                        </th>
+                        <th>
+                          使能
+                        </th>
+                        <th>
+                          错误
+                        </th>
+                        <th>
+                          新鲜
+                        </th>
                       </tr>
                     </thead>
-                    <tbody id="motorStatusBody"></tbody>
+                    <tbody id="motorStatusBody">
+                    </tbody>
                   </table>
                 </div>
               </fieldset>
+              <fieldset id="motorRecoveryPanel">
+                <legend>
+                  电机故障恢复
+                </legend>
+                <div class="overall-buttons">
+                  <label>
+                    CAN 电机
+                    <select aria-label="故障恢复电机" id="recoveryMotorId">
+                      <option value="1">
+                        CAN 1
+                      </option>
+                      <option value="2">
+                        CAN 2
+                      </option>
+                      <option value="3">
+                        CAN 3
+                      </option>
+                      <option value="4">
+                        CAN 4
+                      </option>
+                      <option value="5">
+                        CAN 5
+                      </option>
+                      <option value="6">
+                        CAN 6
+                      </option>
+                    </select>
+                  </label>
+                  <button data-cmd="reset_motor" data-motor-id="1" id="clearMotorFaultBtn">
+                    清除所选错误 · 0x9B
+                  </button>
+                  <button data-cmd="reboot_motor" data-motor-id="1" id="rebootMotorBtn">
+                    重启所选电机 · 0x07
+                  </button>
+                </div>
+                <p>
+                  清错需要所选电机反馈有效且静止；重启需要六轴反馈有效、整臂静止。
+                  重启会短暂掉线并释放所选电机力矩，请先支撑机械臂。完成后保持关闭，需另行使能。
+                </p>
+                <p id="recoveryGate" role="status">
+                  连接后检查恢复条件
+                </p>
+                <p id="recoveryResult" role="status">
+                  0x9B 清除错误标志；0x07 重启驱动，不重新置零。运动学 /
+                  标定错误不能靠重启修复。
+                </p>
+              </fieldset>
+              <details class="base-frame-panel" open="">
+                <summary>
+                  各关节坐标系相对 base_link 的位姿
+                </summary>
+                <p>
+                  J1–J6 的 URDF 子坐标系；XYZ 为 mm，RPY 为
+                  °。这是坐标系姿态，不是关节自身转角。由当前编码器 /
+                  绳索反解推算。
+                </p>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>
+                          关节 / 坐标系
+                        </th>
+                        <th>
+                          X
+                        </th>
+                        <th>
+                          Y
+                        </th>
+                        <th>
+                          Z
+                        </th>
+                        <th>
+                          Roll
+                        </th>
+                        <th>
+                          Pitch
+                        </th>
+                        <th>
+                          Yaw
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody id="baseFrameBody">
+                    </tbody>
+                  </table>
+                </div>
+                <p id="baseFrameStatus">
+                  等待有效反馈
+                </p>
+              </details>
+              <fieldset>
+                <legend>
+                  关节状态（绳索运动学反解）
+                </legend>
+                <div class="table-scroll">
+                  <table aria-label="关节状态表">
+                    <thead>
+                      <tr>
+                        <th>
+                          关节
+                        </th>
+                        <th>
+                          角度(°)
+                        </th>
+                        <th>
+                          速度(°/s)
+                        </th>
+                        <th>
+                          使能
+                        </th>
+                        <th>
+                          错误
+                        </th>
+                        <th>
+                          运动
+                        </th>
+                        <th>
+                          状态更新时间
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody id="jointStatusBody">
+                    </tbody>
+                  </table>
+                </div>
+              </fieldset>
+              <details class="usage-note">
+                <summary>
+                  使用说明与控制边界
+                </summary>
+                <p>
+                  使用可信隔离网络，服务端暂无鉴权和
+                TLS。断开网页不会自动停止普通轨迹。
+                </p>
+                <p>
+                  停止按钮是软件请求，不替代物理急停。视图选择仅改变信息呈现。
+                </p>
+                <p>
+                  DirectMove
+                和预设姿态不经过避障规划；关节反馈有容差，目标仍使用标准限位。
+                </p>
+              </details>
             </section>
-            <section
-              class="view-panel"
-              data-view-panel="commissioning"
-              hidden=""
-            >
-              <div id="viewerCommissioningSlot"></div>
+            <section class="view-panel" data-view-panel="commissioning" hidden="">
+              <div id="viewerCommissioningSlot">
+              </div>
               <div class="section-heading">
                 <div>
-                  <span class="eyebrow">COMMISSIONING</span>
-                  <h2>方向确认与软件标零</h2>
+                  <span class="eyebrow">
+                    COMMISSIONING
+                  </span>
+                  <h2>
+                    方向确认与软件标零
+                  </h2>
                 </div>
               </div>
               <div class="empty-state" id="commissioningUnavailable">
-                <span class="empty-icon">⊙</span>
-                <h3>当前未进入方向测试模式</h3>
+                <span class="empty-icon">
+                  ⊙
+                </span>
+                <h3>
+                  当前未进入方向测试模式
+                </h3>
                 <p>
                   停止正常控制服务后，使用
-                  <code>--commissioning</code>
+                  <code>
+                    --commissioning
+                  </code>
                   启动独立方向测试服务。连接后此处显示电机和关节点动控件。
                 </p>
-                <p>切换界面视图不会更改后端模式或控制权限。</p>
+                <p>
+                  切换界面视图不会更改后端模式或控制权限。
+                </p>
               </div>
               <fieldset hidden="" id="zeroReferencePanel">
-                <legend>设置机械零位参考</legend>
-                <p>先将机械臂实际放到六个关节均为 0° 的机械零位，再采集当前编码器读数。此操作只保存软件零偏，不移动机械臂，也不写电机 ROM。</p>
-                <label><input type="checkbox" id="zeroReferenceConfirmed" /> 我已确认实物处于机械零位，且六轴静止</label>
-                <button id="setZeroReference" disabled="">采集并保存软件零点</button>
-                <div id="zeroReferenceCurrent" role="status">当前软件零点：未设置</div>
-                <div id="zeroReferenceResult" role="status">等待维护模式及新鲜静止反馈</div>
+                <legend>
+                  设置机械零位参考
+                </legend>
+                <p>
+                  先将机械臂实际放到六个关节均为 0° 的机械零位，再采集当前编码器读数。此操作只保存软件零偏，不移动机械臂，也不写电机 ROM。
+                </p>
+                <label>
+                  <input id="zeroReferenceConfirmed" type="checkbox"/>
+                  我已确认实物处于机械零位，且六轴静止
+                </label>
+                <button disabled="" id="setZeroReference">
+                  采集并保存软件零点
+                </button>
+                <div id="zeroReferenceCurrent" role="status">
+                  当前软件零点：未设置
+                </div>
+                <div id="zeroReferenceResult" role="status">
+                  等待维护模式及新鲜静止反馈
+                </div>
               </fieldset>
               <fieldset hidden="" id="axisTestPanel">
-                <legend>单轴方向测试</legend>
+                <legend>
+                  单轴方向测试
+                </legend>
                 <p>
                   电机测试的“+”表示协议角增加：只按减速比换算输出轴步长，不应用
                   motor_direction、软件偏置或绳索耦合。关节测试使用当前模型，可能驱动多个电机；无有效反解时禁止关节点动。
@@ -980,30 +1285,25 @@
                   停止。此功能不能代替物理急停。
                 </p>
                 <div class="endpoint-row">
-                  <strong>电机输出轴</strong>
-                  <select id="testMotorId"></select>
-                  <button id="testEnableMotor">使能所选电机</button>
-                  <button id="testDisableMotor">关闭所选电机</button>
-                  <label
-                    >输出轴步长(°)
-                    <input
-                      id="motorTestStep"
-                      max="5"
-                      min="0.01"
-                      step="any"
-                      type="number"
-                      value="5"
-                  /></label>
-                  <label
-                    >输出轴速度(°/s)
-                    <input
-                      id="motorTestSpeed"
-                      min="0.05"
-                      step="any"
-                      type="number"
-                      value="5"
-                      max="10"
-                    /></label>
+                  <strong>
+                    电机输出轴
+                  </strong>
+                  <select id="testMotorId">
+                  </select>
+                  <button id="testEnableMotor">
+                    使能所选电机
+                  </button>
+                  <button id="testDisableMotor">
+                    关闭所选电机
+                  </button>
+                  <label>
+                    输出轴步长(°)
+                    <input id="motorTestStep" max="5" min="0.01" step="any" type="number" value="5"/>
+                  </label>
+                  <label>
+                    输出轴速度(°/s)
+                    <input id="motorTestSpeed" max="10" min="0.05" step="any" type="number" value="5"/>
+                  </label>
                   <button data-axis-test="motor" data-sign="-1">
                     电机 − 步进
                   </button>
@@ -1011,30 +1311,22 @@
                     电机 + 步进
                   </button>
                 </div>
-                <div id="motorTestReason" role="status"></div>
+                <div id="motorTestReason" role="status">
+                </div>
                 <div class="endpoint-row">
-                  <strong>关节轴</strong>
-                  <select id="testJointId"></select>
-                  <label
-                    >步长(°)
-                    <input
-                      id="jointTestStep"
-                      max="0.5"
-                      min="0.01"
-                      step="any"
-                      type="number"
-                      value="0.1"
-                  /></label>
-                  <label
-                    >速度(°/s)
-                    <input
-                      id="jointTestSpeed"
-                      min="0.05"
-                      step="any"
-                      type="number"
-                      value="5"
-                      max="10"
-                    /></label>
+                  <strong>
+                    关节轴
+                  </strong>
+                  <select id="testJointId">
+                  </select>
+                  <label>
+                    步长(°)
+                    <input id="jointTestStep" max="0.5" min="0.01" step="any" type="number" value="0.1"/>
+                  </label>
+                  <label>
+                    速度(°/s)
+                    <input id="jointTestSpeed" max="10" min="0.05" step="any" type="number" value="5"/>
+                  </label>
                   <button data-axis-test="joint" data-sign="-1">
                     关节 − 步进
                   </button>
@@ -1042,163 +1334,97 @@
                     关节 + 步进
                   </button>
                 </div>
-                <div id="jointTestReason" role="status"></div>
+                <div id="jointTestReason" role="status">
+                </div>
                 <p>
                   低于电机可用最小速度的指令会被拒绝，其余速度向下取整。关节测试会检查耦合电机不同步时的运动范围；接近限位时可缩小步长，具体拒绝原因显示在日志中。
                 </p>
                 <button class="btn-red" id="axisTestStop">
                   停止当前点动 / 重试停止
                 </button>
-                <div id="axisTestStatus" role="status">尚无测试</div>
-                <label
-                  >本次现场观察
-                  <input
-                    id="axisObservation"
-                    placeholder="例如：CAN2 +，J2 朝前，J4 未动（注明观察方向）"
-                    type="text"
-                /></label>
-                <button id="saveAxisObservation">保存到最近一次测试</button>
+                <div id="axisTestStatus" role="status">
+                  尚无测试
+                </div>
+                <label>
+                  本次现场观察
+                  <input id="axisObservation" placeholder="例如：CAN2 +，J2 朝前，J4 未动（注明观察方向）" type="text"/>
+                </label>
+                <button id="saveAxisObservation">
+                  保存到最近一次测试
+                </button>
                 <p>
                   每次测试自动记录指令和动作前后六轴反馈。观察方向需人工填写，下载诊断
                   JSON 会同时包含测试记录。
                 </p>
-                <div
-                  id="axisTestRecords"
-                  style="
+                <div id="axisTestRecords" style="
                     max-height: 200px;
                     overflow: auto;
                     white-space: pre-wrap;
-                  "
-                ></div>
+                  ">
+                </div>
               </fieldset>
             </section>
           </div>
-          <aside aria-label="实时反馈" class="telemetry">
+          <aside aria-label="实时反馈" class="telemetry task-tray">
             <section class="task-card card">
               <div class="section-heading">
-                <h2>最近运动任务</h2>
-                <span class="pill" id="taskBadge">待机</span>
+                <h2>
+                  最近运动任务
+                </h2>
+                <span class="pill" id="taskBadge">
+                  待机
+                </span>
               </div>
-              <div id="taskSummary">暂无运动任务</div>
-              <div
-                aria-label="任务进度"
-                aria-valuemax="100"
-                aria-valuemin="0"
-                aria-valuenow="0"
-                class="progress-track"
-                id="taskProgress"
-                role="progressbar"
-              >
-                <span></span>
+              <div id="taskSummary">
+                暂无运动任务
               </div>
-              <p id="taskCaption">以控制器最终结果为准</p>
-              <p id="arrivalSummary" role="status">到位状态：尚未验证</p>
-              <div id="arrivalErrors" class="arrival-errors"></div>
+              <div aria-label="任务进度" aria-valuemax="100" aria-valuemin="0" aria-valuenow="0" class="progress-track" id="taskProgress" role="progressbar">
+                <span>
+                </span>
+              </div>
+              <p id="taskCaption">
+                以控制器最终结果为准
+              </p>
+              <p id="arrivalSummary" role="status">
+                到位状态：尚未验证
+              </p>
+              <div class="arrival-errors" id="arrivalErrors">
+              </div>
             </section>
-            <fieldset>
-              <legend>末端位姿 · mm / °</legend>
-              <div class="readonly-grid">
-                <label>X (mm)</label>
-                <input
-                  aria-label="X 位置 mm"
-                  id="endX"
-                  readonly=""
-                  type="text"
-                  value="--"
-                />
-                <label>Y (mm)</label>
-                <input
-                  aria-label="Y 位置 mm"
-                  id="endY"
-                  readonly=""
-                  type="text"
-                  value="--"
-                />
-                <label>Z (mm)</label>
-                <input
-                  aria-label="Z 位置 mm"
-                  id="endZ"
-                  readonly=""
-                  type="text"
-                  value="--"
-                />
-              </div>
-              <div class="readonly-grid">
-                <label>RX (°)</label>
-                <input
-                  aria-label="RX 姿态 °"
-                  id="endRx"
-                  readonly=""
-                  type="text"
-                  value="--"
-                />
-                <label>RY (°)</label>
-                <input
-                  aria-label="RY 姿态 °"
-                  id="endRy"
-                  readonly=""
-                  type="text"
-                  value="--"
-                />
-                <label>RZ (°)</label>
-                <input
-                  aria-label="RZ 姿态 °"
-                  id="endRz"
-                  readonly=""
-                  type="text"
-                  value="--"
-                />
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>关节状态（绳索运动学反解）</legend>
-              <div class="table-scroll">
-                <table aria-label="关节状态表">
-                  <thead>
-                    <tr>
-                      <th>关节</th>
-                      <th>角度(°)</th>
-                      <th>速度(°/s)</th>
-                      <th>使能</th>
-                      <th>错误</th>
-                      <th>运动</th>
-                      <th>状态更新时间</th>
-                    </tr>
-                  </thead>
-                  <tbody id="jointStatusBody"></tbody>
-                </table>
-              </div>
-            </fieldset>
-            <details class="usage-note">
-              <summary>使用说明与控制边界</summary>
-              <p>
-                使用可信隔离网络，服务端暂无鉴权和
-                TLS。断开网页不会自动停止普通轨迹。
-              </p>
-              <p>
-                停止按钮是软件请求，不替代物理急停。视图选择仅改变信息呈现。
-              </p>
-              <p>
-                DirectMove
-                和预设姿态不经过避障规划；关节反馈有容差，目标仍使用标准限位。
-              </p>
-            </details>
           </aside>
         </div>
       </main>
       <footer class="workspace-footer">
-        <span>Pi Arm Workspace</span><span>base_link / tool0 · mm / °</span
-        ><span id="lastFeedbackTime">尚未收到状态</span>
+        <span>
+          Pi Arm Workspace
+        </span>
+        <span>
+          base_link / tool0 · mm / °
+        </span>
+        <span id="lastFeedbackTime">
+          尚未收到状态
+        </span>
       </footer>
     </div>
-    <script src="vendor/viewer-libs.js"></script>
-    <script src="assets/viewer.js"></script>
-    <script src="assets/console.js?v=V0.51"></script>
-    <script src="assets/diagnostics.js?v=20261116-diagnostics1"></script>
-    <script src="assets/control.js?v=V0.51"></script>
-    <script src="assets/interactive.js"></script>
-    <script src="assets/programs.js?v=V0.51"></script>
-    <script src="assets/repeat.js?v=V0.51"></script>
-    <script src="assets/teaching.js?v=V0.51"></script>
+    <script src="vendor/viewer-libs.js">
+    </script>
+    <script src="assets/viewer.js">
+    </script>
+    <script src="assets/console.js?v=V0.52">
+    </script>
+    <script src="assets/diagnostics.js?v=20261116-diagnostics1">
+    </script>
+    <script src="assets/control.js?v=V0.52">
+    </script>
+    <script src="assets/interactive.js">
+    </script>
+    <script src="assets/programs.js?v=V0.52">
+    </script>
+    <script src="assets/repeat.js?v=V0.52">
+    </script>
+    <script src="assets/teaching.js?v=V0.52">
+    </script>
+    <script src="assets/pendant.js?v=V0.52">
+    </script>
   </body>
 </html>

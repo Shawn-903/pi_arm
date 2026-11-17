@@ -16,6 +16,7 @@ def main():
         page.on('pageerror', lambda e: errors.append(str(e)))
         page.goto(args.url)
         page.locator('#connectBtn').click()
+        page.locator('#teachTab-target').click()
         page.wait_for_function('lastState?.state_available')
         assert page.evaluate('lastState.hardware_type === "mock" || lastState.can_interface === "vcan0"'), 'Physical CAN prohibited'
         page.locator('[data-cmd="enable_motor"][data-motor-id="0"]').click()
@@ -68,6 +69,7 @@ def main():
         # Drag-teaching switches must retain the pose and block normal commands.
         held = page.evaluate('lastState.current_joint_angles')
         page.once('dialog', lambda d: d.accept())
+        page.locator('#teachTab-drag').click()
         page.locator('#dragTeachingBtn').click()
         page.wait_for_function('lastState.teaching_active && !lastState.control_permitted')
         assert page.locator('#multiMoveBtn').is_disabled()
@@ -78,6 +80,7 @@ def main():
         page.wait_for_timeout(700)
         actual = page.evaluate('lastState.current_joint_angles')
         assert max(abs(a-b) for a,b in zip(held,actual)) <= .002, (held, actual)
+        page.locator('#teachTab-target').click()
         page.locator('[data-tab="multi"]').click()
         page.locator('#copyJointTargets').click()
         page.locator('#multiJoint1').fill(str(actual[0]+.1))

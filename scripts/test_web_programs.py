@@ -19,6 +19,7 @@ class Quiet(SimpleHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ws", default="ws://127.0.0.1:8766")
+    parser.add_argument("--url", help="使用已部署页面，可验证局域网 HTTP 访问")
     parser.add_argument("--screenshots", type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -32,12 +33,22 @@ def main():
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.on("dialog", lambda dialog: dialog.accept())
-            page.goto(f"http://127.0.0.1:{server.server_port}/control.html?ws={args.ws}")
+            page.goto(args.url or f"http://127.0.0.1:{server.server_port}/control.html?ws={args.ws}")
             page.locator("#connectBtn").click()
             page.wait_for_function('lastState?.hardware_type==="mock" && lastState.state_available')
             assert page.evaluate("lastState.hardware_type") == "mock"
             page.evaluate('PiArmControl.request("enable_motor",{motor_id:0})')
             page.wait_for_function('lastState.robot_state==="READY"')
+            before = page.evaluate('lastState.task.task_id')
+            angle = page.evaluate('lastState.current_joint_angles[0]')
+            page.locator('#stepDelta').fill('0.1')
+            page.locator('[data-step-axis="0"][data-step-sign="1"]').click()
+            page.wait_for_function('id=>lastState.task.task_id>id && lastState.task.status===2', arg=before)
+            assert abs(page.evaluate('lastState.current_joint_angles[0]') - angle - .1) < .01
+            page.locator('#teachTab-target').click()
+            target = page.locator('#multiMoveBtn').bounding_box()
+            model = page.locator('#viewerStage').bounding_box()
+            assert target['x'] + target['width'] <= model['x'] and target['y'] + target['height'] < 1000
             page.locator('[data-view-target="programs"]').click()
             page.locator("#programName").fill(prefix)
             page.locator("#programAdd").click()
@@ -131,6 +142,10 @@ def main():
                         view,
                     )
                     assert page.locator("#globalStop").is_visible()
+                    page.evaluate('window.scrollTo(0,document.body.scrollHeight)')
+                    stop = page.locator('#globalStop').bounding_box()
+                    assert 0 <= stop['y'] and stop['y'] + stop['height'] <= height
+                    page.evaluate('window.scrollTo(0,0)')
                     if args.screenshots and view in ("workbench", "programs"):
                         args.screenshots.mkdir(parents=True, exist_ok=True)
                         page.screenshot(

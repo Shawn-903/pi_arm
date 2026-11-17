@@ -19,9 +19,12 @@
     generation = 0;
   const search = document.createElement('input');
   search.id = 'pointSearch'; search.placeholder = '搜索名称或备注'; search.setAttribute('aria-label', '搜索点位');
-  $('pointList').before(search); search.addEventListener('input', render);
+  const filter = document.createElement('select'); filter.id = 'pointFilter'; filter.setAttribute('aria-label', '筛选点位类型');
+  filter.add(new Option('全部类型', '')); filter.add(new Option('关节点位', 'joint')); filter.add(new Option('末端位姿', 'cartesian'));
+  const searchBar = document.createElement('div'); searchBar.className = 'point-searchbar'; searchBar.append(search, filter);
+  $('pointList').before(searchBar); search.addEventListener('input', render); filter.addEventListener('change', render);
   const importer = document.createElement('input'); importer.type = 'file'; importer.accept = '.json,application/json'; importer.id = 'pointImport';
-  const importLabel = document.createElement('label'); importLabel.textContent = '导入点位 '; importLabel.append(importer);
+  const importLabel = document.createElement('label'); importLabel.className = 'file-label'; importLabel.textContent = '导入 JSON'; importer.setAttribute('aria-label', '导入点位 JSON'); importLabel.append(importer);
   const conflict = document.createElement('select'); conflict.id = 'pointConflict'; conflict.setAttribute('aria-label','导入冲突处理');
   conflict.add(new Option('冲突跳过','skip')); conflict.add(new Option('相同 ID 更新','update'));
   $('exportPoints').after(importLabel, conflict);
@@ -71,14 +74,15 @@
     $("pointCount").textContent =
       `${library.points.length} 个点位 · 版本 ${library.revision}`;
     $("pointList").replaceChildren();
-    if (!library.points.length) {
+    const visible = library.points.filter(point => (!filter.value || point.kind === filter.value) &&
+      (!search.value || (point.name+' '+(point.note||'')).toLowerCase().includes(search.value.toLowerCase())));
+    if (!visible.length) {
       const empty = document.createElement("p");
       empty.className = "point-empty";
-      empty.textContent = "尚无点位。录入测试目标，或在机械臂静止后记录反馈。";
+      empty.textContent = library.points.length ? '没有匹配的点位，请调整筛选条件。' : '尚无点位。录入目标，或在机械臂静止后记录反馈。';
       $("pointList").append(empty);
     }
-    for (const point of library.points) {
-      if (search.value && !(point.name+' '+(point.note||'')).toLowerCase().includes(search.value.toLowerCase())) continue;
+    for (const point of visible) {
       const row = document.createElement("article");
       row.className = "point-card";
       row.dataset.pointId = point.id;
@@ -94,7 +98,7 @@
       const buttons = document.createElement("div");
       buttons.className = "point-actions";
       const load = document.createElement("button");
-      load.textContent = "加载到运动表单";
+      load.textContent = "载入运动目标";
       load.dataset.pointAction = "load";
       load.disabled = !available || busy || Boolean(compatibility(point));
       load.title = compatibility(point) || "仅填入目标，不执行运动";

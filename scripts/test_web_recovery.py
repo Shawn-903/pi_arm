@@ -33,6 +33,8 @@ def main():
         page.locator('[data-cmd="enable_motor"][data-motor-id="0"]').click()
         page.wait_for_function('lastState.robot_state === "READY"')
         task = page.evaluate('lastState.task.task_id')
+        page.locator('#viewRole').select_option('developer')
+        page.locator('[data-view-target="diagnostics"]').click()
         page.locator('#recoveryMotorId').select_option('2')
         page.locator('#rebootMotorBtn').click()
         page.wait_for_function('document.getElementById("recoveryResult").textContent.includes("电机保持关闭")')

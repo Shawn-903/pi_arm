@@ -135,7 +135,7 @@ ros2 topic echo /pi_arm/state --once
 
 ## 备份与恢复
 
-版本管理使用 `main` 和工作分支 `refactor/code-organization`，当前版本为 `V0.51`。后续功能更新按 `V0.52`、`V0.53` 递增，较大版本调整由项目负责人指定；编号规则、使用与开发的区分及版本记录见 [版本管理](docs/versioning.md)。
+版本管理使用 `main` 和工作分支 `refactor/code-organization`，当前版本为 `V0.52`。后续功能更新按 `V0.53`、`V0.54` 递增，较大版本调整由项目负责人指定；编号规则、使用与开发的区分及版本记录见 [版本管理](docs/versioning.md)。
 
 历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
 

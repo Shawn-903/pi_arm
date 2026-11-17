@@ -185,6 +185,9 @@ def run_fixture(browser, url, screenshots):
     print('PASS name reordering, invalid/missing/stale feedback, frozen last pose, unclamped tolerances and fault highlighting', flush=True)
 
     update(fixture(q))
+    page.locator('#teachTab-target').click()
+    page.locator('[data-tab="single"]').click()
+    page.locator('#modelOptions > summary').click()
     page.locator('#viewerPreview').select_option('zero')
     snapshot = page.evaluate('PiArmViewer.snapshot()')
     assert snapshot['previewVisible']

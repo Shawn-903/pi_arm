@@ -26,6 +26,9 @@ def main():
         assert page.locator('#movePackingPose').is_disabled()
         assert page.locator('#moveZeroPose').is_disabled()
         page.locator('#connectBtn').click()
+        page.locator('#teachTab-target').click()
+        page.locator('[data-tab="single"]').click()
+        page.locator('#targetUtilities > summary').click()
         page.wait_for_function('lastState?.state_available')
         assert page.evaluate('lastState.hardware_type') == 'mock', 'Only mock is allowed'
         page.locator('[data-cmd="enable_motor"][data-motor-id="0"]').click()
