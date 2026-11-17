@@ -133,20 +133,22 @@ ros2 topic echo /pi_arm/state --once
 
 ## 备份与恢复
 
-版本管理使用 `main` 和工作分支 `refactor/code-organization`。历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
+版本管理使用 `main` 和工作分支 `refactor/code-organization`，当前阶段标签为 `V0.5`。后续功能更新按 `V0.51`、`V0.52` 递增，较大版本调整由项目负责人指定；编号规则、使用与开发的区分及版本记录见 [版本管理](docs/versioning.md)。
+
+历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
 
 恢复版本前，先停止服务，提交或另行保存未提交修改：
 
 ```bash
 git fetch origin --tags
-git switch --detach repeatability-v1.0
+git switch --detach V0.5
 bash scripts/build.sh
 ```
 
 恢复后按上面的 R10 命令启动，并核对当前标定与实物参考。查看历史代码也可创建独立工作区：
 
 ```bash
-git worktree add --detach ../pi_arm-repeatability-1.0 repeatability-v1.0
+git worktree add --detach ../pi_arm-V0.5 V0.5
 ```
 
 返回主分支使用 `git switch main`，继续开发使用 `git switch refactor/code-organization`。新克隆后首次进入工作分支使用 `git switch --track origin/refactor/code-organization`。旧阶段标签 `v0.1.0-stage1`、`v0.2.0-viewer-baseline` 用于历史追溯。
