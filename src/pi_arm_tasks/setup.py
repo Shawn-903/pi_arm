@@ -8,6 +8,8 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/pi_arm_tasks"]),
         ("share/pi_arm_tasks", ["package.xml", "README.md"]),
         ("share/pi_arm_tasks/zero_reference", ["pi_arm_tasks/zero_reference/README.md"]),
+        ("share/pi_arm_tasks/calibration_motion", ["pi_arm_tasks/calibration_motion/README.md"]),
+        ("share/pi_arm_tasks/examples", ["examples/calibration_poses.json"]),
     ],
     install_requires=["setuptools"],
     tests_require=["pytest"],
@@ -19,5 +21,6 @@ setup(
     entry_points={"console_scripts": [
         "pi_arm_zero_reference = pi_arm_tasks.zero_reference.node:main",
         "pi_arm_zero = pi_arm_tasks.zero_reference.cli:main",
+        "pi_arm_calibration_motion = pi_arm_tasks.calibration_motion.cli:main",
     ]},
 )

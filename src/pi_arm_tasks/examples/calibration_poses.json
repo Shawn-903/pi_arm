@@ -1,0 +1,4 @@
+[
+  {"name": "P001", "joint_positions_deg": [0, 0, 0, 0, 0, 0], "dwell_sec": 3.0},
+  {"name": "P002", "joint_positions_deg": [5, 0, 0, 0, 0, 0], "dwell_sec": 3.0}
+]

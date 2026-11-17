@@ -41,6 +41,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | 网页布局、诊断、重复运动等单项功能 | 从下方离线网页测试中选择对应脚本；跨页面共用逻辑变化时覆盖相关页面 |
 | commissioning 电机测试界面、请求或模拟器冻结运动 | `test_web_axis.py` 普通与 `--stall` 场景，使用独立 commissioning/vcan 服务 |
 | 软件标零计算、持久化或任务入口 | 硬件 `test_backend` 中 `SoftwareZero.*` 及相关坐标测试；`test_software_zero_vcan.py` 验证生产后端；任务/网页变化选择客户端和网页专项入口 |
+| 标定姿态采样任务 | [任务测试](../src/pi_arm_tasks/test/) 检查姿态输入及执行/停止；[test_calibration_motion_mock.py](test_calibration_motion_mock.py) 验证完整 mock 控制链与 CLI，可用 `--case success` 或 `--case interrupt` 单独运行场景 |
 | manager 到位、停止或取消 | [manager 测试目录](../src/pi_arm_manager/test/) 中对应单测；涉及编排、Action 或并发时加 `test_arrival_integration.py` |
 | manager 工作线程、租约或退出顺序 | `test_manager_shutdown.py` 的相关场景；共享动作收尾发生变化时加 `test_arrival_integration.py` |
 | 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
