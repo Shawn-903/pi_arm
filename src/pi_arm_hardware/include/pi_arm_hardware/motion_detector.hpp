@@ -8,9 +8,9 @@
 namespace pi_arm_hardware
 {
 
-// Feedback-only motion classification. Raw position/velocity, command limits,
-// stop ACKs and the driver's management/zeroing interlocks are not filtered.
-// Times must be monotonic sensor receipt times in seconds, not read-loop times.
+// 根据位置变化和持续速度判断运动，对运动标志进行时间防抖。
+// 输入位置/速度保持原值；时间使用单调时钟记录的传感器回包时刻，单位秒，
+// 以便重复读取同一缓存时保留原有证据时间。
 class MotionDetector
 {
 public:

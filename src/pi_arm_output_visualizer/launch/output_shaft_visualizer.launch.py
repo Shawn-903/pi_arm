@@ -111,9 +111,8 @@ def generate_launch_description():
                 executable="joint_state_publisher_gui",
                 name="pi_arm_output_shaft_gui",
                 output="screen",
-                # The isolated description topic is generated from the same
-                # YAML used by the converter and hardware backend, so slider
-                # ranges cannot drift from the enforced output-shaft limits.
+                # GUI 的模型话题使用独立名称；滑块范围、映射器和硬件后端
+                # 共用同一份 YAML 中的输出轴限位。
                 remappings=[
                     ("/joint_states", output_shaft_topic),
                     ("/robot_description", "/pi_arm/output_shaft_robot_description"),

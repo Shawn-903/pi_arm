@@ -233,7 +233,7 @@
     document.getElementById("commissioningUnavailable").hidden = Boolean(
       fresh && state.commissioning,
     );
-    // A stale/disconnected page must not keep displaying old angles as live data.
+    // 反馈过期或断连时，将实时数值清为占位符。
     if (!fresh) {
       document
         .querySelectorAll(

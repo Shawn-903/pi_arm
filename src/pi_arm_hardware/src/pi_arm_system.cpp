@@ -316,9 +316,7 @@ hardware_interface::CallbackReturn PiArmSystem::on_activate(const rclcpp_lifecyc
   try {
     backend_->activate();
     command_positions_ = state_positions_;
-    // Velocity command interfaces start at rest. Initializing them to the
-    // positive joint limits manufactures a non-zero idle command and is not a
-    // valid controller state.
+    // 激活时以反馈位置和零速度初始化命令接口，作为控制器接管前的静止目标。
     command_velocities_.assign(joint_names_.size(), 0.0);
     {
       std::lock_guard<std::mutex> sample_lock(sample_mutex_);
@@ -339,8 +337,7 @@ hardware_interface::CallbackReturn PiArmSystem::on_deactivate(const rclcpp_lifec
   hardware_active_.store(false);
   {
     std::lock_guard<std::mutex> sample_lock(sample_mutex_);
-    // Control loop stops updating samples; clear stale motion so manager does
-    // not keep seeing RUNNING from frozen in_motion flags.
+    // 停用后控制循环停止更新采样，清除缓存运动标志并将反馈标为失效。
     std::fill(
       latest_sample_.velocities_rad_s.begin(), latest_sample_.velocities_rad_s.end(), 0.0);
     std::fill(latest_sample_.in_motion.begin(), latest_sample_.in_motion.end(), false);

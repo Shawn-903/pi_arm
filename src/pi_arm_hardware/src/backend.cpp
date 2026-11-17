@@ -597,8 +597,7 @@ MotionArmResult RealBackend::set_motion_armed(
       return {false, true, "cannot close controller writes for holding"};
     }
     if (!normal_motion_sent_) {
-      // An already-reached goal may never produce a fresh JTC command. It
-      // still needs an explicit position loop (RUN alone is not a hold).
+      // 起点已到达目标时，JTC 可能直接完成；在此补发 A4，建立当前位置保持。
       const auto snapshot = driver_->snapshot();
       std::vector<pi_arm_can::PositionCommand> commands;
       const auto now = std::chrono::steady_clock::now();
@@ -725,7 +724,7 @@ bool RealBackend::write(
     output_speed_limit = output_speed_limit_rad_s_;
   }
   if (!motion_write_gate_.permit_write(positions_rad, velocities_rad_s)) {
-    // This is the captured idle/hold command, not a new controller command.
+    // 等待本次租约下的新目标；捕获的空闲/保持命令在此跳过发送。
     return true;
   }
 
@@ -800,9 +799,8 @@ bool RealBackend::write(
       const double protocol_cap = std::min(65535.0, std::floor(
           std::abs(output_velocity_to_protocol_dps(output_speed_limit, actuator)) + 1e-10));
       if (protocol_cap < 1.0) {disarm_motion(0U); return false;}
-      // A4 speed is a ceiling, not a feedforward velocity. JTC's sampled
-      // positions define the trajectory timing. Rounding feedforward down
-      // accumulates tracking lag; setting zero can remove the motor's limit.
+      // JTC 采样位置决定轨迹时序，A4 速度字段使用输出轴上限。
+      // 若改用向下取整的瞬时前馈速度，会累积跟随延迟；零值可能解除电机限速。
       const double protocol_speed = protocol_cap;
       commands.push_back(
         pi_arm_can::PositionCommand{
@@ -905,8 +903,7 @@ ManagementResult RealBackend::manage(
     }
     return {true, 0, "selected motor errors cleared and confirmed by feedback"};
   }
-  // Power and fault-management operations are never motion-authorizing. They
-  // revoke an existing lease before any management frame is queued.
+  // 进入电源管理或重启流程前先撤销运动租约，再排入管理帧。
   const auto stopped = set_motion_armed(false, 0U);
   if (!stopped.success && (operation == pi_arm_can::ManagementOperation::MOTOR_RUN ||
     operation == pi_arm_can::ManagementOperation::MOTOR_REBOOT)) {

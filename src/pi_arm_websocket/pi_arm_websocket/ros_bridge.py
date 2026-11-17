@@ -97,7 +97,7 @@ class RosBridge(Node):
             "direct": ActionClient(self, DirectMove, "/pi_arm/direct_move"),
         }
         if self.commissioning:
-            # No normal manager/controller commands exist in this mode.
+            # 将普通控制客户端替换为维护节点及任务包的服务客户端。
             for client in self.service_clients.values():
                 self.destroy_client(client)
             for client in self.action_clients.values():

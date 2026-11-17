@@ -70,8 +70,8 @@ private:
   std::vector<double> command_velocities_;
   HardwareSample latest_sample_;
   std::mutex sample_mutex_;
-  // Lifecycle transitions must wait for any in-flight management/hold RPC.
-  // The control loop does not take this mutex.
+  // 生命周期变更在此等待正在执行的管理/保持服务完成。
+  // 此锁用于服务与生命周期回调；控制循环通过快照锁和后端同步机制共享数据。
   std::mutex service_mutex_;
   std::atomic_bool hardware_active_{false};
 

@@ -12,11 +12,9 @@ namespace pi_arm_transmission
 using Vector6 = std::array<double, 6>;
 using Matrix6 = std::array<std::array<double, 6>, 6>;
 
-// Public vectors use the six ROS active-joint coordinates in this order:
-// joint_01, joint_02, joint_04, joint_05, joint_06, joint_09.
-// For the synchronized mechanisms, the equivalent mechanical coordinates are
-// S3 = 2 * joint_04, S4 = 2 * joint_05, and S5 = 2 * joint_06. Those factors
-// are already substituted into the formulas implemented by this class.
+// 关节向量按 joint_01、joint_02、joint_04、joint_05、joint_06、joint_09 排列，
+// 输出轴向量按 CAN1–6 排列；位置单位 rad，速度单位 rad/s。
+// 同步机构总角 S3=2*joint_04、S4=2*joint_05、S5=2*joint_06 已代入本类公式。
 
 struct Axis6Residual
 {
@@ -42,8 +40,8 @@ public:
   KinematicsStatus check_output_position_limits(
     const Vector6 & output_position_rad) const noexcept;
 
-  // Feedback allowance propagated through the cable coupling. Command callers
-  // must use the strict check above. Joint bounds must still be checked after IK.
+  // 将关节反馈容差经绳索耦合传播到输出轴范围；目标使用上方的标准限位检查。
+  // 反解后由调用方继续检查关节限位。
   KinematicsStatus check_output_feedback_limits(
     const Vector6 & output_position_rad,
     const Vector6 & joint_tolerances_rad) const noexcept;

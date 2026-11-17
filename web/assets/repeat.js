@@ -246,7 +246,7 @@
     if (!run) return;
     const report = { schema_version: 2, measurement_source: 'encoder_cable_model_not_external_metrology',
       base_frame: 'base_link', tool_frame: 'tool0', rpy_convention: 'Rz(yaw) Ry(pitch) Rx(roll)', ...clone(run) };
-    // Browser-local deadlines/origin are implementation details, not cross-device timestamps.
+    // 移除页面调度用的单调时钟变量，导出记录保留采样时间和各段耗时。
     for (const key of ['clock_origin_ms', 'deadline', 'dwell_until', 'previous_capture_elapsed_s',
       'previous_arrival_elapsed_s', 'round_started_elapsed_s', 'target_arrived_elapsed_s', 'target_arrived_at']) delete report[key];
     report.timing = { source: 'browser_performance_now', unit: 'seconds',

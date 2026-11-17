@@ -1143,7 +1143,7 @@ window.PiArmControl = {
       values.forEach((v, i) => {
         document.getElementById(`multiJoint${i + 1}`).value = v.toFixed(3);
       });
-      // A later first valid feedback sample must not silently replace the loaded goal.
+      // 点位已提供目标，跳过首次反馈对表单的自动初始化。
       targetsInitialized = true;
     } else
       ["X", "Y", "Z", "Rx", "Ry", "Rz"].forEach((axis, i) => {

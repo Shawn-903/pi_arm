@@ -66,7 +66,7 @@
   }
 
   function orderedAngles(state) {
-    // Missing, repeated, or unknown names are not silently treated as J1..J6.
+    // 按模型关节名称重排反馈；名称缺失、重复或未知时返回无效结果。
     const names = state?.joint_names;
     if (
       !Array.isArray(names) ||

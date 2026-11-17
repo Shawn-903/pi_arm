@@ -38,9 +38,8 @@ inline bool complete_raw_motor_state(
     hardware.motor_ages_sec.size() == count;
 }
 
-// This is the actual enable/disable service gate used by ManagerNode.  It
-// Requires complete, fresh and still raw feedback. A fault forbids enabling,
-// but must not prevent a controlled power-off after motion has stopped.
+// ManagerNode 的使能/关闭条件检查，使用完整、新鲜且静止的原始反馈。
+// 故障时保留静止后的关闭入口，使能则要求正常状态。
 inline MotorPowerDecision decide_motor_power_operation(
   const MotorPowerOperation operation,
   const pi_arm_interfaces::msg::HardwareState & hardware,
@@ -111,8 +110,7 @@ inline MotorPowerDecision decide_motor_power_operation(
   return {true, false, 0, "ok"};
 }
 
-// Recovery needs raw stationary motor feedback, not valid cable inversion or
-// motion permission. A motor already off still needs the recovery command.
+// 恢复操作沿用关闭电机的原始反馈检查，已关闭的电机也继续发送恢复命令。
 inline MotorPowerDecision decide_motor_recovery(
   const pi_arm_interfaces::msg::HardwareState & hardware,
   uint8_t state, bool task_claimed, bool still, int motor_id)
@@ -123,9 +121,8 @@ inline MotorPowerDecision decide_motor_recovery(
   return decision;
 }
 
-// Clearing flags changes neither power nor the position reference. Verify the
-// selected motors; missing feedback from an unrelated motor is not a veto.
-// The hardware service also checks three raw stationary speed samples.
+// 清错保留电源和位置参考，按所选电机的新鲜、静止反馈判断可用性。
+// 硬件服务随后核验三个原始静止速度样本。
 inline MotorPowerDecision decide_motor_clear_errors(
   const pi_arm_interfaces::msg::HardwareState & hardware,
   const bool task_claimed, const int motor_id)

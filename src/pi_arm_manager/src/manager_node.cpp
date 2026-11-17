@@ -496,7 +496,7 @@ private:
         const auto original = trajectory.points;
         trajectory.points.clear();
         const double duration = rclcpp::Duration(original.back().time_from_start).seconds();
-        // Sample the exact position-linear JTC segments for display, not a new plan.
+        // 按 JTC 各段的位置线性插值采样，使显示路径与执行轨迹对应。
         size_t segment = 0;
         for (int sample = 0; sample <= 200; ++sample) {
           const double t = duration * sample / 200.0;
@@ -1757,7 +1757,7 @@ private:
       task_.target_positions = goal.trajectory.points.back().positions;
       task_.arrival_state = "tracking";
     }
-    // Explicit action tolerances cannot silently inherit a zero/disabled controller default.
+    // 将 manager 配置的位置、速度容差显式传给 JTC。
     goal.goal_tolerance.clear();
     for (const auto & name : goal.trajectory.joint_names) {
       control_msgs::msg::JointTolerance tolerance;
@@ -1842,8 +1842,7 @@ private:
       std::lock_guard<std::mutex> lock(follow_mutex_);
       active_follow_goal_ = follow_handle;
     }
-    // The controller may accept after Stop already closed the hardware gate.
-    // Cancel that late goal too; never allow it to survive into the next task.
+    // 停止关闭硬件写入后，控制器仍可能回报接受目标；在此补发取消请求。
     if (stop_requested_.load()) {cancel_goal<Follow>(*follow_client_, follow_handle);}
     auto result_future = follow_client_->async_get_result(follow_handle);
     const auto status = wait_future_logged(

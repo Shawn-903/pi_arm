@@ -228,9 +228,8 @@ private:
   pi_arm_transmission::CableKinematics kinematics_;
   pi_arm_transmission::Vector6 output_positions_rad_{};
   pi_arm_transmission::Vector6 output_velocities_rad_s_{};
-  // Guards sample_/stationary_samples_/flags: read()/write() run on the control
-  // loop while manage() runs on a service thread. Mock operations are cheap, so
-  // a single mutex is sufficient and never blocks for long.
+  // 控制循环的 read()/write() 与服务线程的 manage() 共用此锁，
+  // 串行更新 sample_、stationary_samples_ 和配置/激活标志。
   mutable std::mutex mutex_;
   HardwareSample sample_;
   std::vector<std::size_t> stationary_samples_;
