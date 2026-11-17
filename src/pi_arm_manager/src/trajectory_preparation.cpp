@@ -64,9 +64,8 @@ void retime_trajectory(
       duration = std::max(duration, std::abs(point.positions[i] - previous[i]) /
         joint_limits.at(trajectory.joint_names[i]).velocity);
     }
-    // Position-only waypoints select linear JTC interpolation: no spline
-    // overshoot into the feedback allowance. |J(0)| bounds cable speed on
-    // each linear segment, including the chord axes.
+    // 只提供位置点，让 JTC 做线性插值，避免样条过冲越过标准限位。
+    // |J(0)| 给出每个线性段的输出轴速度上界，也覆盖采用正弦模型的腕部通道。
     point.velocities.clear();
     point.accelerations.clear();
     point.effort.clear();

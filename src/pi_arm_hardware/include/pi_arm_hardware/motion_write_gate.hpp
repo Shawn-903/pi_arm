@@ -9,10 +9,9 @@
 namespace pi_arm_hardware
 {
 
-// A motion lease is necessary but not sufficient for a real position write.
-// The first command after arming must differ from the controller command that
-// was already present at arm time, so an idle/hold command can never become the
-// first real position frame merely because the motors were enabled.
+// 运动租约只授予当前任务写入资格。取得租约后，还要等控制器命令的
+// 位置或速度与空闲时缓存的基线不同，才允许第一次真实位置写入。
+// 这样，使能电机或取得租约不会把控制器残留的保持目标当成新运动。
 class MotionWriteGate
 {
 public:
@@ -52,6 +51,7 @@ public:
     if (!armed_) {
       return true;
     }
+    // 非零 ID 只能释放自己的租约，防止旧任务清理时撤销新任务；0 表示强制撤销。
     if (lease_id != 0U && lease_id != active_lease_id_) {
       return false;
     }

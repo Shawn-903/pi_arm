@@ -1,4 +1,4 @@
-"""Durable teaching-point library. No CAN or motion APIs."""
+"""持久化示教点位；用版本号检查并发编辑，以文件锁和原子替换保护存档。"""
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
@@ -90,7 +90,7 @@ class PointStore:
             encoded = json.dumps(data, ensure_ascii=False, allow_nan=False, indent=2)
             if len(encoded.encode('utf-8')) > 2*1024*1024:
                 raise ProtocolError(CODE_INVALID_PARAMS, '点位库超过 2 MiB，请导出备份并删除不再需要的点位')
-            # Replace only after validation and fsync. A corrupt file is never overwritten.
+            # 校验旧存档并将新数据 fsync 落盘后才原子替换；旧文件损坏时保留原件并报错。
             name = None
             try:
                 with tempfile.NamedTemporaryFile(mode='w', dir=self.path.parent, prefix='.points-', delete=False) as temp:

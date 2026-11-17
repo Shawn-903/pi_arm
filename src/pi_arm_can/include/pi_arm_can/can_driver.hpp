@@ -100,14 +100,15 @@ public:
   DriverMode mode() const noexcept {return mode_.load();}
   ManagementOperation management_operation() const noexcept {return operation_.load();}
   bool running() const noexcept {return running_.load();}
+  // 连接编号在故障/重连时更新；提交命令携带该编号，驱动据此拒绝旧连接的命令。
   std::uint64_t connection_generation() const noexcept {return connection_generation_.load();}
   std::string last_error() const;
 
   bool hold_positions(const std::vector<PositionCommand> & commands, std::uint64_t generation);
   bool enqueue_position_batch(const std::vector<PositionCommand> & commands, std::uint64_t generation);
-  // Purges queued position commands, then sends protocol 0x81 and waits for ACKs.
+  // 清空待发位置命令，发送 0x81 释放位置闭环，并等待停止应答。
   bool stop_motors(const std::vector<std::uint8_t> & motor_ids);
-  // Non-blocking ACK wait: suitable for faults detected in the control loop.
+  // 提交停止请求，不在此等待应答；控制循环随后用 motion_stop_status() 查询确认。
   bool request_motor_stop(const std::vector<std::uint8_t> & motor_ids, bool retry_failed = false);
   MotionStopStatus motion_stop_status();
   bool wait_for_motor_stop();
@@ -160,9 +161,8 @@ private:
   std::atomic<std::uint64_t> connection_generation_{0U};
 
   std::mutex tx_mutex_;
-  // Serializes a CONTROL -> MONITORING transition with an in-flight position
-  // batch. Once set_mode(MONITORING) returns, no later 0xA4 from an older
-  // queued batch can be written.
+  // 模式切换与位置帧发送共用此锁。set_mode(MONITORING) 返回后，
+  // 已排队的旧 0xA4 位置命令也不能继续发出。
   std::mutex control_tx_mutex_;
   std::condition_variable tx_cv_;
   std::deque<TxBatch> tx_queue_;
@@ -172,8 +172,9 @@ private:
   std::atomic<MotionStopStatus> motion_stop_status_{MotionStopStatus::IDLE};
   std::vector<std::uint8_t> stop_motor_ids_;
   std::chrono::steady_clock::time_point motor_stop_requested_at_{};
-  // One owner opens/closes the socket and performs I/O, including reconnects.
+  // 同一个 I/O 线程负责 socket 的打开、收发、重连和关闭。
   std::thread io_thread_;
+  // 进程独占锁：占用同一 CAN 接口时只能有一个驱动，与任务的运动租约不同。
   int lease_fd_{-1};
   int socket_fd_{-1};
 };

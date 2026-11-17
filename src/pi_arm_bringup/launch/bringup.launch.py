@@ -22,12 +22,9 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     use_manager = LaunchConfiguration("use_manager")
     use_websocket = LaunchConfiguration("use_websocket")
-    # controller_manager accepts the first transient-local robot description it
-    # receives and ignores later ones.  A stale publisher on /robot_description
-    # can therefore select hardware parameters from an older launch.  Keep the
-    # control description on a launch-specific configuration path so an
-    # explicit backend/interface selection cannot be replaced by that stale
-    # global sample.
+    # controller_manager 使用最先收到的持久化模型消息，后到的描述不会替换它。
+    # 因此按后端类型和 CAN 接口隔离描述话题，避免 /robot_description 上残留的
+    # 旧发布者覆盖本次启动选定的硬件参数。
     controller_robot_description_topic = PathJoinSubstitution(
         ["/pi_arm/controller_robot_description", hardware_type, can_interface]
     )
@@ -73,9 +70,9 @@ def generate_launch_description():
             (moveit_share / "config" / "kinematics.yaml").read_text(encoding="utf-8")
         )
     }
-    # joint_limits.yaml is the source for joint acceleration overrides (URDF has
-    # position/velocity). Pilz TCP caps live in pilz_cartesian_limits.yaml for
-    # move_group only; manager MoveL caps are compile-time constants in manager_node.cpp.
+    # URDF 提供关节位置/速度限位，joint_limits.yaml 补充加速度。
+    # Pilz 末端限速由 move_group 的 pilz_cartesian_limits.yaml 配置；
+    # manager 的 MoveL 请求上限另在 manager_node.cpp 中定义，修改时需核对两处。
     robot_description_planning = {
         "robot_description_planning": yaml.safe_load(
             (moveit_share / "config" / "joint_limits.yaml").read_text(encoding="utf-8")
@@ -217,10 +214,8 @@ def generate_launch_description():
             Node(
                 package="pi_arm_manager",
                 executable="pi_arm_manager_node",
-                # Do not set name= here. MoveGroupInterface creates a second
-                # rclcpp::Node inside this process; launch's name remapping would
-                # rename both to pi_arm_manager and produce a duplicate graph entry.
-                # The C++ node is already constructed as Node("pi_arm_manager").
+                # 此处不设置 name：MoveGroupInterface 会在进程内创建另一个节点，
+                # launch 名称重映射会把两者改成同名。C++ 主节点已有 pi_arm_manager 名称。
                 output="screen",
                 parameters=[
                     robot_description,

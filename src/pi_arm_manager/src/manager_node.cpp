@@ -1608,7 +1608,7 @@ private:
     rclcpp_action::Client<ActionT> & client,
     const typename rclcpp_action::ClientGoalHandle<ActionT>::SharedPtr & goal)
   {
-    // Shutdown closes the hardware gate before canceling either planner or JTC.
+    // 退出时先关闭硬件写入许可，再取消规划器/JTC，避免取消期间继续下发旧目标。
     while (shutting_down_.load() && !shutdown_stop_ready_.load()) {
       std::this_thread::sleep_for(10ms);
     }
@@ -1780,9 +1780,9 @@ private:
       }
       throw std::runtime_error("failed to arm motion");
     }
-    // Release the lease even if a future or result handler throws.
-    // Failed paths keep this fallback after explicit disarm: set_motion_armed
-    // re-evaluates concurrent Stop/fault requests before issuing the final RPC.
+    // future 或结果处理抛异常时也必须释放租约。失败分支即使已显式释放，
+    // 仍保留这个兜底：set_motion_armed 会在最终请求前重新检查并发停止/故障，
+    // 不能因为合并重复清理而省掉这次检查。
     bool completed = false;
     const auto release = [this, lease_id, &completed](int *) {
       if (!completed) {set_motion_armed(false, lease_id, "trajectory/scope_exit");}
@@ -1885,14 +1885,14 @@ private:
       std::lock_guard<std::mutex> lock(follow_mutex_);
       active_follow_goal_.reset();
     }
-    // Keep the final position command active until fresh feedback has remained
-    // within position AND velocity tolerances. A controller success alone is insufficient.
+    // 控制器报告成功后仍保持最终目标，直到新鲜反馈的位置和速度都持续满足
+    // 到位条件；控制器成功不能单独作为机械臂到位的依据。
     if (backend_ok && !stop_requested_.load() && !wait_arrival("settling")) {
       backend_ok = false;
       detail = arrival_error("before stop");
     }
-    // Successful arrival retains the final A4 target. User cancellation holds
-    // current encoder positions; faults/timeouts retain the fail-closed stop.
+    // 到位后保留最终 A4 位置目标；用户取消则保持当前编码器位置。
+    // 故障/超时走释放位置闭环的停止路径，不能误用正常到位的保持策略。
     if (!backend_ok || stop_requested_.load() || handle->is_canceling()) {
       disarm_direct("direct_move/follow_result");
     }
@@ -1904,8 +1904,7 @@ private:
   bool abort_failed_action(
     const std::shared_ptr<GoalHandleT> & handle, const std::shared_ptr<ResultT> & result)
   {
-    // Finish TaskState before replying to the action. Returning false keeps
-    // the enclosing trajectory lease guard active for hardware cleanup.
+    // 先更新 TaskState，再回复 action；返回 false 让外层租约守卫继续负责硬件清理。
     finish_task(pi_arm_interfaces::msg::TaskState::FAILED, result->code, result->message);
     handle->abort(result);
     return false;

@@ -1,4 +1,4 @@
-"""ROS subscriptions, services and action lifecycle for the WebSocket facade."""
+"""连接 WebSocket 协程与 ROS 订阅、服务和动作，保存反馈快照并跟踪动作终态。"""
 from __future__ import annotations
 
 import asyncio
@@ -126,6 +126,7 @@ class RosBridge(Node):
             return self._state
 
     async def wait_future(self, future: Any, timeout: float | None = None) -> Any:
+        # ROS 回调通知完成，等待放到工作线程，避免阻塞 WebSocket 的 asyncio 循环。
         completed = threading.Event()
         future.add_done_callback(lambda _: completed.set())
         ok = await asyncio.to_thread(completed.wait, timeout or self.timeout)
@@ -193,7 +194,7 @@ class RosBridge(Node):
         try:
             if not result_future.done():
                 await self.wait_future(handle.cancel_goal_async())
-            # A cancel response alone does not prove that motion has stopped.
+            # 取消应答仅表示请求被处理；还需等动作终态，才能确认跟踪中的任务已结束。
             result = await self.wait_future(result_future)
             return result.status in (4, 5, 6)  # SUCCEEDED, CANCELED, ABORTED
         except Exception as exc:
@@ -205,8 +206,8 @@ class RosBridge(Node):
         if state is None:
             self.get_logger().warning(f"action {action_name} 拒绝: 状态尚未就绪")
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "机械臂状态尚未就绪")
-        # Busy only while a task is actually running. Do not treat residual
-        # robot_state=RUNNING (e.g. still_frames mask after FAILED) as busy.
+        # 任务是否忙以 TaskState 为准。失败后整机 RUNNING 可能因静止防抖暂时残留，
+        # 不能据此一直封锁新请求；后续仍检查整机状态和后端执行条件。
         if state.task.status == TaskState.RUNNING:
             self.get_logger().warning(
                 f"action {action_name} 拒绝: 忙 (task={state.task.command}/{state.task.task_id})"

@@ -1,6 +1,7 @@
-"""WebSocket connection/state transport and process entry point.
+"""WebSocket 连接、状态推送与进程入口。
 
-The original class and rotation-helper imports remain available here for callers.
+命令分发交给 commands，ROS 通信交给 ros_bridge，状态字段交给 state_payload。
+此处继续导出原有类和旋转换算函数，保留调用方已有的导入路径。
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Validate wire commands and route them through the ROS bridge."""
+"""校验网页命令和运行模式，在协议边界换算单位，再通过 ROS bridge 分发请求。"""
 from __future__ import annotations
 
 import asyncio
@@ -336,7 +336,7 @@ class CommandGateway:
         if joint_id > len(names):
             raise ProtocolError(CODE_INVALID_PARAMS, "joint_id 不在当前机械臂配置中")
         if stop:
-            # Stopping never creates a fresh movement goal or requires READY.
+            # motor_stop 沿用旧命令名，实际停止整条任务；不新建运动目标，也不要求 READY。
             await self.bridge.call_service("stop_motion", StopMotion.Request())
             return {"cmd": "motor_stop", "joint_id": joint_id}
         speed = self._angular_speed(params, "max_speed")

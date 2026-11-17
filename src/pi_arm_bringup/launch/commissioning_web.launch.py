@@ -1,4 +1,4 @@
-"""Exclusive CAN owner for bounded motor/joint direction tests. No ros2_control."""
+"""装配维护监测节点、方向测试、软件标零任务和网页网关，由监测节点独占 CAN。"""
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource

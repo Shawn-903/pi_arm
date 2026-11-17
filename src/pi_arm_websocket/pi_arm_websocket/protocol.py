@@ -86,7 +86,7 @@ POINT_FIELDS = {
 
 
 def point_precision(value, rounded=False):
-    """Wire-only rounding. Keep control math, radians, quaternions and timestamps intact."""
+    """仅对发给网页的指定显示字段舍入；保留控制计算、弧度、四元数和时间戳精度。"""
     if isinstance(value, dict):
         return {k: point_precision(v, k in POINT_FIELDS or (rounded and k in {"x", "y", "z", "rx", "ry", "rz"}))
                 for k, v in value.items()}
@@ -98,6 +98,7 @@ def point_precision(value, rounded=False):
 
 
 def response(msg_id: int, code: int, message: str, data: dict[str, Any] | None = None) -> str:
+    # ms 是沿用的文字说明字段名，不是时间单位；保持协议键名以兼容已有客户端。
     return json.dumps(
         {"type": "rsp", "msg_id": msg_id, "code": code, "ms": message, "data": point_precision(data or {})},
         ensure_ascii=False,

@@ -29,11 +29,10 @@ struct BackendConfig
   bool read_only{false};
   bool commissioning{false};
   std::vector<ActuatorConfig> actuators;
-  // Per-joint limits, filled by the hardware plugin from the URDF <limit> tags.
-  // The single source of truth for these values is the robot description.
+  // 关节限位由插件从 URDF <limit> 读取，模型描述是这些数值的唯一来源。
   std::vector<double> joint_lower_limits_rad;
   std::vector<double> joint_upper_limits_rad;
-  // Read-side allowance only; never added to command or trajectory limits.
+  // 仅放宽反馈/起点核验，不能加到命令或轨迹目标的限位上。
   pi_arm_transmission::Vector6 joint_feedback_tolerances_rad{};
   std::vector<double> joint_velocity_limits_rad_s;
   std::chrono::milliseconds poll_interval{20};
@@ -44,6 +43,7 @@ struct BackendConfig
 
 struct HardwareSample
 {
+  // 关节状态按主动关节顺序排列；耦合关节的状态由所依赖的电机共同决定。
   std::vector<double> positions_rad;
   std::vector<double> velocities_rad_s;
   std::vector<bool> enabled;
@@ -52,9 +52,8 @@ struct HardwareSample
   std::vector<bool> fresh;
   std::vector<std::int32_t> error_codes;
   std::vector<double> ages_sec;
-  // Raw motor-controller state in BackendConfig::actuators order. Keep this
-  // separate from the joint-level arrays above: one joint can depend on more
-  // than one motor in the cable transmission.
+  // 原始电机状态按 BackendConfig::actuators 排列。一个关节可能依赖多个
+  // 绳索电机，因此不能与上方关节数组按相同下标直接互换。
   std::vector<bool> motor_enabled;
   std::vector<bool> motor_has_error;
   std::vector<bool> motor_in_motion;
@@ -99,13 +98,11 @@ struct MotionArmResult
   std::string message;
 };
 
-// Thread-safety contract: read() and write() are called from the ros2_control
-// loop while manage() and set_motion_armed() can be called concurrently from
-// the auxiliary service thread. Every implementation must keep these paths
-// safe without blocking the control loop for the duration of management I/O.
-// Lifecycle methods (configure/activate/deactivate/cleanup) are never called
-// concurrently with each other or with read()/write()/manage(); the plugin
-// guarantees this ordering.
+// 并发约定：ros2_control 循环调用 read()/write()，辅助服务线程可同时调用
+// manage()/set_motion_armed()。实现必须保护共享状态；等待管理命令回包时，
+// 不能一直占用控制循环所需的锁。
+// configure/activate/deactivate/cleanup 由插件按生命周期顺序调用；调用方
+// 负责避免它们相互重叠，或与 read()/write()/管理操作并发。
 class Backend
 {
 public:
@@ -162,8 +159,8 @@ private:
   MotionArmResult stop_and_hold(const std::vector<std::uint8_t> & motor_ids) noexcept;
   MotionArmResult disarm_motion(std::uint64_t lease_id, bool retry_stop = false,
     std::uint64_t feedback_hold_epoch = 0U) noexcept;
-  // Serialize the final command submission with lease changes. ACK waiting
-  // happens after releasing this mutex, never in read()/write().
+  // CAN 目标提交与租约变更共用此锁，防止停止后漏发旧目标。
+  // 等待应答前必须释放该锁；read()/write() 不等待应答。
   std::mutex motion_mutex_;
   std::mutex feedback_mutex_;
   pi_arm_transmission::Vector6 recovery_start_{};

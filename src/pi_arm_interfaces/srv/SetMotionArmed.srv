@@ -1,9 +1,12 @@
+# armed=true 为当前任务申请写入许可；false 撤销许可。
 bool armed
-# With armed=false: nonzero lease retains the successful final target;
-# lease_id=0 cancels writes and holds fresh current encoder positions (soft stop).
+# armed=false 且 hold_position=true 时：非零 lease_id 保留成功到位的最终目标；
+# lease_id=0 关闭轨迹写入，并用新鲜编码器位置建立当前位置保持。
+# armed=false 且 hold_position=false 时走停止路径，不请求位置保持。
 bool hold_position
+# 任务租约编号；非零编号用于匹配本次任务，0 用于显式停止。
 uint64 lease_id
-# Per-lease output-shaft speed ceiling, rad/s; zero selects 5 deg/s.
+# 本次租约的输出轴速度上限，单位 rad/s；0 使用默认 5°/s。
 float64 max_output_velocity
 ---
 bool success

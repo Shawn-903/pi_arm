@@ -13,9 +13,9 @@ namespace pi_arm_manager
 
 void validate_timed_trajectory(const trajectory_msgs::msg::JointTrajectory & trajectory);
 
-// The node validates timing and canonical joint order before taking this start
-// snapshot. This calculation uses only that snapshot and immutable model limits;
-// the caller retains clock stamping, locks, leases, and controller submission.
+// 调用前由节点校验时间和关节顺序，并取得起点 previous（rad）。这里按模型限位
+// 和输出轴速度上限 output_speed（rad/s）调整轨迹时间，只使用传入快照。
+// 时间戳、锁、运动租约和控制器提交仍由节点管理。
 void retime_trajectory(
   trajectory_msgs::msg::JointTrajectory & trajectory,
   std::vector<double> previous,

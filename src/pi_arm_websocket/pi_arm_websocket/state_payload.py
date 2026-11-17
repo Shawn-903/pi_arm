@@ -1,4 +1,4 @@
-"""Convert one ROS state snapshot into hardware/task fields for the wire protocol."""
+"""将同一帧 ROS 状态转换为网页协议中的硬件和任务字段。"""
 from __future__ import annotations
 
 import math
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def robot_state_payload(state: RobotState | None) -> dict[str, Any]:
-    """Build fresh containers without reading clients, TF, or another state snapshot."""
+    """只使用传入快照，返回独立字典，避免混入另一时刻的反馈或修改原消息。"""
     if state is None:
         body: dict[str, Any] = {
             "current_joint_angles": [],
@@ -50,7 +50,7 @@ def robot_state_payload(state: RobotState | None) -> dict[str, Any]:
         body = {
             "current_joint_angles": [v * RAD_TO_DEG for v in hardware.positions],
             "current_speeds": [v * RAD_TO_DEG for v in hardware.velocities],
-            # Legacy `enabled` remains joint-level for compatibility.
+            # 兼容字段 enabled 仍表示关节使能状态；原始电机状态另放 motor_enabled。
             "enabled": list(hardware.enabled),
             "joint_enabled": list(hardware.enabled),
             "has_error": list(hardware.errors),
@@ -132,7 +132,7 @@ def robot_state_payload(state: RobotState | None) -> dict[str, Any]:
 
 
 def json_safe(value: Any) -> Any:
-    """ROS unavailable samples may contain NaN/Infinity, which browsers reject."""
+    """把无效反馈中的 NaN/Infinity 转为 JSON null，避免浏览器拒绝整条状态消息。"""
     if isinstance(value, float) and not math.isfinite(value):
         return None
     if isinstance(value, dict):
