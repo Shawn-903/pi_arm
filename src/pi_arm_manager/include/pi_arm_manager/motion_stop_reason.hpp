@@ -8,9 +8,7 @@
 namespace pi_arm_manager
 {
 
-// Preserve why an active motion was interrupted. A single stop_requested flag
-// is not sufficient: a user cancellation and a hardware fault must not produce
-// the same public Action/TaskState result.
+// 记录运动中断原因，用于选择位置保持/故障停止策略，并生成对应的 Action/TaskState 结果。
 enum class MotionStopReason : std::uint8_t
 {
   NONE = 0,

@@ -98,7 +98,7 @@ def point_precision(value, rounded=False):
 
 
 def response(msg_id: int, code: int, message: str, data: dict[str, Any] | None = None) -> str:
-    # ms 是沿用的文字说明字段名，不是时间单位；保持协议键名以兼容已有客户端。
+    # ms 保存给客户端的文字说明，沿用现有协议键名。
     return json.dumps(
         {"type": "rsp", "msg_id": msg_id, "code": code, "ms": message, "data": point_precision(data or {})},
         ensure_ascii=False,

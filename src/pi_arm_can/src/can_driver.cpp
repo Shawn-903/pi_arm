@@ -154,8 +154,7 @@ void CanDriver::open_socket()
   }
 
   try {
-    // An unplugged/unpowered bus must not leave the TX thread blocked forever,
-    // preventing commissioning watchdog stops or process shutdown.
+    // 发送最多等待 100 ms，使总线断开时 I/O 线程仍能处理心跳超时和进程退出。
     const struct timeval send_timeout {0, 100000};
     if (::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout)) < 0) {
       throw std::runtime_error("failed to configure bounded SocketCAN transmit timeout");
@@ -355,7 +354,7 @@ bool CanDriver::hold_positions(
         command.protocol_angle_deg, command.max_protocol_speed_dps));
     }
   } catch (...) {return false;}
-  // Explicit teaching exit, serialized with management; never restore old targets via RUN.
+  // 位置保持与管理操作串行执行，直接提交刚采集的位置目标。
   auto expected = DriverMode::MONITORING;
   if (!mode_.compare_exchange_strong(expected, DriverMode::EXCLUSIVE_MANAGEMENT)) {return false;}
   const auto since = std::chrono::steady_clock::now();
@@ -541,8 +540,8 @@ bool CanDriver::execute_management(
   }
 
   if (operation == ManagementOperation::MOTOR_REBOOT) {
-    // 0x07 intentionally has NO ACK (vendor manual, section 29). Never retry
-    // reboot automatically and never restore CONTROL after a power cycle.
+    // 0x07 通过后续轮询确认结果（协议第 29 节）。发送一次后转为监测，
+    // 清理旧反馈，再等待重启后的角度和状态。
     set_mode(DriverMode::MONITORING);
     {
       std::unique_lock<std::shared_mutex> lock(state_mutex_);
@@ -670,8 +669,7 @@ void CanDriver::io_loop() noexcept
       }
       if (stop_requested_.load()) {break;}
       next_connect = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-      // Finish any failed management call before opening another connection.
-      // Its queued commands and delayed reboot follow-up must never cross it.
+      // 先等旧管理调用结束，再建立新连接，使重启后续步骤及其命令归属于同一次连接。
       std::unique_lock<std::mutex> operation_lock(management_mutex_, std::try_to_lock);
       if (operation_lock.owns_lock()) {
         try {
@@ -823,7 +821,7 @@ void CanDriver::receive_frame(const int timeout_ms) noexcept
     try {
       process_received_frame(frame);
     } catch (...) {
-      // A malformed device response must not terminate reception of later frames.
+      // 单帧解析失败时跳过该帧，收帧循环继续处理后续数据。
     }
   }
 }

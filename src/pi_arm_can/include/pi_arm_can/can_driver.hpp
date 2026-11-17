@@ -44,8 +44,7 @@ struct DriverConfig
 {
   std::string interface_name{"can0"};
   std::vector<std::uint8_t> motor_ids;
-  // A read-only driver may poll 0x92/0x9A/0x9C but can never enter CONTROL
-  // or execute management commands.
+  // 只读模式轮询 0x92/0x9A/0x9C；控制和管理请求在模式检查处被拒绝。
   bool read_only{false};
   std::chrono::milliseconds state_poll_interval{20};
   std::size_t status1_poll_divider{5U};
@@ -161,8 +160,7 @@ private:
   std::atomic<std::uint64_t> connection_generation_{0U};
 
   std::mutex tx_mutex_;
-  // 模式切换与位置帧发送共用此锁。set_mode(MONITORING) 返回后，
-  // 已排队的旧 0xA4 位置命令也不能继续发出。
+  // 模式切换与位置帧发送共用此锁；切换到 MONITORING 后清除旧目标并关闭位置发送。
   std::mutex control_tx_mutex_;
   std::condition_variable tx_cv_;
   std::deque<TxBatch> tx_queue_;

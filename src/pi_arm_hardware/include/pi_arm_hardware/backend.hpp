@@ -32,7 +32,7 @@ struct BackendConfig
   // 关节限位由插件从 URDF <limit> 读取，模型描述是这些数值的唯一来源。
   std::vector<double> joint_lower_limits_rad;
   std::vector<double> joint_upper_limits_rad;
-  // 仅放宽反馈/起点核验，不能加到命令或轨迹目标的限位上。
+  // 反馈/起点核验使用的容差；命令和轨迹目标使用标准限位。
   pi_arm_transmission::Vector6 joint_feedback_tolerances_rad{};
   std::vector<double> joint_velocity_limits_rad_s;
   std::chrono::milliseconds poll_interval{20};
@@ -52,8 +52,8 @@ struct HardwareSample
   std::vector<bool> fresh;
   std::vector<std::int32_t> error_codes;
   std::vector<double> ages_sec;
-  // 原始电机状态按 BackendConfig::actuators 排列。一个关节可能依赖多个
-  // 绳索电机，因此不能与上方关节数组按相同下标直接互换。
+  // 原始电机状态按 BackendConfig::actuators 排列；上方关节数组按关节顺序排列。
+  // 一个关节的状态由其依赖的多个绳索电机共同决定。
   std::vector<bool> motor_enabled;
   std::vector<bool> motor_has_error;
   std::vector<bool> motor_in_motion;
@@ -99,8 +99,8 @@ struct MotionArmResult
 };
 
 // 并发约定：ros2_control 循环调用 read()/write()，辅助服务线程可同时调用
-// manage()/set_motion_armed()。实现必须保护共享状态；等待管理命令回包时，
-// 不能一直占用控制循环所需的锁。
+// manage()/set_motion_armed()。共享状态由锁保护，等待管理命令回包前释放
+// 控制循环所需的锁，使 read()/write() 能继续运行。
 // configure/activate/deactivate/cleanup 由插件按生命周期顺序调用；调用方
 // 负责避免它们相互重叠，或与 read()/write()/管理操作并发。
 class Backend

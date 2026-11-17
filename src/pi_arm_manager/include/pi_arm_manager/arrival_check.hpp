@@ -39,7 +39,7 @@ inline ArrivalCheck check_arrival(
   return result;
 }
 
-// A repeated cached sample cannot establish a stable arrival interval.
+// 按反馈序号累计连续到位时间，新采样满足位置和速度条件时才推进窗口。
 class ArrivalWindow
 {
 public:

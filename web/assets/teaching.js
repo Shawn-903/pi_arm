@@ -1,4 +1,4 @@
-/* Teaching data only. Loading a point never submits a motion request. */
+/* 点位记录、保存和加载；选中的点位填入运动表单，交由操作者预览并执行。 */
 (() => {
   const $ = (id) => document.getElementById(id);
   const jointNames = [

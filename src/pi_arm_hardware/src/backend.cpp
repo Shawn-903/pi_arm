@@ -458,8 +458,7 @@ MotionArmResult RealBackend::disarm_motion(
   if (feedback_hold_epoch != 0U && feedback_hold_epoch != stop_hold_epoch_.load()) {
     return {true, motion_write_gate_.armed(), "feedback predates stop/hold transition; recheck next sample"};
   }
-  // An old action's scope-exit/cancel callback must not release a subsequent
-  // operator hold. Faults, teaching and shutdown use the explicit lease zero.
+  // 用户停止已接管位置保持时，旧任务的清理视为完成；故障、示教和退出用零租约显式释放。
   if (lease_id != 0U && stop_hold_active_.load() && !motion_write_gate_.armed()) {
     return {true, false, "obsolete trajectory cleanup ignored; stop position remains held"};
   }
@@ -504,8 +503,7 @@ MotionArmResult RealBackend::stop_and_hold(const std::vector<std::uint8_t> & mot
       stop_hold_active_.store(false);
       ++stop_hold_epoch_;
       lock.unlock();
-      // On unavailable/faulty feedback a position target cannot be trusted.
-      // Fall back to the existing stop path and report failure, never success.
+      // 保持条件失效时改走故障停止，并保留本次保持失败的结果。
       set_motion_armed(false, 0U);
       return MotionArmResult{false, false, "HOLD UNCONFIRMED: " + message};
     };
@@ -529,8 +527,7 @@ MotionArmResult RealBackend::stop_and_hold(const std::vector<std::uint8_t> & mot
                state.motor_state != 0x00U && state.motor_state != 0x30U;
       });
     if (all_off) {
-      // Stop is available even before enabling. Never enable an off motor via
-      // A4, or turn an ordinary Stop click into an unrecoverable hold fault.
+      // 全部电机已关闭时确认停止应答，并保持关闭状态。
       if (!driver_->stop_motors(motor_ids)) {return fail("disabled motor stop ACK missing");}
       normal_motion_sent_ = false;
       stop_hold_active_.store(false);
@@ -559,11 +556,9 @@ MotionArmResult RealBackend::stop_and_hold(const std::vector<std::uint8_t> & mot
         std::max(1.0, std::floor(std::abs(output_velocity_to_protocol_dps(0.017453292519943295, actuator))))});
     }
     if (stop_hold_active_.load() && !stop_hold_failed_.load()) {
-      return {true, false, "stop position already held"};  // Do not recapture a drifting target.
+      return {true, false, "stop position already held"};  // 重复停止沿用已确认目标，保持固定参考。
     }
-    // Direct A4 replacement preserves position control; no torque-release 0x81
-    // is sent on the healthy soft-stop path. ACK + fresh stationary feedback
-    // must confirm the captured targets before reporting success.
+    // 用 A4 直接接替轨迹目标，使位置闭环保持连续；应答和新鲜静止反馈共同确认保持结果。
     if (!driver_->hold_positions(commands, generation)) {return fail("captured position hold was not acknowledged/settled");}
     normal_motion_sent_ = true;
     stop_hold_failed_.store(false);
@@ -904,8 +899,7 @@ ManagementResult RealBackend::manage(
         return {false, 2001, "selected motor feedback must be fresh and stationary"};
       }
     }
-    // Auxiliary services are serialized. Clearing flags does not revoke a hold,
-    // issue a whole-arm stop, switch power, or change a position reference.
+    // 清错与其他管理服务串行执行，并保持当前运动租约、位置目标和电机电源状态。
     if (!driver_->execute_management(operation, ids, std::chrono::milliseconds(1000), generation)) {
       return {false, 2002, "clear error state was not confirmed: " + driver_->last_error()};
     }
@@ -939,8 +933,7 @@ ManagementResult RealBackend::manage(
     }
   }
   if (operation == pi_arm_can::ManagementOperation::MOTOR_REBOOT) {
-    // Do not mix reboot with a trajectory, or infer a preserved multi-turn
-    // reference merely from CAN returning. No ROM/RAM zero command is sent.
+    // 管理入口已确认整臂静止。保存重启前的角度，供恢复后核验多圈参考。
     const auto before = driver_->snapshot();
     const auto before_time = std::chrono::steady_clock::now();
     for (const auto id : ids) {

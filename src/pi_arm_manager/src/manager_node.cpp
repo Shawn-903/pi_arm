@@ -251,8 +251,7 @@ public:
     RCLCPP_INFO(get_logger(), "manager shutdown: draining active motion=%d before ROS shutdown",
       motion_active ? 1 : 0);
     try {
-      // Idle/preview owns no motion lease. Do not introduce a hardware RPC on
-      // idle exit (the backend may already be shutting down with the launch).
+      // 活动运动在退出前释放租约；空闲和预览直接清理各自资源。
       if (motion_active && !request_stop(MotionStopReason::NODE_SHUTDOWN)) {
         shutdown_failed_.store(true);
       }
@@ -353,8 +352,7 @@ private:
     const std::shared_ptr<pi_arm_interfaces::srv::PreviewMotion::Request> request,
     std::shared_ptr<pi_arm_interfaces::srv::PreviewMotion::Response> response)
   {
-    // Sharing MoveGroupInterface is safe because previews and motion claims are
-    // mutually exclusive. Do not hold command_mutex_ while waiting on MoveIt.
+    // 预览与运动互斥使用 MoveGroupInterface；取得使用权后释放 command_mutex_，再等待规划。
     {
       std::lock_guard<std::mutex> lock(command_mutex_);
       if (shutting_down_.load()) {
@@ -890,9 +888,7 @@ private:
       hardware.connected = false;
     }
     const auto state = aggregate_state(hardware, task_);
-    // Only hold RUNNING for settling while a motion claim is active. After
-    // FAILED/CANCELED/SUCCEEDED the claim is released; still_frames must not
-    // fake RUNNING or subsequent goals are blocked as "busy".
+    // 活动任务在反馈稳定前保持 RUNNING；任务结束后由硬件反馈决定整机状态。
     if (state == pi_arm_interfaces::msg::RobotState::READY &&
       task_claimed_.load() && still_frames_.load() < 3)
     {
@@ -1471,8 +1467,7 @@ private:
     validate_timed_trajectory(follow_goal.trajectory);
     log_trajectory_summary("movel", follow_goal.trajectory);
     publish_feedback<MoveL>(handle, 0.3F, "sending_follow");
-    // Do not use move_group_->execute(): unreliable under MultiThreadedExecutor from a
-    // worker thread. Send the Pilz-timed trajectory to JTC, same as movejs/direct_move.
+    // 工作线程将 Pilz 定时轨迹直接交给 JTC，复用 movejs/direct_move 的执行和收尾流程。
     complete_follow_action<MoveL>(handle, follow_goal, "movel");
   }
 
@@ -1780,9 +1775,8 @@ private:
       }
       throw std::runtime_error("failed to arm motion");
     }
-    // future 或结果处理抛异常时也必须释放租约。失败分支即使已显式释放，
-    // 仍保留这个兜底：set_motion_armed 会在最终请求前重新检查并发停止/故障，
-    // 不能因为合并重复清理而省掉这次检查。
+    // 作用域守卫负责异常退出时释放租约。失败分支会再次调用 set_motion_armed，
+    // 在最终请求前重新检查并发停止/故障，使清理采用最新的停止原因。
     bool completed = false;
     const auto release = [this, lease_id, &completed](int *) {
       if (!completed) {set_motion_armed(false, lease_id, "trajectory/scope_exit");}
@@ -1885,14 +1879,12 @@ private:
       std::lock_guard<std::mutex> lock(follow_mutex_);
       active_follow_goal_.reset();
     }
-    // 控制器报告成功后仍保持最终目标，直到新鲜反馈的位置和速度都持续满足
-    // 到位条件；控制器成功不能单独作为机械臂到位的依据。
+    // 控制器成功后保持最终目标，等待新鲜反馈的位置和速度持续满足到位条件。
     if (backend_ok && !stop_requested_.load() && !wait_arrival("settling")) {
       backend_ok = false;
       detail = arrival_error("before stop");
     }
-    // 到位后保留最终 A4 位置目标；用户取消则保持当前编码器位置。
-    // 故障/超时走释放位置闭环的停止路径，不能误用正常到位的保持策略。
+    // 到位保留最终 A4 目标，用户取消保持当前编码器位置；故障/超时释放位置闭环。
     if (!backend_ok || stop_requested_.load() || handle->is_canceling()) {
       disarm_direct("direct_move/follow_result");
     }

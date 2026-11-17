@@ -336,7 +336,7 @@ class CommandGateway:
         if joint_id > len(names):
             raise ProtocolError(CODE_INVALID_PARAMS, "joint_id 不在当前机械臂配置中")
         if stop:
-            # motor_stop 沿用旧命令名，实际停止整条任务；不新建运动目标，也不要求 READY。
+            # motor_stop 将所选关节的停止操作转为整条任务的 StopMotion 请求。
             await self.bridge.call_service("stop_motion", StopMotion.Request())
             return {"cmd": "motor_stop", "joint_id": joint_id}
         speed = self._angular_speed(params, "max_speed")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export display assets from the ROS model; never opens CAN or starts ROS nodes."""
+"""从 ROS 模型导出网页用 URDF、压缩网格和哈希清单。"""
 import argparse
 import gzip
 import hashlib
@@ -20,7 +20,7 @@ def export(output):
     controls = robot.find("ros2_control")
     names = [joint.attrib["name"] for joint in controls.findall("joint")]
     robot.remove(controls)
-    # Visual-only export. The same joint transforms/limits/mimics are retained.
+    # 网页模型保留源模型的关节变换、限位和随动关系。
     for link in robot.findall("link"):
         for element in list(link):
             if element.tag != "visual":

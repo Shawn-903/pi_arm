@@ -1,4 +1,4 @@
-/* Read-only planning and opt-in finite joint gestures; no separate transport. */
+/* 关节拖动、目标预览和路径回放；用户开启松手执行后，通过现有控制入口提交目标。 */
 (() => {
   const $ = (id) => document.getElementById(id);
   let state = null,

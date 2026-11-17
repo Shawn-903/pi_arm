@@ -206,8 +206,8 @@ class RosBridge(Node):
         if state is None:
             self.get_logger().warning(f"action {action_name} 拒绝: 状态尚未就绪")
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "机械臂状态尚未就绪")
-        # 任务是否忙以 TaskState 为准。失败后整机 RUNNING 可能因静止防抖暂时残留，
-        # 不能据此一直封锁新请求；后续仍检查整机状态和后端执行条件。
+        # 任务忙闲取自 TaskState；失败后的静止防抖可能暂时保留整机 RUNNING。
+        # 后续准入检查再结合整机状态和后端执行条件判断。
         if state.task.status == TaskState.RUNNING:
             self.get_logger().warning(
                 f"action {action_name} 拒绝: 忙 (task={state.task.command}/{state.task.task_id})"

@@ -354,8 +354,7 @@ hardware_interface::CallbackReturn PiArmSystem::on_deactivate(const rclcpp_lifec
 hardware_interface::return_type PiArmSystem::read(
   const rclcpp::Time &, const rclcpp::Duration &)
 {
-  // The backend implementations are thread-safe against concurrent manage()
-  // calls, so the control loop never contends with slow management commands.
+  // backend 在内部协调 read() 与管理操作；控制循环直接读取后端快照。
   HardwareSample sample;
   if (!backend_->read(sample) || sample.positions_rad.size() != joint_names_.size() ||
     sample.velocities_rad_s.size() != joint_names_.size())
@@ -491,7 +490,7 @@ void PiArmSystem::publish_hardware_state()
     sample = latest_sample_;
   }
   if (!hardware_active_.load()) {
-    // Belt-and-suspenders: never advertise frozen motion while inactive.
+    // 停用后缓存失去实时性，发布时标为断连并清除新鲜度和运动标志。
     std::fill(sample.velocities_rad_s.begin(), sample.velocities_rad_s.end(), 0.0);
     std::fill(sample.in_motion.begin(), sample.in_motion.end(), false);
     std::fill(sample.fresh.begin(), sample.fresh.end(), false);

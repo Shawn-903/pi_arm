@@ -46,8 +46,7 @@
       state?.motor_in_motion?.length === 6 && state.motor_in_motion.every(v => v === false);
   }
   function timingStats() {
-    // First arrival includes arbitrary initial positioning. Only B-to-B intervals
-    // describe the recurring cycle; never mix the first round into this estimate.
+    // 首次到点包含任意起始姿态的就位时间；周期用相邻两次 B 点记录之间的间隔统计。
     const intervals = (run?.samples || []).map(s => s.target_interval_s).filter(Number.isFinite);
     if (!intervals.length) return null;
     const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
@@ -138,7 +137,7 @@
       params.output_speed_limit = owner.config.output_speed;
       const result = await window.PiArmControl.repeatMove(point.kind === 'joint' ? 'move' : 'movel', params);
       if (!owner.active || run !== owner) {
-        // An accepted reply may race a stop request. Never schedule another leg.
+        // 停止请求可能早于接受回包到达；对刚接受的任务补发停止并结束本次调度。
         window.PiArmControl.stop();
         return;
       }
