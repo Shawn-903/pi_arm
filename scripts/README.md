@@ -36,6 +36,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | 修改类型 | 相关检查或测试入口 |
 | --- | --- |
 | 文档、注释、编辑器配置 | 差异、相对链接、配置解析与作用范围；不启动 ROS 或浏览器 |
+| CAN 接口配置脚本 | `sudo python3 scripts/test_setup_can.py`，用临时替身记录 ip/modprobe 调用，检查无效参数无副作用、接口类型和配置顺序；不操作真实接口 |
 | 网关命令、状态或点位逻辑 | 从 [网关测试目录](../src/pi_arm_websocket/test/) 选择对应文件；ROS 调用或共享状态变化时，再覆盖受影响的 mock 路径 |
 | 网页布局、诊断、重复运动等单项功能 | 从下方离线网页测试中选择对应脚本；跨页面共用逻辑变化时覆盖相关页面 |
 | commissioning 电机测试界面、请求或模拟器冻结运动 | `test_web_axis.py` 普通与 `--stall` 场景，使用独立 commissioning/vcan 服务 |
@@ -44,6 +45,7 @@ colcon test --packages-select pi_arm_hardware --ctest-args -R '^test_motion_writ
 | manager 工作线程、租约或退出顺序 | `test_manager_shutdown.py` 的相关场景；共享动作收尾发生变化时加 `test_arrival_integration.py` |
 | 硬件写入许可、租约或停止保持 | 对应 `test_motion_write_gate` / `test_backend`；涉及真实后端控制链时加 `test_motion_safety_vcan.py` |
 | backend 或硬件插件停用、退出、资源释放 | `test_backend_lifecycle_vcan.py`，覆盖真实插件生命周期、租约门禁和 SocketCAN 资源；按影响补对应停止/断连回归 |
+| 硬件插件初始化配置 | `test_system_configuration`，检查关节数量、有效配置导出和非法参数；使用 mock，不打开 CAN |
 | CAN 断线重连、接口迟到或重建 | `test_can_recovery_vcan.py`，验证反馈恢复、旧授权失效和停止未确认状态保留 |
 | 反馈解码或运动状态判定 | 对应 CAN 单测 / `test_motion_detector`；涉及后端反馈链时加 `test_motion_feedback_vcan.py` |
 | ROS 接口、构建或依赖 | 重建受影响包及消费者，运行对应单测和受影响集成路径；范围跨包时扩大到依赖包 |
