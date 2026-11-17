@@ -1,6 +1,6 @@
 # pi_arm_websocket
 
-Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服务/动作，推送状态，并管理持久点位和 URDF FK。自身不直接操作 SocketCAN；HTML 静态服务由根目录启动脚本另行启动。
+Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久化点位和模型坐标显示。普通运动请求转给 manager，维护请求转给维护节点或任务服务。坐标显示通过 URDF 正运动学（FK）计算；HTML 静态服务由根目录启动脚本另行启动。
 
 ## 文件与节点
 
@@ -20,12 +20,12 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 
 默认 host `0.0.0.0`、port `8765`、推送周期 `100 ms`、状态超时 `1 s`、请求超时 `5 s`。其他参数包括 `hardware_type`、`read_only`、`commissioning`、`calibration_file`、`points_file`、`frame_model_file`、`joint_names`。
 
-普通模式订阅 `/pi_arm/state` 并使用 manager；只读/commissioning 订阅 `/pi_arm/hardware_state`。只读不建管理/运动客户端；commissioning 只建其专属管理和 AxisTest 服务，不能借普通运动命令绕过模式。
+普通模式订阅 `/pi_arm/state` 并使用 manager；只读/commissioning 订阅 `/pi_arm/hardware_state`。只读模式保留状态和点位功能；commissioning 创建维护管理、AxisTest 及软件标零任务的服务客户端，使用独立维护链路。
 
 ## 协议
 
 请求格式：`{"type":"req","msg_id":1,"cmd":"point_list","params":{}}`。
-响应：`type=rsp`，对应 `msg_id`，包含 `code`、`ms`、`data`；成功 code 为 0。状态为 `type=state`，包含任务、硬件许可、坐标与能力字段，前端按能力开放功能。
+响应：`type=rsp`，通过 `msg_id` 对应请求。`code=0` 表示请求成功，`ms` 是文字说明（沿用的字段名，不是毫秒），`data` 是结果数据。状态为 `type=state`，包含任务、硬件许可、坐标与能力字段，前端按能力开放功能。
 
 | 命令 | 路由/语义 |
 | --- | --- |
@@ -36,7 +36,7 @@ Python WebSocket ↔ ROS 2 网关。将网页 JSON 命令转换为 manager 服�
 | `movej` / `movejs` / `movel` | 对应 ROS MoveJ / MoveJs / MoveL |
 | `preview_motion` | joint/output/ik/lin 只读预览 |
 | `enable_motor` / `disable_motor` / `reset_motor` / `reboot_motor` | 管理服务；reset 为清错，reboot 为选定电机重启 |
-| `stop_motion` / `motor_stop` | 停止链，不是默认的到位保持动作 |
+| `stop_motion` / `motor_stop` | 普通模式取消当前任务并请求保持当前位置；`motor_stop` 同样停止整条任务。commissioning 模式转给 AxisTest 停止服务 |
 | `set_teaching` | 显式进入/退出实机拖拽示教 |
 | `axis_test` / `axis_test_heartbeat` / `axis_test_stop` | commissioning 专用单轴测试 |
 | `point_list` / `point_save` / `point_delete` | 点位库读取/存储/删除，不发运动 |

@@ -23,7 +23,7 @@ ros2_control 的 `SystemInterface` 插件包，通过六轴 Backend 将关节命
 
 ## 关键行为
 
-- 反馈必须完整新鲜；标定通过后才进行受许可的正常控制。输出轴包络检查不能替代关节限位，反解后仍逐关节校验。
+- 正常运动要求反馈完整新鲜、标定有效且取得控制许可。缺少反馈或标定无效时仍发布已有原始数据和诊断原因。输出轴包络检查不能替代关节限位，反解后仍逐关节校验。
 - J2/J3 的反馈与起点容差为 3°；下发目标坚持标准限位。起点落在容差带时，生成命令会投影到最近标准边界。
 - A4 协议速度是整数上限，向下取整，不能提高低速请求。普通运动使用控制器采样位置推进，不能用过小的整数前馈速度造成持续落后。
 - 成功到位后保留最后 A4 位置闭环。正常取消/网页停止关闭轨迹写入、清空旧指令，使用新鲜原始协议角直接下发 A4 保持，不先发送释放位置环的 0x81。故障、超时、下使能、进入示教和服务退出仍使用原有故障/释放路径。
@@ -33,7 +33,15 @@ ros2_control 的 `SystemInterface` 插件包，通过六轴 Backend 将关节命
 
 `/pi_arm/hardware_state` 发布原始数据与原因；`/pi_arm/hardware/*` 管理服务供 manager 调用。只读模式不暴露写入服务；commissioning 服务在 `/pi_arm/commissioning/*`。
 
-正常控制 backend 停用后保留 CAN 反馈读取，但禁止重新取得运动租约、建立位置保持或切换示教。再次激活后仍需新的运动租约；恢复反馈不会自动恢复旧授权。插件的激活、停用与管理服务串行处理。cleanup、shutdown 和 error 回调先结束服务线程，再停止运动、关闭 CAN 线程/socket 并释放接口独占锁；停止应答缺失时日志保留 `STOP UNCONFIRMED`，资源释放不代表已确认电机停止。
+生命周期分为“停用后等待再次激活”和“退出并释放资源”两种情况：
+
+| 阶段 | 处理顺序与结果 |
+| --- | --- |
+| 停用（deactivate） | 撤销运动许可，保留 CAN 反馈读取；停用期间不能取得新租约、建立位置保持或切换示教 |
+| 再次激活（activate） | 允许重新申请运动租约；恢复反馈不会自动恢复旧授权 |
+| cleanup / shutdown / error | 先结束服务线程，再停止运动，随后关闭 CAN 线程和 socket，最后释放接口独占锁 |
+
+插件的激活、停用与管理服务串行处理。停止应答缺失时日志保留 `STOP UNCONFIRMED`；资源释放和电机停止确认是两件事，需分别检查。
 
 ## 停止并保持
 
@@ -57,6 +65,6 @@ manager 的活动任务仍立即产生 RUNNING；空闲时才由反馈运动标�
 
 ## 验证
 
-`test/test_backend.cpp`、`test/test_motion_write_gate.cpp` 覆盖后端与租约；`test/test_motion_detector.cpp` 覆盖静止噪声、低速、持续速度、稳定期与缓存/失效反馈。`test/vcan_backend_probe.cpp`、`test/vcan_reboot_probe.cpp`、`test/vcan_motion_probe.cpp` 由 [vcan 脚本](../../scripts/README.md) 编译/调用，验证生产 RealBackend；不应将探针接到实机 CAN。
+`test/test_system_configuration.cpp` 覆盖插件配置入口；`test/test_backend.cpp`、`test/test_motion_write_gate.cpp` 覆盖后端与租约；`test/test_motion_detector.cpp` 覆盖静止噪声、低速、持续速度、稳定期与缓存/失效反馈。`test/vcan_backend_probe.cpp`、`test/vcan_reboot_probe.cpp`、`test/vcan_motion_probe.cpp` 由 [vcan 脚本](../../scripts/README.md) 编译/调用，验证生产 RealBackend；不应将探针接到实机 CAN。
 
 [test_backend_lifecycle_vcan.py](../../scripts/test_backend_lifecycle_vcan.py) 验证停用后的租约门禁、重新激活、插件 shutdown/error/cleanup、停止应答缺失及重复清理。启用 `BUILD_TESTING` 构建后，使用空闲的虚拟 `vcan0` 和 ROS 域 100 运行：`ROS_DOMAIN_ID=100 python3 scripts/test_backend_lifecycle_vcan.py --probe build/pi_arm_hardware/vcan_lifecycle_probe --log-dir /tmp/backend-lifecycle`。探针在生命周期回调后保留插件对象，检查 CAN socket 与独占锁是否已释放。

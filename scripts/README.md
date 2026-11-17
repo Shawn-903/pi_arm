@@ -141,7 +141,7 @@ python3 scripts/test_rebind_cable_directions.py
 sudo bash -c 'source /opt/ros/jazzy/setup.bash && source install/setup.bash && PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_can_recovery_vcan.py'
 ```
 
-前两个脚本自己建立模拟器并调用生产 RealBackend，固定/核验 vcan0，不需要另启实机服务；应顺序运行，不能与其他驱动或模拟器争用 vcan0。方向重绑定测试是离线文件测试。
+`test_motion_safety_vcan.py` 和 `test_reboot_vcan.py` 自行启动模拟器并调用生产 RealBackend，固定/核验 vcan0，不需要另启实机服务。它们应顺序运行，不能与其他驱动或模拟器争用 vcan0。`test_rebind_cable_directions.py` 是离线文件测试。
 
 [运动反馈回归](test_motion_feedback_vcan.py) 使用单独的 `vcan_motion`，核验生产 RealBackend 的静止抖动、零速度读数下的缓慢位移、腕部通道映射、掉线恢复和无效运动学。它只产生虚拟查询/反馈帧，拒绝非 vcan 接口，并断言没有使能、位置或标零命令。source 要验证的 install（支持隔离 overlay），再执行：
 

@@ -46,6 +46,8 @@ bash scripts/start_web.sh \
 
 当前参考为 R10，打包关节角 `[0, 100.7, -85.6, 0, 0, 0]°`。R10 绑定当前 ROM 零点与绳索配置，不应在重新装配、重新标零后直接复用。首次运行先核对网页中的标定、六轴反馈及控制许可。
 
+如果已采集并保存软件零点，后续启动还需传入同一 `software_zero_file`，例如 `software_zero_file:=$HOME/.local/share/pi_arm/software-zero-can0.yaml`。该参数默认为空，不会自动查找文件。日常软件标零改变的是持久化零偏，操作步骤与 Python 调用见 [任务包](src/pi_arm_tasks/README.md)。
+
 ### 只读监测
 
 ```bash
@@ -144,6 +146,7 @@ git worktree add --detach ../pi_arm-repeatability-1.0 repeatability-v1.0
 | 数据 | 保存位置与恢复方式 |
 | --- | --- |
 | 源码、配置、接受的标定 | Git；标定数据与 `.cable.yaml` 必须配套 |
+| 软件零点 | 启动参数 `software_zero_file` 指定的文件；单独备份，后续启动继续传入同一路径，并核对实物参考 |
 | 点位库 | 默认 `~/.local/share/pi_arm/points-real.json` / `points-mock.json`；网页导出备份，停止服务后恢复到相应 `points_file` |
 | 重复测试记录 | 当前浏览器内存；关闭、刷新或新测试前导出 JSON/CSV |
 | ROM 零点、绳索张紧状态 | 实物状态，不能通过 Git 回滚恢复 |

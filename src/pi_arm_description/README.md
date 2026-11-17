@@ -9,7 +9,7 @@
 - `meshes/`：原始 STL；模型导出脚本无损压缩并写入 SHA-256 清单。
 - [launch/display.launch.py](launch/display.launch.py)：joint_state_publisher_gui + robot_state_publisher/RViz 的离线关节显示。
 
-Xacro 参数包括 `backend`（默认 mock）、`can_interface`、`bitrate`、`cable_kinematics_file`、`calibration_file`、`allow_real_control`，由 bringup 填入。
+Xacro 参数包括 `backend`（默认 mock）、`can_interface`、`bitrate`、`cable_kinematics_file`、`calibration_file`、`software_zero_file`、`allow_real_control`，由 bringup 填入。
 
 ## 六自由度与坐标
 
@@ -24,7 +24,7 @@ Xacro 参数包括 `backend`（默认 mock）、`can_interface`、`bitrate`、`c
 
 URDF `origin` 定义父到关节零位变换，`axis` 是该局部坐标系中的轴，不能按屏幕左右直接判正负。`visual` 的网格坐标与 `collision` 的碰撞形状也不能混用。基座为 `base_link`，当前控制点为法兰中心 `tool0`，没有附加工具坐标偏置。
 
-mimic 是运动学假设，不是独立电机指令。尤其 J3/J4/J5 的主动关节角与整段机构总弯曲角不能混为同一个量。腕部总弯曲核验见 [transmission](../pi_arm_transmission/README.md#腕部实机核验)。
+mimic 表示随动关节：它的角度由另一关节按指定比例和偏移计算。表中的随动关系是运动学假设，不是独立电机指令。J3/J4/J5 的主动关节角与整段机构总弯曲角也不同。腕部总弯曲核验见 [transmission](../pi_arm_transmission/README.md#腕部实机核验)。
 
 协议安装方向/比值与绳索通道的区别见 [硬件配置](../pi_arm_hardware/config/README.md)。仅修改模型显示方向而不核验实物，可能掩盖真正的绳索映射问题。
 

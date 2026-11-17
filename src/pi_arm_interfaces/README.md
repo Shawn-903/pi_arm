@@ -1,6 +1,6 @@
 # pi_arm_interfaces
 
-ROS 2 公共接口定义包，由 rosidl 生成 C++/Python 类型；自身不启动节点、不控制硬件。除显式命名为 `deg` 的调试字段，ROS 运动数据使用 SI 单位：rad、rad/s、m、s。
+ROS 2 公共接口定义包。硬件、manager、任务包和网关通过这里的消息、服务和动作交换数据，rosidl 为它们生成 C++/Python 类型。除显式命名为 `deg` 的调试字段，ROS 运动数据使用 SI 单位：rad、rad/s、m、s。
 
 ## 消息
 
@@ -30,7 +30,9 @@ ROS 2 公共接口定义包，由 rosidl 生成 C++/Python 类型；自身不启
 | [SetTeaching](srv/SetTeaching.srv) | 显式进入拖拽示教或退出并保持当前位置 |
 | [StopMotion](srv/StopMotion.srv) | 正常停止并保持当前位置，成功需确认保持；故障/失联不能保证保持 |
 | [AxisTest](srv/AxisTest.srv) | commissioning 专用 start/heartbeat/stop，步进与速度单位为 °、°/s |
-| [SetZeroReference](srv/SetZeroReference.srv) | 确认已知实物姿态并采集软件零点；参考关节角使用 rad。硬件入口 `/pi_arm/commissioning/set_zero_reference` 只在维护模式存在，不移动机械臂、不写 ROM |
+| [SetZeroReference](srv/SetZeroReference.srv) | 确认已知实物姿态并采集软件零点，参考关节角使用 rad。前端/Python 任务入口为 `/pi_arm/tasks/set_zero_reference`，转调维护模式的 `/pi_arm/commissioning/set_zero_reference`；调用方式见 [任务包](../pi_arm_tasks/README.md) |
 | [PreviewMotion](srv/PreviewMotion.srv) | joint/output/ik/lin 只读预览，不执行；返回轨迹仅供显示 |
+
+`SetMotionArmed` 的租约是一次运动的临时写入许可，用 `lease_id` 关联任务与清理请求。正常到位释放该许可时保留最终目标；用户停止使用零 lease 捕获当前位置。该服务由控制链内部协调，上层程序通过动作或 `StopMotion` 发起操作。
 
 修改字段时同步硬件发布、manager、网关与消费者测试。此包的验证以接口生成及各消费者测试为主；可用 `ros2 interface show pi_arm_interfaces/msg/RobotState` 检查安装结果。
