@@ -23,16 +23,18 @@ ROS 2 公共接口定义包。硬件、manager、任务包和网关通过这里�
 
 ## 服务
 
-| 定义 | 作用 |
-| --- | --- |
-| [ManageMotor](srv/ManageMotor.srv) | 按服务名使能/关闭/清错/重启；通常 ID 0 表示全部，但重启只接受 1–6 |
-| [SetMotionArmed](srv/SetMotionArmed.srv) | 硬件内部写入租约、输出轴限速；`armed=false, hold_position=true` 时，非零 lease 保留到位目标，零 lease 停止并保持当前编码器位置 |
-| [SetTeaching](srv/SetTeaching.srv) | 显式进入拖拽示教或退出并保持当前位置 |
-| [StopMotion](srv/StopMotion.srv) | 取消当前运动并保持当前位置，返回保持确认结果或失败原因 |
-| [AxisTest](srv/AxisTest.srv) | commissioning 专用 start/heartbeat/stop，步进与速度单位为 °、°/s |
-| [SetZeroReference](srv/SetZeroReference.srv) | 确认已知实物姿态并采集软件零点，参考关节角使用 rad。前端/Python 任务入口为 `/pi_arm/tasks/set_zero_reference`，转调维护模式的 `/pi_arm/commissioning/set_zero_reference`；调用方式见 [任务包](../pi_arm_tasks/README.md) |
-| [PreviewMotion](srv/PreviewMotion.srv) | 根据 joint/output/ik/lin 请求计算目标和轨迹，供前端预览 |
+| 定义 | 服务入口 | 作用 |
+| --- | --- | --- |
+| [ManageMotor](srv/ManageMotor.srv) | `/pi_arm/enable_motor`、`/pi_arm/disable_motor`、`/pi_arm/reset_motor`、`/pi_arm/reboot_motor` | 使能、关闭、清错或重启；ID 0 表示全部，重启选择单个 ID 1–6 |
+| [SetMotionArmed](srv/SetMotionArmed.srv) | `/pi_arm/hardware/set_motion_armed`，供控制链内部使用 | 申请或释放运动写入租约、设置输出轴限速；释放时，非零 lease 的 hold 保留到位目标，零 lease 的 hold 停止并保持当前位置 |
+| [SetTeaching](srv/SetTeaching.srv) | `/pi_arm/set_teaching` | 进入拖拽示教或退出并保持当前位置 |
+| [StopMotion](srv/StopMotion.srv) | `/pi_arm/stop_motion` | 取消当前运动并保持当前位置，返回保持确认结果或失败原因 |
+| [AxisTest](srv/AxisTest.srv) | `/pi_arm/commissioning/axis_test` | 维护模式的 start/heartbeat/stop，步进与速度单位为 °、°/s |
+| [SetZeroReference](srv/SetZeroReference.srv) | `/pi_arm/tasks/set_zero_reference` | 确认实物参考姿态并采集软件零点，参考关节角使用 rad；转调 `/pi_arm/commissioning/set_zero_reference`，调用方式见 [任务包](../pi_arm_tasks/README.md) |
+| [PreviewMotion](srv/PreviewMotion.srv) | `/pi_arm/preview_motion` | 根据 joint/output/ik/lin 请求计算目标和轨迹，供前端预览 |
 
 `SetMotionArmed` 的租约是一次运动的临时写入许可，用 `lease_id` 关联任务与清理请求。正常到位释放该许可时保留最终目标；用户停止使用零 lease 捕获当前位置。该服务由控制链内部协调，上层程序通过动作或 `StopMotion` 发起操作。
+
+Python 程序从 `pi_arm_interfaces.msg`、`pi_arm_interfaces.srv` 和 `pi_arm_interfaces.action` 导入生成的类型，用 `rclpy` 创建订阅、服务客户端或 `ActionClient`。调用顺序及字段用法可参考 [ros_bridge.py](../pi_arm_websocket/pi_arm_websocket/ros_bridge.py)。正常模式的上述管理入口由 manager 提供；维护模式的电机管理服务使用 `/pi_arm/commissioning/` 前缀。
 
 修改字段时同步硬件发布、manager、网关与消费者测试。此包的验证以接口生成及各消费者测试为主；可用 `ros2 interface show pi_arm_interfaces/msg/RobotState` 检查安装结果。

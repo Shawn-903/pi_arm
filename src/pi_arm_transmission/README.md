@@ -12,6 +12,17 @@ C++17 绳索运动学库，可由 ROS 节点或独立程序调用。位置正解
 
 `output_directions` 乘整条绳索方程，含其 J2 补偿项；`coupling_sign` 只影响该补偿项。`swap_wrist_channels=true` 时 CAN4 行使用 q5，CAN5 行使用 q4；YAML 中 joint_05/joint_06 几何键仍表示原 CAN4/CAN5 行。
 
+## 程序调用
+
+C++ 程序包含 `pi_arm_transmission/config_loader.hpp` 和 `pi_arm_transmission/cable_kinematics.hpp`，链接 `pi_arm_transmission` 库。典型调用顺序如下：
+
+1. `load_cable_kinematics_config(path)` 读取 YAML，返回 `CableKinematicsParameters`；用它构造 `CableKinematics`。
+2. 将角度放入 `Vector6`，调用 `joint_to_output_position(q, phi)` 或 `output_to_joint_position(phi, q)`，结果写入第二个参数。
+3. 检查返回的 `KinematicsStatus` 对象：`ok()` 为真时使用输出；失败时通过 `error`、`axis` 和 `value` 定位原因，`to_string(error)` 提供错误名称。
+4. 速度换算使用当前位置和速度作为输入，调用 `joint_to_output_velocity` 或 `output_to_joint_velocity`；`jacobian(q, matrix)` 返回当前位置的速度映射矩阵。
+
+配置读取和模型构造通过异常报告无效参数，运行时换算通过状态值报告错误。目标和反馈的限位检查方法见下方 [限位与轨迹时间](#限位与轨迹时间)。完整调用可参考 [库测试](test/test_cable_kinematics.cpp) 和 [硬件后端](../pi_arm_hardware/src/backend.cpp)。
+
 ## 当前生产模型
 
 以下为当前方向、通道和半径代入后的公式，所有角度用 rad；几何半径单位 mm，比例无量纲：
@@ -43,7 +54,7 @@ q5 = asin((-phi4 - B*q2) / C)
 q6 = -phi6 - K*q2
 ```
 
-反解使用 asin 主分支，并检查定义域与关节限位。模型按定长绳索、无间隙传动和 URDF 随动关系计算。
+反解使用 asin 主分支并检查定义域。模型按定长绳索、无间隙传动和 URDF 随动关系计算。
 
 速度关系为 `phi_dot = J(q) * q_dot`。Jacobian 的非零项：
 

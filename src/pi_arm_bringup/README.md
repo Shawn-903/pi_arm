@@ -13,7 +13,9 @@
 | [controllers.yaml](config/controllers.yaml) | 控制周期 50 Hz、六轴顺序、位置/速度接口及 JTC 容差 |
 | [manager.yaml](config/manager.yaml) | 默认到位容差 0.2°、连续稳定 0.5 s、收敛等待 10 s |
 
-常用参数如下。`monitor_web` 和 `commissioning_web` 会包含 `monitor.launch.py`，可传入其中声明的硬件参数；各入口的完整参数以 `DeclareLaunchArgument` 为准。
+加载 ROS 和工作区环境后，可用 `ros2 launch pi_arm_bringup bringup.launch.py hardware_type:=mock` 启动模拟控制链。根目录的 `scripts/start_web.sh` 会调用相应 launch，并同时启动网页 HTTP 服务。
+
+常用参数如下。`monitor_web` 和 `commissioning_web` 会包含 `monitor.launch.py`，可传入其中声明的硬件参数。查看完整参数及默认值可执行 `ros2 launch pi_arm_bringup bringup.launch.py --show-args`，其他入口替换其中的 launch 文件名。
 
 | 参数 | 用途与适用入口 |
 | --- | --- |

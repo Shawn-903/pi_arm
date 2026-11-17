@@ -27,6 +27,8 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 请求格式：`{"type":"req","msg_id":1,"cmd":"point_list","params":{}}`。
 响应：`type=rsp`，通过 `msg_id` 对应请求。`code=0` 表示请求成功，`ms` 保存文字说明，`data` 保存结果数据。状态为 `type=state`，包含任务、硬件许可、坐标与能力字段，前端按能力开放功能。
 
+编写客户端时，连接 `ws://树莓派IP:8765`，发送上面的 JSON 即可读取点位库；成功响应的 `data` 包含 `revision` 和 `points`。连接中会持续收到状态推送，因此按 `type` 区分状态与请求响应，再用 `msg_id` 对应已发送的请求。连续请求使用不同的 `msg_id`，网关返回的 `ms` 可直接显示给操作者。
+
 | 命令 | 路由/语义 |
 | --- | --- |
 | `motor_move` / `move` | 单关节 / 完整六关节目标，经 DirectMove 执行 |
@@ -43,7 +45,7 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 
 网页目标使用 °、mm，网关转换为 ROS 动作的 rad、m。RPY 使用固定轴 XYZ，即 `Rz(yaw) Ry(pitch) Rx(roll)`，坐标系为 base_link，控制点为 tool0。返回的预览轨迹 TCP 路径使用 m，渲染时按米制读取。请求字段定义见 `protocol.py` 和 `commands.py`，调用示例可查阅 `test/`。
 
-依赖方向为 `gateway → commands / ros_bridge / state_payload`。commands 与 ros_bridge 通过状态、服务和动作接口协作；state_payload 只转换传入的状态快照。入口仍是 `pi_arm_websocket.gateway:main`，原有 `gateway.RosBridge`、`gateway.CommandGateway` 和旋转换算函数的导入方式继续可用。
+进程入口是 `pi_arm_websocket.gateway:main`。`gateway` 管理连接，调用 `commands` 分发请求、通过 `ros_bridge` 访问 ROS，再由 `state_payload` 将反馈快照转换为网页消息。
 
 运动响应中的 `task_id` 用于跟踪任务，后续 `state` 提供执行进度和终态。目标接受或任务号获取超时时，网关会处理迟到响应，并请求取消已接受的目标。
 

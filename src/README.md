@@ -1,6 +1,8 @@
 # 源码与开发约定
 
-本工作区有 11 个 ROS 2 包。安装、整体启动和版本恢复统一见 [根 README](../README.md)，网页操作见 [web](../web/README.md)。
+本工作区有 11 个 ROS 2 包，组成从运动请求、轨迹规划到 CAN 电机控制的链路。安装、整体启动和版本恢复见 [根 README](../README.md)，网页操作见 [web](../web/README.md)。
+
+编写运动程序时，从 [manager 的动作接口](pi_arm_manager/README.md#接口与文件) 接入；软件标零及 Python 任务调用见 [pi_arm_tasks](pi_arm_tasks/README.md)。编写新的网页客户端时使用 [WebSocket 协议](pi_arm_websocket/README.md#协议)，在独立 C++ 程序中计算关节角和输出轴角时使用 [绳索库](pi_arm_transmission/README.md#程序调用)。
 
 ## 包索引
 

@@ -28,11 +28,13 @@ source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ```
 
-依赖脚本使用 sudo 安装系统包。构建采用 `colcon build --symlink-install`，并从 Xacro 导出网页模型。日常重新构建执行 `bash scripts/build.sh`；静态网页文件修改后刷新浏览器即可。
+依赖脚本使用 sudo 安装系统包。构建采用 `colcon build --symlink-install`，并从 Xacro 导出网页模型。日常重新构建执行 `bash scripts/build.sh`；静态网页文件修改后刷新浏览器即可。新开终端运行 `ros2` 命令时，先执行上面的两条 `source` 命令，加载 ROS 和本项目的包。
 
 ## 选择启动模式
 
 `start_web.sh` 同时启动 ROS 服务和网页 HTTP 服务，默认使用 mock 模拟后端。同一 CAN 接口只运行一个驱动实例，切换模式前先停止上一实例。
+
+首次熟悉项目可从 [模拟运行](#模拟运行) 开始，体验连接、设置目标和查看任务结果。连接实物后，可先用只读监测查看反馈，再按需要进入正常控制或单轴方向测试。`commissioning` 是维护模式的名称。
 
 ### 实机正常控制
 
@@ -73,6 +75,8 @@ bash scripts/start_web.sh --commissioning can_interface:=can0 \
 ```bash
 bash scripts/start_web.sh hardware_type:=mock
 ```
+
+mock 后端在内存中生成电机反馈，用于调试控制流程和网页交互。打开 [网页控制台](#打开网页与停止) 并连接后，后端类型应显示 `mock`，六轴状态和模型随模拟反馈更新。点击“所有电机使能”，在关节控制面板设置目标并执行，可观察模型运动和任务结果。
 
 与正在运行的实机并行开发时，应使用独立 ROS 域及端口：
 
@@ -122,7 +126,7 @@ ros2 topic echo /pi_arm/state --once
 | 页面可打开但无法连接 | WebSocket 地址/8765 端口、网关进程；HTTP 与 WS 是两个服务 |
 | 六轴掉线或反馈过期 | CAN 接口、供电、驱动占用与启动日志 |
 | `CALIBRATION_INVALID` | R10 文件路径、approved、配置指纹和模型快照；见 [配置说明](src/pi_arm_hardware/config/README.md) |
-| 有反馈但运动不可用 | 启动模式、使能、示教状态、控制许可、活动任务及 JTC 是否 active |
+| 有反馈但运动不可用 | 启动模式、使能、示教状态、控制许可、活动任务及关节轨迹控制器（JTC）是否 active |
 | 回零看起来很慢 | 同时检查关节速度与输出轴限速，绳索耦合会延长整臂同步时间 |
 
 启动日志在终端，ROS 日志通常在 `~/.ros/log/`，构建和测试日志在工作区 `log/`。零点与参考配置见 [硬件配置](src/pi_arm_hardware/config/README.md)。

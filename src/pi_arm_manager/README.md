@@ -33,6 +33,10 @@
 
 上层程序通过 [interfaces](../pi_arm_interfaces/README.md) 中的动作提交运动目标，跟踪任务反馈和结果；通过 `StopMotion` 服务请求停止。`/pi_arm/preview_motion` 返回计算结果供显示：joint/output 使用 DirectMove 插值，ik 调用 `/compute_ik` 求端点解，lin 规划 Pilz 路径。正式执行时从最新反馈起点重新生成轨迹。
 
+编写运动程序时，先按根 README 启动正常控制链，并让客户端使用相同的 `ROS_DOMAIN_ID` 和工作区环境。读取 `/pi_arm/state` 确认状态，经 `/pi_arm/enable_motor` 使能后，将目标发送到所需的动作入口。
+
+普通关节插值使用 `/pi_arm/direct_move`：按 [主动关节顺序](../README.md#坐标和数据约定) 填写 `joint_names` 和 `positions`，位置和 `max_velocity` 分别使用 rad、rad/s；`output_space=false` 表示关节目标。通过动作反馈的 `task_id` 跟踪任务，并读取最终结果的 `success`、`code` 和 `message`。服务路径和动作类型见 [接口表](../pi_arm_interfaces/README.md)。
+
 清错服务按所选电机检查新鲜、静止反馈，其他电机暂时失联时仍可对在线电机清错；活动任务、已知运动或停止未确认时会拒绝请求。使能、失能和重启继续检查整臂反馈与静止状态。`/pi_arm/hardware/*` 是供 manager 使用的内部管理接口。
 
 ## 验证
