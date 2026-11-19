@@ -4,26 +4,26 @@
 
 ## 一条命令标零
 
-树莓派上的项目完成构建、CAN 接口就绪后，先停止正在运行的控制或维护服务，将机械臂放到机械零位并保持静止。在仓库根目录执行：
+机械零位是打包姿态，J1 至 J6 依次为 `[0, 100.7, -85.6, 0, 0, 0]°`。树莓派完成构建、CAN 接口就绪后，停止占用 CAN 的服务，将机械臂放到打包姿态并保持静止。在仓库根目录运行以下命令。
 
 ```bash
 bash scripts/zero_reference.sh --confirm-reference
 ```
 
-脚本会加载 ROS 和当前工作区环境，启动硬件维护服务与标零服务，等待电机反馈就绪后采集一次零点，保存结果，再关闭本次启动的服务。`--confirm-reference` 表示你已确认实物处于给定姿态；默认参考关节角均为零。
+脚本加载 ROS 和工作区环境，启动维护与标零服务，等待六台电机反馈稳定后采集一次，保存结果并关闭本次服务。`--confirm-reference` 表示你已确认实物处于给定姿态。
 
 默认使用 `can0`。脚本把已知关节姿态、此刻六台电机的编码器读数和当前模型指纹保存到 `~/.local/share/pi_arm/software-zero-can0.yaml`。文件名随 CAN 接口变化。
 
-**文件丢失时**，把实物重新放到同一个已知姿态并保持静止，再执行同一条采集命令。关节角的定义沿用原值，本次编码器读数决定新的零偏。机械臂处在未知姿态时，单凭编码器读数无法恢复之前的对应关系。
+**文件丢失时**，把实物重新放到同一个已知姿态并保持静止，再执行同一条采集命令。沿用该姿态的关节角，根据本次编码器读数重新计算零偏。
 
-采集其他已知姿态时，使用 `--reference-deg` 传入角度，单位为度，顺序为 `joint_01, joint_02, joint_04, joint_05, joint_06, joint_09`：
+采集其他已知姿态时，用 `--reference-deg` 按 J1 至 J6 顺序传入角度（°）。例如，实物处于六个关节角均为 0° 的零位时，运行以下命令。
 
 ```bash
 bash scripts/zero_reference.sh --confirm-reference \
-  --reference-deg 0 100.7 -85.6 0 0 0
+  --reference-deg 0 0 0 0 0 0
 ```
 
-该例将当前实物姿态登记为这组角度。自定义绳索模型用 `--cable-kinematics-file` 指定；服务和静止反馈的等待时间由 `--startup-timeout` 设置，默认 15 秒。
+自定义绳索模型用 `--cable-kinematics-file` 指定。服务和静止反馈的等待时间由 `--startup-timeout` 设置，默认 15 秒。
 
 运行日志输出到终端。成功时，最后一行 JSON 给出 `success`、`reference_id`、`software_zero_file` 和 `cleanup_success`，命令退出码为 0。失败时会说明原因并清理本次服务；若返回 `result_unknown: true`，按保存文件中的参考编号核对结果后再操作。按 `Ctrl+C` 可以结束运行，已发出的采集请求会先等待本次结果，再退出。
 
@@ -37,7 +37,7 @@ bash scripts/zero_reference.sh --confirm-reference \
 bash scripts/start_web.sh --commissioning
 ```
 
-该入口会启动 `pi_arm_zero_reference` 服务节点。网页“方向测试”中，将实物放到六关节机械零位，勾选确认后点击“采集并保存软件零点”。成功后显示参考编号，并通过 `HardwareState.software_zero_id` 发布。
+该入口会启动 `pi_arm_zero_reference` 服务节点。在网页“方向测试”中核对打包姿态的参考角，确认实物姿态和静止状态后点击“采集并保存软件零点”。成功后显示参考编号，并通过 `HardwareState.software_zero_id` 发布。
 
 ## 命令行与 Python
 
@@ -45,19 +45,20 @@ bash scripts/start_web.sh --commissioning
 
 上面的网页启动命令已经包含所需服务。独立 ROS 程序也可以先启动 `pi_arm_bringup` 的 `monitor.launch.py`，设置 `commissioning:=true`，再在另一个已加载环境的终端执行 `ros2 run pi_arm_tasks pi_arm_zero_reference`。
 
-客户端命令行使用度，默认参考姿态为机械零位：
+客户端也默认在机械零位采集。实物处于打包姿态且静止时运行以下命令。
 
 ```bash
 ros2 run pi_arm_tasks pi_arm_zero --confirm-reference
-ros2 run pi_arm_tasks pi_arm_zero --confirm-reference \
-  --reference-deg 0 100.7 -85.6 0 0 0
 ```
 
-Python 使用弧度，`set_zero_reference()` 返回 ROS future。调用方通过 spin 接收结果：
+Python 的 `set_zero_reference()` 接受以弧度表示的关节角，返回 ROS future。以下示例在打包姿态采集。
 
 ```python
+import math
+
 import rclpy
 from pi_arm_tasks.zero_reference import ZeroReferenceClient
+from pi_arm_websocket.presets import PACKING_JOINTS_DEG
 
 rclpy.init()
 node = rclpy.create_node("my_zero_reference_program")
@@ -66,7 +67,7 @@ try:
     if not client.wait_for_service(timeout_sec=3.0):
         raise RuntimeError("请先启动维护模式和 pi_arm_zero_reference")
     future = client.set_zero_reference(
-        [0.0] * 6, reference_pose_confirmed=True,
+        [math.radians(angle) for angle in PACKING_JOINTS_DEG], reference_pose_confirmed=True,
     )
     rclpy.spin_until_future_complete(node, future, timeout_sec=6.0)
     if not future.done():
@@ -86,7 +87,7 @@ finally:
 
 采集成功后，运行 `bash scripts/start_web.sh --monitor`，连接网页，核对关节反馈与实物参考姿态、诊断中的 `software_zero_id` 与采集返回的 `reference_id`。正常控制、只读和维护模式都会自动读取当前接口的零点。自定义位置时，采集用 `--software-zero-file`，启动用 `software_zero_file:=/绝对路径/zero.yaml`。
 
-首次采集和重新采集都使用当前的绳索模型、已知姿态和实测编码器读数。参考编号用于区分两次采集，已有点位需要按新零点复核。V0.52 的旧零点仍可搭配原基础配置加载，V0.53 的单文件可以直接读取。另有自定义打包姿态时，可用 `--calibration-file` 带入已批准的打包配置。
+首次采集和重新采集都使用当前的绳索模型、已知姿态和实测编码器读数。参考编号用于区分两次采集，已有点位需要按新零点复核。V0.52 的旧零点仍可搭配原基础配置加载，V0.53 的单文件可以直接读取。`--calibration-file` 可一并保存旧配置中已批准的打包运动目标。实物处于自定义姿态时，用 `--reference-deg` 指定本次采集的关节角。
 
 加载软件零点要求电机协议角度参考与采集时一致。断电、驱动重启或 0x80 关闭后，先核对实物姿态和编码器参考，再决定是否重新采集。零偏变化后重新核验已有点位。
 

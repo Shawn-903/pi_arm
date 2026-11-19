@@ -21,6 +21,7 @@ from rclpy.signals import SignalHandlerOptions
 import xacro
 import yaml
 
+from .cli import add_reference_arguments
 from .client import ZeroReferenceClient, zero_request
 from .files import resolve_reference_files
 
@@ -62,9 +63,7 @@ def _stop_services(children):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--confirm-reference", action="store_true", required=True,
-                        help="confirm the arm is physically at the specified reference pose")
-    parser.add_argument("--reference-deg", type=float, nargs=6, default=[0.0, 100.7, -85.6, 0.0, 0.0, 0.0])
+    add_reference_arguments(parser)
     parser.add_argument("--can-interface", default="can0")
     parser.add_argument("--calibration-file", type=Path)
     parser.add_argument("--cable-kinematics-file", type=Path)

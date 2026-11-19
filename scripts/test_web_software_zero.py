@@ -24,13 +24,18 @@ def main():
         page.locator('[data-view-target="commissioning"]').click()
         button = page.locator('#setZeroReference')
         assert button.is_disabled()
+        expected = [0, 100.7, -85.6, 0, 0, 0]
+        assert page.evaluate('lastState.mechanical_zero_joints_deg') == expected
+        assert page.locator('#zeroReferenceAngles').inner_text() == '0°，100.7°，-85.6°，0°，0°，0°'
         page.locator('#zeroReferenceConfirmed').check()
         page.wait_for_function('!document.getElementById("setZeroReference").disabled')
         button.click()
         page.wait_for_function('document.getElementById("zeroReferenceResult").textContent.includes("软件标零成功")')
         page.wait_for_function('id => lastState.software_zero_id && lastState.software_zero_id !== id', arg=before['id'])
         assert page.evaluate('lastState.raw_protocol_positions_deg') == before['raw']
-        assert max(abs(value) for value in page.evaluate('lastState.model_output_positions_rad')) < 1e-8
+        page.wait_for_function('pose => lastState.current_joint_angles?.length === 6 && '
+                               'lastState.current_joint_angles.every((angle, i) => Math.abs(angle - pose[i]) < 0.002)',
+                               arg=expected)
         assert not page.locator('#zeroReferenceConfirmed').is_checked()
         assert button.is_disabled()
         assert not errors, errors

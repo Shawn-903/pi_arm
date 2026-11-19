@@ -277,7 +277,7 @@ function refreshPresetPoses(fresh, permitted) {
         : preset.reason || (!permitted ? "等待当前运动或请求结束" : "可执行");
     button.title = reason;
     document.getElementById(statusId).textContent =
-      `${name === "packing" ? "打包姿态" : "零位姿态"}：${target}；${reason}`;
+      `${name === "packing" ? "打包姿态" : "零位"}：${target}；${reason}`;
   }
 }
 
@@ -655,11 +655,16 @@ function refreshAxisTests(fresh) {
     ![...pending.values()].some((item) =>
       ["axis_test", "reset_motor", "reboot_motor", "set_zero_reference"].includes(item.cmd),
     );
+  const reference = lastState?.mechanical_zero_joints_deg;
+  const hasReference = Array.isArray(reference) && reference.length === activeJointNames.length &&
+    reference.every(Number.isFinite);
+  document.getElementById("zeroReferenceAngles").textContent =
+    hasReference ? reference.map((angle) => `${angle}°`).join("，") : "等待连接";
   document.getElementById("setZeroReference").disabled =
-    !idle || !lastState?.motor_test_permitted ||
+    !idle || !lastState?.motor_test_permitted || !hasReference ||
     !document.getElementById("zeroReferenceConfirmed").checked;
   document.getElementById("zeroReferenceCurrent").textContent =
-    `当前软件零点：${lastState?.software_zero_id || "未设置，使用基础标定"}`;
+    `当前软件零点：${lastState?.software_zero_id || "未设置"}`;
   const id = Number(document.getElementById("testMotorId").value);
   const index = lastState?.motor_ids?.indexOf(id) ?? -1;
   const enabled = lastState?.motor_enabled?.[index] === true;
@@ -721,7 +726,7 @@ function bindAxisTests() {
     const result = document.getElementById("zeroReferenceResult");
     result.textContent = "正在采集静止编码器读数并保存…";
     const sent = sendCommand("set_zero_reference", {
-      reference_joint_positions_deg: [0, 0, 0, 0, 0, 0],
+      reference_joint_positions_deg: lastState.mechanical_zero_joints_deg,
       reference_pose_confirmed: true,
     }, {
       resolve: (data) => {

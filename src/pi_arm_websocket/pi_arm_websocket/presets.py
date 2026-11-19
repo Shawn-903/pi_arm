@@ -78,7 +78,7 @@ class PosePresets:
             if hardware.motion_stop_pending or hardware.motion_stop_failed:
                 reasons.append("停止尚未确认")
         result = {}
-        for name, label, target in [("packing", "打包姿态", self.packing), ("zero", "零位姿态", [0.0]*6)]:
+        for name, label, target in [("packing", "打包姿态", self.packing), ("zero", "零位", [0.0]*6)]:
             denied = list(reasons)
             if name == "packing":
                 if self.error:

@@ -4,6 +4,15 @@ Pi Arm 是树莓派六自由度绳索机械臂的控制软件，目标环境为 
 
 网页控制台提供六轴状态与三维模型显示、关节与末端运动、有限步进、点位管理、步骤程序和重复定位测试。Python SDK 可在 Windows 或树莓派中直接调用运动函数。可按用途选择模拟运行、只读监测、单轴方向测试或实机控制。
 
+## 姿态约定
+
+| 名称 | J1 至 J6 的关节角（°） |
+| --- | --- |
+| 机械零位（打包姿态） | `[0, 100.7, -85.6, 0, 0, 0]` |
+| 零位 | `[0, 0, 0, 0, 0, 0]` |
+
+软件标零默认在机械零位采集编码器读数，计算并保存软件零偏。
+
 ## 文档入口
 
 | 需求 | 文档 |
@@ -46,7 +55,7 @@ source install/setup.bash
 bash scripts/start_web.sh hardware_type:=real allow_real_control:=true
 ```
 
-标零时，停止占用 CAN 的服务，确认实物在六关节机械零位并保持静止，执行 `bash scripts/zero_reference.sh --confirm-reference`。实机启动自动读取 `~/.local/share/pi_arm/software-zero-can0.yaml`。文件丢失时，把实物放回已知姿态，再采集一次即可重建。其他已知姿态见[标零步骤](src/pi_arm_tasks/pi_arm_tasks/zero_reference/README.md)。
+标零时，停止占用 CAN 的服务，将实物放到打包姿态并保持静止，执行 `bash scripts/zero_reference.sh --confirm-reference`。实机启动自动读取 `~/.local/share/pi_arm/software-zero-can0.yaml`。文件丢失时可在同一姿态重新采集。其他已知姿态见[标零步骤](src/pi_arm_tasks/pi_arm_tasks/zero_reference/README.md)。
 
 DirectMove、输出轴和预设姿态使用关节插值，执行前确认沿途空间。笛卡尔 LIN 规划末端直线路径，并按已建模场景检查碰撞。
 
@@ -129,7 +138,7 @@ ros2 topic echo /pi_arm/state --once
 
 ## 备份与恢复
 
-当前版本为 `V0.54`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
+当前版本为 `V0.55`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
 
 历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
 

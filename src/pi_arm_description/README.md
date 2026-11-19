@@ -22,7 +22,7 @@ Xacro 参数包括 `backend`（默认 mock）、`can_interface`、`bitrate`、`c
 | J5 | joint_06 | ±60° | joint_07 = joint_06 |
 | J6 | joint_09 | ±180° | 无 |
 
-URDF `origin` 定义父坐标系到关节零位的变换，`axis` 定义关节在局部坐标系中的转轴。`visual` 设置显示网格，`collision` 设置碰撞形状。基座坐标系为 `base_link`，控制点 `tool0` 位于法兰中心。
+URDF `origin` 定义关节角为 0 时相对父坐标系的位姿，`axis` 定义关节在局部坐标系中的转轴。`visual` 设置显示网格，`collision` 设置碰撞形状。基座坐标系为 `base_link`，控制点 `tool0` 位于法兰中心。
 
 mimic 表示随动关节：它的角度由另一关节按指定比例和偏移计算。整段机构姿态由主动关节和随动关节共同决定；腕部总弯曲角的计算见 [transmission](../pi_arm_transmission/README.md#腕部实机核验)。
 

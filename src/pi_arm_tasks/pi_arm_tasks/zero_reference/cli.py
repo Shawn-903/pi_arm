@@ -5,15 +5,22 @@ import json
 import math
 
 import rclpy
+from pi_arm_websocket.presets import PACKING_JOINTS_DEG
 
 from .client import ZeroReferenceClient
 
 
+def add_reference_arguments(parser):
+    parser.add_argument("--reference-deg", type=float, nargs=6, default=PACKING_JOINTS_DEG,
+                        metavar=("J1", "J2", "J3", "J4", "J5", "J6"),
+                        help="参考关节角（°），默认为机械零位（打包姿态）%(default)s")
+    parser.add_argument("--confirm-reference", action="store_true", required=True,
+                        help="确认实物已处于指定姿态并保持静止")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-deg", type=float, nargs=6, default=[0.0] * 6)
-    parser.add_argument("--confirm-reference", action="store_true", required=True,
-                        help="confirm that the arm is physically at the specified reference pose")
+    add_reference_arguments(parser)
     args = parser.parse_args()
     rclpy.init()
     node = rclpy.create_node("pi_arm_zero_client")

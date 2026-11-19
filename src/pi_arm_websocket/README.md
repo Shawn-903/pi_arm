@@ -14,7 +14,7 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 | [protocol.py](pi_arm_websocket/protocol.py) | JSON 校验、错误码、字段精度及合法命令 |
 | [points.py](pi_arm_websocket/points.py) | 点位库、版本冲突校验、文件锁/fsync/原子替换 |
 | [frames.py](pi_arm_websocket/frames.py) | 同帧六关节的 URDF FK，包含 mimic、各关节坐标系与 tool0 |
-| [presets.py](pi_arm_websocket/presets.py) | 由当前标定派生打包姿态，六轴零位和可用性 |
+| [presets.py](pi_arm_websocket/presets.py) | 定义机械零位（打包姿态）的关节角，提供打包和零位运动目标及其可用状态 |
 | [motion_limits.py](pi_arm_websocket/motion_limits.py) | 角速度默认 5°/s、上限 10°/s |
 | [websocket.launch.py](launch/websocket.launch.py) | 独立网关入口；整体运行通常用 bringup |
 
@@ -34,7 +34,7 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 | `motor_move` / `move` | 单关节 / 完整六关节目标，经 DirectMove 执行 |
 | `output_move` | 六个模型输出轴角，经绳索反解和 DirectMove |
 | `move_preset` | 打包 / 零位，前端可设置关节速度，仍受输出轴限速约束 |
-| `set_zero_reference` | commissioning 软件标零；`reference_joint_positions_deg` 为六关节参考姿态，`reference_pose_confirmed` 必须为 true。经 `pi_arm_tasks` 统一执行，返回参考编号 |
+| `set_zero_reference` | 维护模式软件标零。网页以状态中的 `mechanical_zero_joints_deg` 为参考角，通过 `reference_joint_positions_deg` 传入六个关节角（°）。现场确认后将 `reference_pose_confirmed` 设为 true，采集成功返回参考编号 |
 | `movej` / `movejs` / `movel` | 对应 ROS MoveJ / MoveJs / MoveL |
 | `preview_motion` | joint/output/ik/lin 只读预览 |
 | `enable_motor` / `disable_motor` / `reset_motor` / `reboot_motor` | 管理服务；reset 为清错，reboot 为选定电机重启 |

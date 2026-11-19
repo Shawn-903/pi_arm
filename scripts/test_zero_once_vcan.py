@@ -106,9 +106,10 @@ def main():
             assert missing.returncode != 0 and "--confirm-reference" in missing.stderr
             assert not emulator.frames_for(0x92), "missing confirmation started hardware polling"
             previous_id = None
-            for name, pose in (("zero", [0] * 6), ("known-pose", [1, 0, 0, 0, 0, 0])):
-                source = command if name == "zero" else capture
-                code, result = run_case(work, name, source + ["--reference-deg", *map(str, pose)])
+            for name, pose in (("packing", [0, 100.7, -85.6, 0, 0, 0]), ("zero", [0] * 6),
+                               ("known-pose", [1, 0, 0, 0, 0, 0])):
+                source = command if name == "packing" else capture + ["--reference-deg", *map(str, pose)]
+                code, result = run_case(work, name, source)
                 assert code == 0 and result["success"] and result["cleanup_success"], result
                 assert result["raw_protocol_positions_deg"] == angles
                 document = yaml.safe_load(zero.read_text())
@@ -119,7 +120,7 @@ def main():
                 assert saved["reference_joint_positions_rad"] == [math.radians(value) for value in pose]
                 previous_id = result["reference_id"]
                 assert lease_available(), "CAN lease survived successful exit"
-            print("PASS one-command zero: explicit confirmation, zero/custom pose, persisted IDs and service cleanup", flush=True)
+            print("PASS one-command zero: default packing pose, explicit zero and custom pose", flush=True)
             zero.rename(work / "reference-before-loss.yaml")
             for name in ("lost-file", "recapture"):
                 angles[0] += 72

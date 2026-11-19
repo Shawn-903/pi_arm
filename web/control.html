@@ -77,7 +77,7 @@
           ROS 2 Jazzy / Pi Arm R1
         </small>
         <div class="version-note">
-          Pi Arm V0.54
+          Pi Arm V0.55
         </div>
       </div>
     </aside>
@@ -428,15 +428,14 @@
                         <input id="presetSpeed" max="10" min="0.01" step="any" type="number" value="5"/>
                       </label>
                       <p>
-                        执行整臂关节运动，关节速度默认 5°/s、最高 10°/s，可在此调整，同时受网页输出轴限速约束。打包目标来自后端标定；零位目标为六个主动关节角
-                  0°。这两个按钮不会重设电机零点。
+                        打包姿态是机械零位。零位的六个关节角均为 0°。关节速度默认 5°/s，最高 10°/s，同时受输出轴限速约束。
                       </p>
                       <div class="endpoint-row">
                         <button class="btn-primary" data-preset="packing" disabled="" id="movePackingPose">
                           运动到打包姿态
                         </button>
                         <button class="btn-primary" data-preset="zero" disabled="" id="moveZeroPose">
-                          运动到零位姿态
+                          运动到零位
                         </button>
                         <button class="btn-red" data-cmd="stop_motion">
                           停止运动
@@ -449,7 +448,7 @@
                         打包姿态：等待连接
                       </div>
                       <div id="zeroPoseStatus" role="status">
-                        零位姿态：等待连接
+                        零位：等待连接
                       </div>
                     </fieldset>
                   </details>
@@ -577,10 +576,10 @@
                             六轴目标 · 多关节面板
                           </option>
                           <option value="zero">
-                            零位姿态
+                            零位
                           </option>
                           <option value="packing">
-                            打包姿态 · 当前标定
+                            打包姿态
                           </option>
                         </select>
                         <span id="viewerPreviewStatus">
@@ -1246,14 +1245,14 @@
               </div>
               <fieldset hidden="" id="zeroReferencePanel">
                 <legend>
-                  设置机械零位参考
+                  在机械零位标零
                 </legend>
                 <p>
-                  先将机械臂实际放到六个关节均为 0° 的机械零位，再采集当前编码器读数。此操作只保存软件零偏，不移动机械臂，也不写电机 ROM。
+                  将机械臂放到打包姿态并保持静止。J1 至 J6 的参考角为 <span id="zeroReferenceAngles">等待连接</span>。
                 </p>
                 <label>
                   <input id="zeroReferenceConfirmed" type="checkbox"/>
-                  我已确认实物处于机械零位，且六轴静止
+                  我已确认实物处于打包姿态，且六轴静止
                 </label>
                 <button disabled="" id="setZeroReference">
                   采集并保存软件零点
@@ -1414,7 +1413,7 @@
     </script>
     <script src="assets/diagnostics.js?v=20261116-diagnostics1">
     </script>
-    <script src="assets/control.js?v=V0.52">
+    <script src="assets/control.js?v=V0.55">
     </script>
     <script src="assets/interactive.js">
     </script>

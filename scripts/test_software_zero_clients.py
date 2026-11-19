@@ -37,9 +37,17 @@ def main():
         assert max(abs(value) for value in samples[-1].positions) < 1e-8
         print('PASS Python ZeroReferenceClient: confirmed reference applied through task service', flush=True)
 
+        command = ['ros2', 'run', 'pi_arm_tasks', 'pi_arm_zero', '--confirm-reference']
+        packing = json.loads(subprocess.check_output(command, text=True, timeout=12))
+        assert packing['success'], packing
+        wait(node, lambda: samples[-1].software_zero_id == packing['reference_id'])
+        expected = [math.radians(v) for v in (0, 100.7, -85.6, 0, 0, 0)]
+        assert len(samples[-1].positions) == len(expected)
+        assert all(abs(a - b) < 1e-6 for a, b in zip(samples[-1].positions, expected))
+        print('PASS CLI: default mechanical zero matches the packing pose', flush=True)
+
         output = subprocess.check_output([
-            'ros2', 'run', 'pi_arm_tasks', 'pi_arm_zero', '--confirm-reference',
-            '--reference-deg', '1', '0', '0', '0', '0', '0',
+            *command, '--reference-deg', '1', '0', '0', '0', '0', '0',
         ], text=True, timeout=12)
         cli = json.loads(output)
         assert cli['success'], cli

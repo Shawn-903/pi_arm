@@ -20,7 +20,7 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 from .commands import CommandGateway
-from .presets import PosePresets
+from .presets import PACKING_JOINTS_DEG, PosePresets
 from .protocol import point_precision
 from .state_payload import json_safe, robot_state_payload
 from .ros_bridge import RosBridge, monitor_state
@@ -146,6 +146,8 @@ class WebSocketGateway:
         body["preview_modes"] = ["joint", "output", "ik", "lin"] if preview and preview.service_is_ready() else []
         body["read_only"] = self.bridge.read_only
         body["commissioning"] = self.bridge.commissioning
+        if self.bridge.commissioning:
+            body["mechanical_zero_joints_deg"] = PACKING_JOINTS_DEG
         hardware = state.hardware if state else None
         body["teaching_available"] = not self.bridge.read_only and not self.bridge.commissioning
         body["preset_poses"] = getattr(self.bridge, "presets", PosePresets()).status(self.bridge, state)
