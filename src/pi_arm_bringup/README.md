@@ -21,8 +21,8 @@
 | --- | --- |
 | `hardware_type` | 正常 bringup 的后端类型，默认 `mock`；`real` 使用实机后端 |
 | `can_interface` | 实机或监测使用的 CAN 接口，默认 `can0` |
-| `calibration_file` | 基础标定文件，供硬件坐标换算和参考核验使用 |
-| `software_zero_file` | 持久化软件零点文件的绝对路径；默认空，已采集零点后需在后续启动中继续指定 |
+| `software_zero_file` | 自定义零点文件的绝对路径。实机默认按 CAN 接口自动选择 `~/.local/share/pi_arm/software-zero-can0.yaml` |
+| `calibration_file` | 需要指定首次采集的基础配置、使用旧版自定义标定或显式加载基础标定时填写 |
 | `allow_real_control` | 正常 bringup 的实机写入许可，需显式设置为 `true` |
 | `use_rviz` | 正常 bringup 是否打开 RViz |
 | `websocket_port` | 正常 bringup 和 commissioning 的 WebSocket 端口，默认 `8765` |

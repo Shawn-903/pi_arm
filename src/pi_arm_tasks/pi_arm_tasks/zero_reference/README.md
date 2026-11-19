@@ -12,14 +12,7 @@ bash scripts/zero_reference.sh --confirm-reference
 
 脚本会加载 ROS 和当前工作区环境，启动硬件维护服务与标零服务，等待电机反馈就绪后采集一次零点，保存结果，再关闭本次启动的服务。`--confirm-reference` 表示你已确认实物处于给定姿态；默认参考关节角均为零。
 
-默认使用 `can0`、包内的 `pack_reference_calibration.R10.recorded.yaml` 基础配置，保存到 `$HOME/.local/share/pi_arm/software-zero-can0.yaml`。其他参数可按实际配置指定：
-
-```bash
-bash scripts/zero_reference.sh --confirm-reference \
-  --can-interface can0 \
-  --calibration-file /path/to/base-calibration.yaml \
-  --software-zero-file "$HOME/.local/share/pi_arm/software-zero-can0.yaml"
-```
+默认使用 `can0`，将打包姿态、模型指纹和本次采集的零点一起保存到 `~/.local/share/pi_arm/software-zero-can0.yaml`。再次标零会更新同一文件。切换 CAN 接口时，文件名中的 `can0` 随接口名变化。
 
 采集其他已知姿态时，使用 `--reference-deg` 传入角度，单位为度，顺序为 `joint_01, joint_02, joint_04, joint_05, joint_06, joint_09`：
 
@@ -39,12 +32,7 @@ bash scripts/zero_reference.sh --confirm-reference \
 将机械臂放到参考姿态并保持静止，停止正常控制服务后，在仓库根目录启动维护模式：
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-hardware_share="$(ros2 pkg prefix --share pi_arm_hardware)"
-bash scripts/start_web.sh --commissioning \
-  calibration_file:="$hardware_share/config/pack_reference_calibration.R10.recorded.yaml" \
-  software_zero_file:="$HOME/.local/share/pi_arm/software-zero-can0.yaml"
+bash scripts/start_web.sh --commissioning
 ```
 
 该入口会启动 `pi_arm_zero_reference` 服务节点。网页“方向测试”中，将实物放到六关节机械零位，勾选确认后点击“采集并保存软件零点”。成功后显示参考编号，并通过 `HardwareState.software_zero_id` 发布。
@@ -53,7 +41,7 @@ bash scripts/start_web.sh --commissioning \
 
 接入已运行的维护服务时，使用 `pi_arm_zero` 客户端或 `ZeroReferenceClient`。它们调用 `/pi_arm/tasks/set_zero_reference`，复用服务的配置和保存路径。
 
-上面的网页启动命令已经包含所需服务。独立 ROS 程序也可以先启动 `pi_arm_bringup` 的 `monitor.launch.py`，设置 `commissioning:=true` 并传入相同文件参数，再在另一个已加载环境的终端执行 `ros2 run pi_arm_tasks pi_arm_zero_reference`。
+上面的网页启动命令已经包含所需服务。独立 ROS 程序也可以先启动 `pi_arm_bringup` 的 `monitor.launch.py`，设置 `commissioning:=true`，再在另一个已加载环境的终端执行 `ros2 run pi_arm_tasks pi_arm_zero_reference`。
 
 客户端命令行使用度，默认参考姿态为机械零位：
 
@@ -94,7 +82,9 @@ finally:
 
 ## 保存与后续运行
 
-零偏保存到 `software_zero_file`。正常控制启动时继续指定原基础 `calibration_file` 和这个软件零点文件，初始化时加载偏移，用于反馈及目标坐标换算。
+采集成功后，运行 `bash scripts/start_web.sh --monitor`，连接网页，核对关节反馈与实物参考姿态、诊断中的 `software_zero_id` 与采集返回的 `reference_id`。正常控制、只读和维护模式都会自动读取当前接口的零点。自定义位置时，采集用 `--software-zero-file`，启动用 `software_zero_file:=/绝对路径/zero.yaml`。
+
+首次采集会从包内 R10 读取基础配置。使用其他已批准配置时，可在首次采集时指定 `--calibration-file`。旧版零点也可读取，自定义基础配置继续用原路径指定，下次成功采集时升级为单文件。
 
 加载软件零点要求电机协议角度参考与采集时一致。断电、驱动重启或 0x80 关闭后，先核对实物姿态和编码器参考，再决定是否重新采集。零偏变化后重新核验已有点位。
 

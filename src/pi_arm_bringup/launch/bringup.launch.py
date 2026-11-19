@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
@@ -10,6 +10,7 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
+from pi_arm_tasks.zero_reference.files import configure_launch_references
 
 
 def generate_launch_description():
@@ -46,11 +47,8 @@ def generate_launch_description():
                 bitrate,
                 " cable_kinematics_file:=",
                 cable_kinematics_file,
-                " calibration_file:=",
-                calibration_file,
-                " software_zero_file:='",
-                LaunchConfiguration("software_zero_file"),
-                "'",
+                " ",
+                LaunchConfiguration("reference_xacro_args"),
                 " allow_real_control:=",
                 allow_real_control,
             ]
@@ -133,17 +131,8 @@ def generate_launch_description():
                 ),
                 description="Installed six-axis cable kinematics YAML",
             ),
-            DeclareLaunchArgument(
-                "calibration_file",
-                default_value=PathJoinSubstitution(
-                    [
-                        FindPackageShare("pi_arm_hardware"),
-                        "config",
-                        "pack_reference_calibration.template.yaml",
-                    ]
-                ),
-                description="Pack-reference actuator calibration YAML",
-            ),
+            DeclareLaunchArgument("calibration_file", default_value=""),
+            OpaqueFunction(function=configure_launch_references),
             DeclareLaunchArgument(
                 "allow_real_control",
                 default_value="false",

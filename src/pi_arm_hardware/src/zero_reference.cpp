@@ -35,7 +35,8 @@ ManagementResult RealBackend::set_zero_reference(
   }
   try {
     const auto output_path = std::filesystem::weakly_canonical(config_.software_zero_file);
-    if (output_path == std::filesystem::weakly_canonical(config_.calibration_file) ||
+    if ((output_path == std::filesystem::weakly_canonical(config_.calibration_file) &&
+      calibration_.software_zero_id.empty()) ||
       output_path == std::filesystem::weakly_canonical(config_.cable_kinematics_file))
     {return {false, 1004, "software zero must not overwrite base calibration or cable geometry"};}
     auto base = load_pack_reference_calibration(config_.calibration_file,

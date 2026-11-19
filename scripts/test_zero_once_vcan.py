@@ -79,6 +79,8 @@ def main():
     os.environ.update(ROS_DOMAIN_ID="112", ROS_AUTOMATIC_DISCOVERY_RANGE="LOCALHOST")
     work = args.log_dir or Path(tempfile.mkdtemp(prefix="pi-arm-zero-once-test-"))
     work.mkdir(parents=True, exist_ok=True)
+    os.environ["HOME"] = str(work.resolve() / "home")
+    Path.home().mkdir(exist_ok=True)
     cable = ROOT / "src/pi_arm_description/config/cable_kinematics.yaml"
     candidate = runpy.run_path(str(ROOT / "src/pi_arm_hardware/scripts/pi_arm_calibration_candidate"))
     mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36.0 if i <= 3 else 6.0, motor_direction=d)
@@ -90,10 +92,10 @@ def main():
     base = work / "base.yaml"
     base.write_text(yaml.safe_dump(data))
     base_before = base.read_bytes()
-    zero = work / "zero.yaml"
-    command = ["bash", str(ROOT / "scripts/zero_reference.sh"), "--confirm-reference",
-               "--can-interface", "vcan0", "--calibration-file", str(base),
-               "--cable-kinematics-file", str(cable), "--software-zero-file", str(zero)]
+    zero = Path.home() / ".local/share/pi_arm/software-zero-vcan0.yaml"
+    capture = ["bash", str(ROOT / "scripts/zero_reference.sh"), "--confirm-reference",
+               "--can-interface", "vcan0", "--cable-kinematics-file", str(cable)]
+    command = capture + ["--calibration-file", str(base)]
     emulator = Emulator()
     angles = [180.0, -360.0, 540.0, -120.0, 60.0, -30.0]
     emulator.reset(angles)
@@ -105,10 +107,14 @@ def main():
             assert not emulator.frames_for(0x92), "missing confirmation started hardware polling"
             previous_id = None
             for name, pose in (("zero", [0] * 6), ("known-pose", [1, 0, 0, 0, 0, 0])):
-                code, result = run_case(work, name, command + ["--reference-deg", *map(str, pose)])
+                source = command if name == "zero" else capture
+                code, result = run_case(work, name, source + ["--reference-deg", *map(str, pose)])
                 assert code == 0 and result["success"] and result["cleanup_success"], result
                 assert result["raw_protocol_positions_deg"] == angles
-                saved = yaml.safe_load(zero.read_text())["software_zero"]
+                document = yaml.safe_load(zero.read_text())
+                assert document["calibration"] == data["calibration"]
+                saved = document["software_zero"]
+                assert saved["schema_version"] == 2 and result["software_zero_file"] == str(zero)
                 assert saved["reference_id"] == result["reference_id"] != previous_id
                 assert saved["reference_joint_positions_rad"] == [math.radians(value) for value in pose]
                 previous_id = result["reference_id"]

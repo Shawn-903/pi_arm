@@ -5,6 +5,7 @@
 #include "pi_arm_transmission/config_loader.hpp"
 
 #include <gtest/gtest.h>
+#include <yaml-cpp/yaml.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -338,6 +339,12 @@ protected:
     config.actuators[4].motor_direction = -1;
     base.valid = true;
     base.data.approved = true;
+    base.data.schema_version = 1;
+    base.data.model_version = 3;
+    base.data.created_at_utc = "2026-11-01T00:00:00Z";
+    for (std::size_t i = 0; i < config.actuators.size(); ++i) {
+      base.data.joint_names[i] = config.actuators[i].joint_name;
+    }
     base.data.robot_id = "zero-test-robot";
     base.data.calibration_id = "base-reference";
     base.data.configuration_fingerprint = pi_arm_hardware::calibration_configuration_fingerprint(
@@ -407,6 +414,33 @@ TEST_F(SoftwareZero, InvalidCandidateLeavesCommittedReferenceUnchanged)
   std::swap(reversed[0], reversed[1]);
   EXPECT_THROW(pi_arm_hardware::load_software_zero_reference(
     path.string(), base, reversed, kinematics), std::exception);
+}
+
+TEST_F(SoftwareZero, SingleFileLoadsAloneAndLegacyIsUpgradedOnlyOnCapture)
+{
+  const auto saved = save();
+  const auto single = pi_arm_hardware::load_pack_reference_calibration(
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics);
+  ASSERT_TRUE(single.valid) << single.message;
+  EXPECT_EQ(single.software_zero_id, saved.software_zero_id);
+  EXPECT_EQ(single.software_output_offsets_rad, saved.software_output_offsets_rad);
+
+  auto document = YAML::LoadFile(path.string());
+  document.remove("calibration");
+  {std::ofstream out(path); out << document;}
+  EXPECT_THROW(pi_arm_hardware::load_software_zero_reference(
+    path.string(), base, config.actuators, kinematics), std::exception);
+  document["software_zero"]["schema_version"] = 1;
+  {std::ofstream out(path); out << document;}
+  const auto old_bytes = contents();
+  const auto legacy = pi_arm_hardware::load_software_zero_reference(
+    path.string(), base, config.actuators, kinematics);
+  EXPECT_EQ(legacy.software_output_offsets_rad, saved.software_output_offsets_rad);
+  EXPECT_EQ(contents(), old_bytes);
+  save("upgraded");
+  EXPECT_EQ(pi_arm_hardware::load_pack_reference_calibration(
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics).software_zero_id,
+    "upgraded");
 }
 
 TEST_F(SoftwareZero, MissingCorruptOrUnapprovedReferenceIsRejected)

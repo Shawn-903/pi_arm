@@ -22,6 +22,7 @@ import xacro
 import yaml
 
 from .client import ZeroReferenceClient, zero_request
+from .files import resolve_reference_files
 
 
 def _wait(node, condition, children, stopped, timeout, description, *, interruptible=True):
@@ -84,10 +85,9 @@ def main():
             raise ValueError("startup-timeout must be finite and positive")
         socket.if_nametoindex(args.can_interface)
         description = Path(get_package_share_directory("pi_arm_description"))
-        hardware = Path(get_package_share_directory("pi_arm_hardware"))
-        calibration = (args.calibration_file or hardware / "config/pack_reference_calibration.R10.recorded.yaml").expanduser().resolve()
+        calibration, zero = resolve_reference_files(
+            args.can_interface, args.calibration_file, args.software_zero_file, capture=True)
         cable = (args.cable_kinematics_file or description / "config/cable_kinematics.yaml").expanduser().resolve()
-        zero = (args.software_zero_file or Path.home() / f".local/share/pi_arm/software-zero-{args.can_interface}.yaml").expanduser().resolve()
         for path in (calibration, cable):
             if not path.is_file():
                 raise FileNotFoundError(path)

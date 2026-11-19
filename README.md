@@ -40,25 +40,20 @@ source install/setup.bash
 
 ### 实机正常控制
 
-供电、CAN 硬件和接口就绪后：
+供电和 CAN 就绪、已完成软件标零后，在树莓派启动实机控制。
 
 ```bash
-bash scripts/start_web.sh \
-  hardware_type:=real can_interface:=can0 allow_real_control:=true \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml
+bash scripts/start_web.sh hardware_type:=real allow_real_control:=true
 ```
 
-当前参考为 R10，打包关节角 `[0, 100.7, -85.6, 0, 0, 0]°`。R10 与 ROM 零点和绳索配置配套使用，重新装配或标零后需重新确认参考，步骤见 [硬件配置](src/pi_arm_hardware/config/README.md)。
-
-已采集软件零点时，后续启动继续使用原基础标定，并传入保存零点的绝对路径，例如 `software_zero_file:=$HOME/.local/share/pi_arm/software-zero-can0.yaml`。该参数默认为空，指定后加载持久化零偏。采集步骤与 Python 调用见 [任务包](src/pi_arm_tasks/README.md)。
+首次标零时，停止占用 CAN 的服务，确认实物在六关节机械零位并保持静止，执行 `bash scripts/zero_reference.sh --confirm-reference`。此后实机启动自动读取 `~/.local/share/pi_arm/software-zero-can0.yaml`，备份零点只需保存这份文件。其他已知参考姿态见[标零步骤](src/pi_arm_tasks/pi_arm_tasks/zero_reference/README.md)。
 
 DirectMove、输出轴和预设姿态使用关节插值，执行前确认沿途空间。笛卡尔 LIN 规划末端直线路径，并按已建模场景检查碰撞。
 
 ### 只读监测
 
 ```bash
-bash scripts/start_web.sh --monitor can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml
+bash scripts/start_web.sh --monitor
 ```
 
 用于查看电机反馈和诊断信息。标定无效时仍可查看原始电机数据。
@@ -66,8 +61,7 @@ bash scripts/start_web.sh --monitor can_interface:=can0 \
 ### 单轴方向测试
 
 ```bash
-bash scripts/start_web.sh --commissioning can_interface:=can0 \
-  calibration_file:=/home/cr/pi_arm/src/pi_arm_hardware/config/pack_reference_calibration.R10.recorded.yaml
+bash scripts/start_web.sh --commissioning
 ```
 
 用于核对电机、关节方向及执行单轴小步测试，网页操作见 [方向测试](web/README.md#方向测试)。
@@ -127,7 +121,7 @@ ros2 topic echo /pi_arm/state --once
 | 网页无法打开 | HTTP 启动终端、主机 IP、8000 端口及网络 |
 | 页面可打开但无法连接 | WebSocket 地址/8765 端口、网关进程；HTTP 与 WS 是两个服务 |
 | 六轴掉线或反馈过期 | CAN 接口、供电、驱动占用与启动日志 |
-| `CALIBRATION_INVALID` | R10 文件路径、approved、配置指纹和模型快照；见 [配置说明](src/pi_arm_hardware/config/README.md) |
+| `CALIBRATION_INVALID` | 核对零点文件、当前 CAN 接口、批准状态及模型指纹。见[配置说明](src/pi_arm_hardware/config/README.md) |
 | 有反馈但运动不可用 | 启动模式、使能、示教状态、控制许可、活动任务及关节轨迹控制器（JTC）是否 active |
 | 回零看起来很慢 | 同时检查关节速度与输出轴限速，绳索耦合会延长整臂同步时间 |
 
@@ -135,7 +129,7 @@ ros2 topic echo /pi_arm/state --once
 
 ## 备份与恢复
 
-版本管理使用 `main` 和工作分支 `refactor/code-organization`，当前版本为 `V0.52`。后续功能更新按 `V0.53`、`V0.54` 递增，较大版本调整由项目负责人指定；编号规则、使用与开发的区分及版本记录见 [版本管理](docs/versioning.md)。
+当前版本为 `V0.53`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
 
 历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
 
@@ -147,7 +141,7 @@ git switch --detach V0.5
 bash scripts/build.sh
 ```
 
-恢复后按上面的 R10 命令启动，并核对当前标定与实物参考。查看历史代码也可创建独立工作区：
+恢复后按对应版本的说明启动，并核对实物参考姿态。查看历史代码也可创建独立工作区：
 
 ```bash
 git worktree add --detach ../pi_arm-V0.5 V0.5
@@ -160,7 +154,7 @@ git worktree add --detach ../pi_arm-V0.5 V0.5
 | 数据 | 保存位置与恢复方式 |
 | --- | --- |
 | 源码、配置、接受的标定 | Git；标定数据与 `.cable.yaml` 必须配套 |
-| 软件零点 | 启动参数 `software_zero_file` 指定的文件；单独备份，后续启动继续传入同一路径，并核对实物参考 |
+| 软件零点 | 默认备份并还原 `~/.local/share/pi_arm/software-zero-can0.yaml`。启动后核对参考编号及实物姿态 |
 | 点位库 | 默认 `~/.local/share/pi_arm/points-real.json` / `points-mock.json`；网页导出备份，停止服务后恢复到相应 `points_file` |
 | 重复测试记录 | 当前浏览器内存；关闭、刷新或新测试前导出 JSON/CSV |
 | ROM 零点、绳索张紧状态 | 记录实物状态，恢复时在现场核对 |

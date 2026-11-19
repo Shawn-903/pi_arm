@@ -1,6 +1,4 @@
-#include "pi_arm_hardware/calibration.hpp"
-
-#include <yaml-cpp/yaml.h>
+#include "calibration_yaml.hpp"
 
 #include <cmath>
 #include <fstream>
@@ -104,7 +102,24 @@ CalibrationResult load_pack_reference_calibration(
     return invalid_result("calibration_file is empty");
   }
   try {
-    const YAML::Node document = YAML::LoadFile(path);
+    const auto document = YAML::LoadFile(path);
+    auto base = decode_pack_reference(document,
+      calibration_configuration_fingerprint(cable_kinematics_file, actuators), actuators, kinematics);
+    if (base.valid && document["software_zero"]) {
+      return decode_software_zero(document, base, actuators, kinematics);
+    }
+    return base;
+  } catch (const std::exception & error) {
+    return invalid_result(error.what());
+  }
+}
+
+CalibrationResult decode_pack_reference(
+  const YAML::Node & document, const std::string & expected_fingerprint,
+  const std::vector<ActuatorConfig> & actuators,
+  const pi_arm_transmission::CableKinematics & kinematics)
+{
+  try {
     const YAML::Node node = document["calibration"];
     if (!node || !node.IsMap()) {
       throw std::invalid_argument("top-level calibration map is required");
@@ -162,8 +177,6 @@ CalibrationResult load_pack_reference_calibration(
       }
     }
 
-    const auto expected_fingerprint =
-      calibration_configuration_fingerprint(cable_kinematics_file, actuators);
     if (result.data.configuration_fingerprint != expected_fingerprint) {
       throw std::invalid_argument(
               "calibration configuration_fingerprint mismatch: expected " +

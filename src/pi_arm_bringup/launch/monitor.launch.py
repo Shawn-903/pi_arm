@@ -1,14 +1,14 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from pi_arm_tasks.zero_reference.files import configure_launch_references
 
 
 def generate_launch_description():
     can_interface = LaunchConfiguration("can_interface")
     cable_kinematics_file = LaunchConfiguration("cable_kinematics_file")
-    calibration_file = LaunchConfiguration("calibration_file")
 
     description_file = PathJoinSubstitution(
         [FindPackageShare("pi_arm_description"), "urdf", "pi_arm.urdf.xacro"]
@@ -24,11 +24,8 @@ def generate_launch_description():
                 can_interface,
                 " cable_kinematics_file:=",
                 cable_kinematics_file,
-                " calibration_file:=",
-                calibration_file,
-                " software_zero_file:='",
-                LaunchConfiguration("software_zero_file"),
-                "'",
+                " ",
+                LaunchConfiguration("reference_xacro_args"),
                 " allow_real_control:=false",
             ]
         )
@@ -49,16 +46,8 @@ def generate_launch_description():
                     ]
                 ),
             ),
-            DeclareLaunchArgument(
-                "calibration_file",
-                default_value=PathJoinSubstitution(
-                    [
-                        FindPackageShare("pi_arm_hardware"),
-                        "config",
-                        "pack_reference_calibration.template.yaml",
-                    ]
-                ),
-            ),
+            DeclareLaunchArgument("calibration_file", default_value=""),
+            OpaqueFunction(function=configure_launch_references, kwargs={"monitor": True}),
             Node(
                 package="pi_arm_hardware",
                 executable="pi_arm_hardware_monitor_node",

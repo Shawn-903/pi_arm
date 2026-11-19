@@ -1,6 +1,5 @@
 #include "pi_arm_hardware/software_zero.hpp"
-
-#include <yaml-cpp/yaml.h>
+#include "calibration_yaml.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -17,6 +16,33 @@ namespace pi_arm_hardware
 {
 namespace
 {
+YAML::Node text_field(const std::string & value)
+{
+  YAML::Node node(value);
+  // Preserve timestamps and numeric-looking IDs as strings in other YAML readers.
+  node.SetTag("tag:yaml.org,2002:str");
+  return node;
+}
+
+YAML::Node pack_reference(const CalibrationData & data)
+{
+  YAML::Node node;
+  node["schema_version"] = data.schema_version;
+  node["robot_id"] = text_field(data.robot_id);
+  node["calibration_id"] = text_field(data.calibration_id);
+  node["approved"] = data.approved;
+  node["model_version"] = data.model_version;
+  node["created_at_utc"] = text_field(data.created_at_utc);
+  node["configuration_fingerprint"] = data.configuration_fingerprint;
+  for (std::size_t i = 0; i < kCalibrationAxisCount; ++i) {
+    node["joint_names"].push_back(data.joint_names[i]);
+    node["motor_ids"].push_back(static_cast<unsigned>(data.motor_ids[i]));
+    node["packing_pose_joint_rad"].push_back(data.packing_pose_joint_rad[i]);
+    node["raw_output_at_packing_rad"].push_back(data.raw_output_at_packing_rad[i]);
+  }
+  return node;
+}
+
 CalibrationVector6 vector6(const YAML::Node & node, const char * key)
 {
   const auto values = node[key];
@@ -33,7 +59,9 @@ CalibrationVector6 vector6(const YAML::Node & node, const char * key)
   return result;
 }
 
-CalibrationResult decode(
+}  // namespace
+
+CalibrationResult decode_software_zero(
   const YAML::Node & document, const CalibrationResult & base,
   const std::vector<ActuatorConfig> & actuators,
   const pi_arm_transmission::CableKinematics & kinematics)
@@ -52,12 +80,28 @@ CalibrationResult decode(
       throw std::invalid_argument("unknown software_zero field: " + item.first.as<std::string>());
     }
   }
-  if (node["schema_version"].as<int>() != 1 ||
+  const int version = node["schema_version"].as<int>();
+  if ((version != 1 && version != 2) ||
     node["robot_id"].as<std::string>() != base.data.robot_id ||
     node["base_calibration_id"].as<std::string>() != base.data.calibration_id ||
     node["configuration_fingerprint"].as<std::string>() != base.data.configuration_fingerprint)
   {
     throw std::invalid_argument("software zero does not match the base calibration/configuration");
+  }
+  if (version == 2 || document["calibration"]) {
+    const auto embedded = decode_pack_reference(
+      document, base.data.configuration_fingerprint, actuators, kinematics);
+    if (!embedded.valid) {
+      throw std::invalid_argument("invalid calibration in zero file: " + embedded.message);
+    }
+    if (embedded.data.robot_id != base.data.robot_id ||
+      embedded.data.calibration_id != base.data.calibration_id ||
+      embedded.data.created_at_utc != base.data.created_at_utc ||
+      embedded.data.packing_pose_joint_rad != base.data.packing_pose_joint_rad ||
+      embedded.data.raw_output_at_packing_rad != base.data.raw_output_at_packing_rad)
+    {
+      throw std::invalid_argument("zero file and selected base calibration differ");
+    }
   }
   const auto ids = node["motor_ids"];
   if (!ids.IsSequence() || ids.size() != 6) {
@@ -89,6 +133,8 @@ CalibrationResult decode(
   return result;
 }
 
+namespace
+{
 void atomic_write(const std::filesystem::path & path, const std::string & text)
 {
   if (!path.is_absolute() || path.filename().empty()) {
@@ -127,7 +173,7 @@ CalibrationResult load_software_zero_reference(
   const std::vector<ActuatorConfig> & actuators,
   const pi_arm_transmission::CableKinematics & kinematics)
 {
-  return decode(YAML::LoadFile(path), base, actuators, kinematics);
+  return decode_software_zero(YAML::LoadFile(path), base, actuators, kinematics);
 }
 
 CalibrationResult save_software_zero_reference(
@@ -142,19 +188,20 @@ CalibrationResult save_software_zero_reference(
     load_software_zero_reference(path, base, actuators, kinematics);
   }
   YAML::Node document;
+  document["calibration"] = pack_reference(base.data);
   auto node = document["software_zero"];
-  node["schema_version"] = 1;
-  node["reference_id"] = reference_id;
-  node["created_at_utc"] = created_at_utc;
-  node["robot_id"] = base.data.robot_id;
-  node["base_calibration_id"] = base.data.calibration_id;
+  node["schema_version"] = 2;
+  node["reference_id"] = text_field(reference_id);
+  node["created_at_utc"] = text_field(created_at_utc);
+  node["robot_id"] = text_field(base.data.robot_id);
+  node["base_calibration_id"] = text_field(base.data.calibration_id);
   node["configuration_fingerprint"] = base.data.configuration_fingerprint;
   for (std::size_t i = 0; i < 6; ++i) {
     node["motor_ids"].push_back(static_cast<int>(base.data.motor_ids[i]));
     node["reference_joint_positions_rad"].push_back(reference_joint_rad[i]);
     node["raw_protocol_positions_deg"].push_back(protocol_deg[i]);
   }
-  auto result = decode(document, base, actuators, kinematics);
+  auto result = decode_software_zero(document, base, actuators, kinematics);
   YAML::Emitter emitter;
   emitter.SetDoublePrecision(std::numeric_limits<double>::max_digits10);
   emitter << document;
