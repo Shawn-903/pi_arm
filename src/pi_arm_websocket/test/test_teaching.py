@@ -114,7 +114,7 @@ def test_queries_are_available_without_control(model,tmp_path):
     assert call(b,'get_state')['robot_state']=='DISABLED'
 
 
-@pytest.mark.parametrize('fault',['stale','moving','task','invalid','disconnected','motor_error','override'])
+@pytest.mark.parametrize('fault',['stale','moving','task','invalid','disconnected','manager_disconnected','motor_error','override'])
 def test_capture_rejects_unusable_feedback(model,tmp_path,fault):
     b=Bridge(model,tmp_path/'points.json');h=b.state.hardware;extra={}
     if fault=='stale':h.motor_fresh=[False]*6
@@ -122,6 +122,7 @@ def test_capture_rejects_unusable_feedback(model,tmp_path,fault):
     if fault=='task':b.state.task.status=1
     if fault=='invalid':h.kinematics_valid=False
     if fault=='disconnected':b.state=None
+    if fault=='manager_disconnected':b.state.state=RobotState.DISCONNECTED
     if fault=='motor_error':h.motor_error_codes=[8]*6
     if fault=='override':extra['values']=[0]*6
     with pytest.raises(ProtocolError):call(b,name='bad',kind='joint',source='feedback',revision=0,**extra)
@@ -137,6 +138,11 @@ def test_manual_validation_conflict_and_corrupt_file(model,tmp_path):
     with pytest.raises(ProtocolError,match='已变化'):call(b,**args)
     with pytest.raises(ProtocolError,match='名称已存在'):call(b,**dict(args,revision=1))
     assert b.points.list()==data
+    wrong_units=dict(exported, points=[dict(point, id='second', name='external', units='rad')])
+    for commit in (False, True):
+        with pytest.raises(ProtocolError, match='external'):
+            call(b,'point_import',document=wrong_units,revision=2,conflict='update',commit=commit)
+        assert b.points.list()==data
     b.points.path.write_text('{broken')
     with pytest.raises(ProtocolError,match='损坏'):call(b,**dict(args,revision=1))
     assert b.points.path.read_text()=='{broken'

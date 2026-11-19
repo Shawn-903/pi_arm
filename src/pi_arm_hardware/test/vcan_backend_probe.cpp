@@ -1,5 +1,5 @@
 // Virtual-CAN regression probe. The interface is deliberately fixed to vcan0.
-#include "pi_arm_hardware/backend.hpp"
+#include "vcan_probe_config.hpp"
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -9,20 +9,11 @@
 #include <algorithm>
 using namespace std::chrono_literals;
 int main(int argc, char **argv) {
-  if(argc!=4) return 2;
-  pi_arm_hardware::BackendConfig c;
-  c.can_interface="vcan0";
-  c.cable_kinematics_file=std::string(argv[1])+"/src/pi_arm_description/config/cable_kinematics.yaml";
-  c.calibration_file=argv[2]; c.commissioning=std::string(argv[3])=="commissioning";
-  c.allow_real_control=!c.commissioning;
-  std::vector<std::string> names{"joint_01","joint_02","joint_04","joint_05","joint_06","joint_09"};
-  std::vector<int> directions{1,-1,-1,-1,-1,1};
-  for(int i=0;i<6;i++) c.actuators.push_back({names[i],static_cast<uint8_t>(i+1),i<3?36.0:6.0,directions[i]});
-  c.joint_upper_limits_rad={3.141592654,1.757546556759,1.494001839708,.523598776,1.047197551,3.141592654};
-  for(double v:c.joint_upper_limits_rad)c.joint_lower_limits_rad.push_back(-v);
-  c.joint_velocity_limits_rad_s.assign(6,.1745329);
-  c.joint_feedback_tolerances_rad = {0, 3*3.141592653589793/180,
-    3*3.141592653589793/180, 0, 0, 0};
+  if (argc != 3) {return 2;}
+  auto c = vcan_probe_config(argv[1], "vcan0");
+  c.commissioning = std::string(argv[2]) == "commissioning";
+  c.read_only = false;
+  c.allow_real_control = !c.commissioning;
   pi_arm_hardware::RealBackend b(c); b.configure(); b.activate();
   std::this_thread::sleep_for(350ms);
   std::cout << "READY" << std::endl;

@@ -931,11 +931,17 @@ private:
     }
     message.stamp = now();
     message.controller_instance_id = controller_instance_id_;
-    auto state_input = message.hardware;
     if (stale) {
-      state_input.connected = false;
+      auto & hardware = message.hardware;
+      hardware.connected = false;
+      hardware.kinematics_valid = false;
+      hardware.control_permitted = false;
+      hardware.motor_test_permitted = false;
+      hardware.joint_test_permitted = false;
+      std::fill(hardware.fresh.begin(), hardware.fresh.end(), false);
+      std::fill(hardware.motor_fresh.begin(), hardware.motor_fresh.end(), false);
     }
-    message.state = aggregate_state(state_input, message.task);
+    message.state = aggregate_state(message.hardware, message.task);
     if (message.state == pi_arm_interfaces::msg::RobotState::READY &&
       task_claimed_.load() && still_frames_.load() < 3)
     {

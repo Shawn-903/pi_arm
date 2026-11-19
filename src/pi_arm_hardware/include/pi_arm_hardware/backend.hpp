@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pi_arm_hardware
@@ -40,6 +41,8 @@ struct BackendConfig
   double moving_speed_threshold_rad_s{0.00017453292519943296};
   double state_stale_timeout_sec{1.0};
 };
+
+BackendConfig backend_config_from_robot_description(const std::string & robot_description);
 
 struct HardwareSample
 {
@@ -168,7 +171,8 @@ private:
   std::atomic_bool stop_hold_active_{false};
   std::atomic_bool stop_hold_failed_{false};
   std::atomic_uint64_t stop_hold_epoch_{1U};
-  bool axis_test_raw_ready(bool require_still) const;
+  using MotorSnapshot = std::unordered_map<std::uint8_t, pi_arm_can::MotorState>;
+  bool axis_test_raw_ready(bool require_still, MotorSnapshot * feedback = nullptr) const;
   bool axis_test_active_{false};
   bool axis_test_stop_failed_{false};
   std::uint64_t axis_test_id_{0};

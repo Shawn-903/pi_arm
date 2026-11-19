@@ -17,7 +17,7 @@ CODE_MOTION_BUSY = 2003
 POINT_COMMANDS = {'point_list', 'point_save', 'point_delete', 'point_update', 'point_import', 'point_export'}
 EXECUTION_COMMANDS = {
     'session_open', 'session_close', 'session_heartbeat', 'execution_state',
-    'execution_pause', 'execution_resume', 'execution_stop', 'request_get', 'task_get',
+    'execution_pause', 'execution_resume', 'execution_stop', 'request_get', 'task_get', 'task_cancel',
     'program_list', 'program_get', 'program_save', 'program_delete', 'program_validate', 'program_start',
     'run_list', 'run_get', 'run_export', 'step_move', 'move_to_point', 'wait',
 }

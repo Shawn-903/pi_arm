@@ -13,6 +13,14 @@ import uuid
 from .protocol import CODE_INVALID_PARAMS, CODE_STATE_UNAVAILABLE, ProtocolError
 from .frames import quaternion
 
+POINT_UNITS = {'joint': 'deg', 'cartesian': 'mm,deg'}
+
+
+def check_point_units(point):
+    expected = POINT_UNITS[point['kind']]
+    if point.get('units') != expected:
+        raise ProtocolError(CODE_INVALID_PARAMS, f"点位「{point['name']}」需要使用 {expected} 单位")
+
 
 def vector(value):
     if (not isinstance(value, list) or len(value) != 6 or
@@ -140,6 +148,7 @@ class PointStore:
         incoming, ids, names = deepcopy(document['points']), set(), set()
         for point in incoming:
             self.validate(point)
+            check_point_units(point)
             identifier = point.get('id')
             if not isinstance(identifier, str) or not identifier or identifier in ids or point['name'].strip() in names:
                 raise ProtocolError(CODE_INVALID_PARAMS, '导入文件中点位编号或名称重复/无效')
@@ -213,7 +222,8 @@ def dispatch_points(bridge, command, params):
     observed = bridge.frame_model.feedback(hardware)
     joints, raw = None, None
     if source == 'feedback':
-        if ('values' in params or not observed['valid'] or not hardware.calibrated or
+        if (state is None or state.state == state.DISCONNECTED or 'values' in params or
+                not observed['valid'] or not hardware.calibrated or
                 state.task.status == 1 or hardware.axis_test_active or hardware.motion_stop_pending or
                 hardware.motion_stop_failed or len(hardware.motor_moving) != 6 or any(hardware.motor_moving) or
                 any(hardware.motor_errors) or any(hardware.motor_error_codes)):
@@ -237,7 +247,7 @@ def dispatch_points(bridge, command, params):
                  values=values, joint_angles_deg=joints, pose_mm_deg=pose, raw_protocol_positions_deg=raw,
                  orientation_xyzw=orientation,
                  base_frame='base_link', tool_frame='tool0', joint_names=bridge.frame_model.names,
-                 units='deg' if kind == 'joint' else 'mm,deg', rpy_convention='Rz(yaw) Ry(pitch) Rx(roll)',
+                 units=POINT_UNITS[kind], rpy_convention='Rz(yaw) Ry(pitch) Rx(roll)',
                  hardware_type=bridge.hardware_type, model_id=bridge.frame_model.model_id,
                  calibration_id=hardware.calibration_id if hardware else '',
                  feedback_stamp_sec=(hardware.stamp.sec + hardware.stamp.nanosec/1e9) if source == 'feedback' else None)

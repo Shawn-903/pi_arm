@@ -20,6 +20,7 @@ let acceptedRunId = null;
 let ownAxisTest = null;
 const axisTestRecords = [];
 const pending = new Map();
+const stopCommands = new Set(["stop_motion", "motor_stop", "execution_stop", "axis_test_stop"]);
 const motionCommands = new Set([
   "motor_move",
   "move",
@@ -63,6 +64,12 @@ function boolText(value) {
   if (value === true) return "是";
   if (value === false) return "否";
   return "--";
+}
+
+function showStopWarning(reason) {
+  const warning = document.getElementById("stopWarning");
+  warning.textContent = reason ? `停止未确认 · ${reason}` : "";
+  warning.hidden = !reason;
 }
 
 function statusClass(value, badWhenTrue = false) {
@@ -324,6 +331,7 @@ function connect() {
   ws.addEventListener("close", () => {
     for (const item of pending.values()) {
       clearTimeout(item.timer);
+      if (stopCommands.has(item.cmd)) showStopWarning("连接已断开，请核对机械臂状态");
       item.reject?.(new Error("连接已断开"));
     }
     pending.clear();
@@ -435,6 +443,7 @@ function sendCommand(cmd, params = {}, options = {}) {
   };
   const timer = setTimeout(() => {
     pending.delete(payload.msg_id);
+    if (stopCommands.has(cmd)) showStopWarning("控制器响应超时，请核对机械臂状态");
     options.reject?.(new Error("运动请求响应超时，结果未知"));
     if (["reset_motor", "reboot_motor"].includes(cmd))
       document.getElementById("recoveryResult").textContent =
@@ -489,7 +498,12 @@ function handleMessage(data) {
     const item = pending.get(data.msg_id);
     if (item) clearTimeout(item.timer);
     pending.delete(data.msg_id);
-    const ok = data.code === 0;
+    const isStop = stopCommands.has(item?.cmd);
+    const ok = data.code === 0 && !(isStop && data.data?.stop_confirmed === false);
+    const reason = isStop && data.data?.stop_confirmed === false
+      ? data.data.message || "控制器未确认停止"
+      : data.ms;
+    if (isStop) showStopWarning(ok ? "" : reason || "停止请求失败");
     if (["reset_motor", "reboot_motor"].includes(item?.cmd)) {
       const text = document.getElementById("recoveryResult");
       text.textContent = ok
@@ -504,7 +518,7 @@ function handleMessage(data) {
       else if (ok && motionCommands.has(item.cmd) && data.data?.task_id !== undefined)
         acceptedTaskId = data.data.task_id;
       if (ok) item.resolve(data.data);
-      else item.reject(new Error(data.ms || "请求失败"));
+      else item.reject(new Error(reason || "请求失败"));
       refreshControlGate();
       return;
     }
@@ -520,7 +534,7 @@ function handleMessage(data) {
     if (ok && data.data?.step_id) acceptedRunId = data.data.run_id;
     else if (ok && accepted) acceptedTaskId = data.data.task_id;
     log(
-      ok
+      isStop && !ok ? "停止失败" : ok
         ? accepted
           ? "运动请求已接受，等待任务结果"
           : "服务执行成功"
@@ -529,7 +543,7 @@ function handleMessage(data) {
         cmd: item?.cmd,
         msg_id: data.msg_id,
         code: data.code,
-        ms: data.ms,
+        ms: reason,
         data: data.data,
       },
     );
@@ -1154,7 +1168,11 @@ window.PiArmControl = {
     return new Promise((resolve, reject) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) { reject(new Error('请先连接机械臂')); return; }
       const id = msgId++;
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('请求超时，请查询运行状态')); }, 22000);
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        if (stopCommands.has(cmd)) showStopWarning("控制器响应超时，请核对机械臂状态");
+        reject(new Error('请求超时，请查询运行状态'));
+      }, 22000);
       pending.set(id, { cmd, timer, resolve, reject });
       ws.send(JSON.stringify({ type: 'req', msg_id: id, cmd, params }));
     });

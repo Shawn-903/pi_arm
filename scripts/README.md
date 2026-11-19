@@ -168,7 +168,7 @@ sudo ip link delete vcan_motion
 
 与现有服务并行开发时，可在 `/tmp` 指定独立 `colcon --log-base ... build --build-base ... --install-base ...` 编译测试硬件包。正式更新按根 README 停止服务、构建并重新启动。
 
-[测试到位与停止集成](test_arrival_integration.py) 在独立 ROS 域 82 启动生产 manager 与合成硬件/控制器服务：`ROS_DOMAIN_ID=82 python3 scripts/test_arrival_integration.py`。覆盖到位复核、运动/等待停止、Action 取消、迟到响应、保持失败与故障优先级，运行前确认该域空闲。
+[测试到位与停止集成](test_arrival_integration.py) 在独立 ROS 域 82 启动生产 manager 与合成硬件/控制器服务：`ROS_DOMAIN_ID=82 python3 scripts/test_arrival_integration.py`。只检查硬件断更和恢复时，加 `--case feedback`。完整用例还覆盖到位复核、运动/等待停止、Action 取消、迟到响应、保持失败与故障优先级。
 
 [manager 退出回归](test_manager_shutdown.py) 使用同类合成服务，在隔离 ROS 域 98 检查退出时的动作终态、租约释放、目标取消和进程退出码。加载待测工作区后，按改动选择 `--case`：`active`、`arming`、`late_accept`、`expired_accept`、`planning`、`preview`、`stop_failure` 或 `idle`。例如：`ROS_DOMAIN_ID=98 python3 scripts/test_manager_shutdown.py --case active --log-dir /tmp/manager-shutdown`。
 
@@ -191,7 +191,7 @@ python3 scripts/test_web_axis.py --stall
 
 ## 软件标零专项验证
 
-构建并 source 待测工作区后，在独占的 vcan0 上执行 `python3 scripts/test_software_zero_vcan.py`。它固定 ROS 域 84，启动生产监测节点和已有虚拟电机模拟器，使用临时参考文件，覆盖静止采样、无电机写入、保存失败、反馈过期、活动任务拒绝及程序重启重载。
+构建并 source 待测工作区后，在独占的 vcan0 上执行 `python3 scripts/test_software_zero_vcan.py`。只检查采集、编码器断更和写盘失败时，加 `--case capture`。虚拟 CAN 用例从项目 URDF 读取电机方向和减速比。脚本固定 ROS 域 84，启动生产监测节点和已有虚拟电机模拟器，使用临时参考文件，覆盖静止采样、无电机写入、保存失败、反馈过期、活动任务拒绝及程序重启重载。
 
 任务与网页验证使用另一个干净的 commissioning/vcan0 实例，配置临时 `software_zero_file`、虚拟基础标定、HTTP 8001 和 WS 8766。对同一测试实例分别运行：
 

@@ -4,12 +4,12 @@
 Source the tested install first. Requires unused vcan0; all records stay in /tmp.
 """
 
+import argparse
 import contextlib
 import json
 import math
 import os
 from pathlib import Path
-import runpy
 import signal
 import subprocess
 import tempfile
@@ -23,6 +23,7 @@ from pi_arm_interfaces.srv import AxisTest, SetZeroReference
 from rclpy.qos import qos_profile_sensor_data
 
 from test_motion_safety_vcan import Emulator
+from vcan_test_model import calibration_mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,6 +59,9 @@ def monitor(work, params):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--case', choices=('all', 'capture'), default='all')
+    args = parser.parse_args()
     info = json.loads(subprocess.check_output(['ip', '-d', '-j', 'link', 'show', 'vcan0']))[0]
     assert info['linkinfo']['info_kind'] == 'vcan', 'virtual CAN only'
     os.environ['ROS_DOMAIN_ID'] = '84'
@@ -77,15 +81,12 @@ def main():
             zero = work / 'references/zero.yaml'
             base = work / 'base.yaml'
             cable = ROOT / 'src/pi_arm_description/config/cable_kinematics.yaml'
-            candidate = runpy.run_path(str(ROOT / 'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
-            mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36.0 if i <= 3 else 6.0,
-                            motor_direction=direction)
-                       for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, -1, -1, -1, -1, 1]), 1)]
+            mapping, fingerprint = calibration_mapping(cable)
             data = yaml.safe_load((ROOT / 'src/pi_arm_hardware/config/pack_reference_calibration.template.yaml').read_text())
             data['calibration'].update(
                 approved=True, robot_id='VCAN-ONLY', calibration_id='SOFTWARE-ZERO-VCAN-ONLY',
                 packing_pose_joint_rad=[0.0] * 6, raw_output_at_packing_rad=[0.0] * 6,
-                configuration_fingerprint=candidate['configuration_fingerprint'](cable, mapping),
+                configuration_fingerprint=fingerprint,
             )
             base.write_text(yaml.safe_dump(data))
             base_before = base.read_bytes()
@@ -119,12 +120,15 @@ def main():
 
                 with emulator.lock:
                     emulator.drop_feedback.add(3)
-                wait(node, lambda: not samples[-1].motor_fresh[2], timeout=3)
-                assert not call(node, client, request).success
+                assert samples[-1].motor_fresh[2]
+                rejected = call(node, client, request)
+                assert not rejected.success, "a cached encoder angle was accepted for a new capture"
                 assert zero.read_bytes() == saved
                 with emulator.lock:
                     emulator.drop_feedback.clear()
-                wait(node, lambda: all(samples[-1].motor_fresh))
+                count = len(samples)
+                wait(node, lambda: len(samples) > count and all(samples[-1].motor_fresh)
+                     and samples[-1].motor_ages_sec[2] < 0.15)
 
                 zero.parent.chmod(0o500)
                 try:
@@ -134,6 +138,8 @@ def main():
                     zero.parent.chmod(0o700)
                 assert zero.read_bytes() == saved and list(samples[-1].software_output_offsets_rad) == offsets
                 print('PASS stale feedback and persistence failure leave the committed reference unchanged', flush=True)
+                if args.case == 'capture':
+                    return
 
                 start = call(node, axis, AxisTest.Request(operation='start', space='motor', axis_id=1,
                                                          delta_deg=1.0, speed_deg_s=5.0))

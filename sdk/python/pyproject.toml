@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pi-arm-sdk"
-version = "0.51.0"
+version = "0.51.1"
 description = "Pi Arm Python motion control client"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["websockets>=15,<18"]
-license = "Apache-2.0"
+license = {text = "Apache-2.0"}
 
 [tool.setuptools.packages.find]
 where = ["."]

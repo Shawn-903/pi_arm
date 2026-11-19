@@ -45,6 +45,8 @@ with Arm("192.168.2.110") as arm:
 
 `pause()` 在运动完成后暂停，等待步骤立即暂停计时。暂停后新的 SDK 运动调用等待继续，普通 Python 计算仍可执行。`resume()` 检查条件后继续；`stop()` 立即禁止下一步、取消当前运动并请求保持当前位置，返回停止确认结果。停止后的运行不能继续。
 
-请求超时会查询原请求的受理结果，不重新发送运动。运动等待超时会请求停止，并抛出 `MotionTimeout`。取消、失败、中断抛出 `ArmError`，包含 `code`、`task_id`、`run_id`、`step_id`、`stop_confirmed`。断线抛出 `ConnectionLost`。异常处理示例见 `examples/`。
+`handle.cancel()` 取消该句柄对应的活动步骤并结束其会话。步骤已结束时返回原结果，后续步骤可以继续运行。此接口需要网关支持 `task_cancel`。
+
+请求超时会查询原请求编号。创建会话的结果仍然未知时，SDK 关闭本次连接。运动等待超时会请求取消该步骤，并抛出 `MotionTimeout`。取消、失败、中断抛出 `ArmError`，包含 `code`、`task_id`、`run_id`、`step_id`、`stop_confirmed`。断线抛出 `ConnectionLost`。异常处理示例见 `examples/`。
 
 点位通过 `arm.points` 管理：`list(search='')`、`get(id_or_name)`、`save(...)`、`update(...)`、`delete(...)`、`export()`、`import_points(...)`。导入先以 `commit=False` 预检，再传预检返回的 `revision` 和 `commit=True` 提交；冲突默认 `skip`，`update` 仅更新相同 ID。`export()` 返回完整精度的存档。保存、编辑和载入点位均不会自动运动。

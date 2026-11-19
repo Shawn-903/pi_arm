@@ -185,6 +185,53 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.state()["session_id"], second)
         self.assertEqual(self.adapter.stop_count, 0)
 
+    async def test_handle_cancel_only_stops_its_active_step(self):
+        session = await self.open()
+        first = await self.submit(session, command="wait", seconds=0)
+        await self.engine.active.worker
+        second = await self.submit(session, command="wait", seconds=30)
+
+        async def cancel(step, connection="client"):
+            return await self.engine.command(
+                "task_cancel", dict(run_id=session, step_id=step["step_id"]), connection
+            )
+
+        self.assertEqual((await cancel(first))["status"], "SUCCEEDED")
+        with self.assertRaises(ExecutionError):
+            await cancel(second, "another connection")
+        self.assertEqual(self.engine.active.step["step_id"], second["step_id"])
+        self.assertEqual(self.adapter.stop_count, 0)
+        self.assertTrue((await cancel(second))["stop_confirmed"])
+        self.assertEqual((await cancel(second))["status"], "CANCELED")
+        self.assertEqual(self.adapter.stop_count, 1)
+
+    async def test_disconnect_during_acquire_only_releases_its_lease(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        lease = self.adapter.lease
+
+        async def delayed_lease(operation, token, name=""):
+            if operation == "acquire":
+                entered.set()
+                await release.wait()
+            return await lease(operation, token, name)
+
+        self.adapter.lease = delayed_lease
+        for connection, owner in (("first", "another-owner"), ("second", "")):
+            entered.clear()
+            release.clear()
+            self.adapter.token = owner
+            opening = asyncio.create_task(self.engine.command(
+                "session_open", dict(request_id=connection), connection
+            ))
+            await entered.wait()
+            await self.engine.command("connection_lost", {}, connection)
+            release.set()
+            with self.assertRaises(ExecutionError):
+                await opening
+            self.assertEqual(self.adapter.token, owner)
+            self.assertEqual(self.adapter.stop_count, 0)
+            self.assertIsNone(self.engine.active)
+
     async def test_stop_during_program_freeze_prevents_start(self):
         entered, release = asyncio.Event(), asyncio.Event()
 

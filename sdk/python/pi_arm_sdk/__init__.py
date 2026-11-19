@@ -3,4 +3,4 @@
 from .client import Arm, ArmError, ConnectionLost, MotionHandle, MotionResult, MotionTimeout
 
 __all__ = ["Arm", "ArmError", "ConnectionLost", "MotionHandle", "MotionResult", "MotionTimeout"]
-__version__ = "0.51.0"
+__version__ = "0.51.1"

@@ -65,8 +65,27 @@ class Engine:
             self.closed_connections.add(connection)
             run = self.active
             if run and run.doc["mode"] == "sdk" and run.connection == connection:
-                await self.stop(run, "脚本连接已断开", 3102)
+                if run.token:
+                    await self.stop(run, "脚本连接已断开", 3102)
+                else:
+                    run.abort.set()
             return {}
+        if command == "task_cancel":
+            run_id, step_id = params.get("run_id"), params.get("step_id")
+            if not run_id or not step_id:
+                raise ValueError("取消任务需要运行编号和步骤编号")
+            run = self.active
+            if run and run.doc["run_id"] == run_id and run.step and run.step["step_id"] == step_id:
+                if run.step["status"] in TERMINAL:
+                    return deepcopy(run.step)
+                self.owned({"session_id": run_id}, connection)
+                # 在同一事件循环中核对当前步骤并设置停止标志，然后才等待硬件。
+                await self.stop(run, "用户取消任务")
+                return deepcopy(run.doc)
+            step = await self.db("get", "steps", step_id)
+            if step["run_id"] != run_id or step["status"] not in TERMINAL:
+                raise ExecutionError(3101, "该任务不是当前运行的活动步骤")
+            return step
         if command in ("execution_stop", "execution_pause", "execution_resume"):
             run = self.active
             if not run:
@@ -91,6 +110,7 @@ class Engine:
                 raise ExecutionError(3101, "本次运行已经结束")
             if command == "execution_stop":
                 await self.stop(run, "用户停止")
+                return dict(deepcopy(run.doc), service_instance_id=self.instance_id)
             elif command == "execution_pause":
                 if run.abort.is_set():
                     raise ExecutionError(3101, "本次运行已经停止")
@@ -327,16 +347,19 @@ class Engine:
             run.token = lease["token"]
             run.doc["controller_instance_id"] = lease["controller_instance_id"]
             if run.abort.is_set() or (mode == "sdk" and connection in self.closed_connections):
-                await self.adapter.stop()
+                token, run.token = run.token, ""
+                await self.adapter.lease("release", token)
                 raise ExecutionError(3101, "运行在受理期间被停止")
             run.doc["status"] = "RUNNING"
             await self.record(run)
+            if run.abort.is_set():
+                raise ExecutionError(3101, "运行在受理期间被停止")
             run.watcher = asyncio.create_task(self.watch(run))
             return run
         except Exception:
             if run.token:
                 await self.stop(run, "会话创建失败", 3101)
-            elif self.active is run:
+            elif self.active is run and run.stop_task is None:
                 self.active = None
             raise
 

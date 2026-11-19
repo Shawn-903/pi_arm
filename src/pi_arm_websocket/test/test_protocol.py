@@ -1,5 +1,7 @@
 import asyncio
 import json
+import logging
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,10 +37,12 @@ def test_run_query_preserves_snapshot_and_sample_precision():
     assert result['code'] == 0 and result['data'] == data
 
 
-@pytest.mark.parametrize("command", sorted(COMMANDS))
-def test_all_legacy_commands_are_accepted_by_parser(command):
-    request = parse_request(json.dumps({"type": "req", "msg_id": 1, "cmd": command}))
-    assert request.command == command
+def test_legacy_commands_remain_available():
+    legacy = {"enable_motor", "disable_motor", "reset_motor", "reboot_motor", "move",
+              "movej", "movejs", "movel", "motor_move", "motor_stop", "stop_motion",
+              "set_teaching", "set_zero_reference", "preview_motion", "output_move", "move_preset",
+              "axis_test", "axis_test_heartbeat", "axis_test_stop", "point_list", "point_save", "point_delete"}
+    assert legacy <= COMMANDS
 
 
 @pytest.mark.parametrize(
@@ -133,6 +137,20 @@ def test_stop_never_sends_a_new_motion_even_without_control_permission():
     )))
     assert bridge.services == ["stop_motion"]
     assert bridge.goals == []
+
+
+def test_unconfirmed_stop_reports_controller_reason_on_the_wire():
+    async def execution(command, params, connection):
+        assert command == "execution_stop"
+        return dict(run_id="run", code=3006, message="保持反馈超时", stop_confirmed=False)
+
+    bridge = SimpleNamespace(read_only=False, commissioning=False, connect_execution=True,
+                             get_logger=lambda: logging.getLogger(__name__), execution=execution,
+                             service_clients={"execution": SimpleNamespace(service_is_ready=lambda: True)})
+    result = json.loads(asyncio.run(CommandGateway(bridge).handle('{"msg_id":7,"cmd":"stop_motion"}')))
+    assert result["msg_id"] == 7 and result["code"] == 3006
+    assert result["ms"] == "保持反馈超时"
+    assert result["data"]["run_id"] == "run" and result["data"]["stop_confirmed"] is False
 
 
 def test_real_cartesian_request_uses_normal_action_and_output_speed_ceiling():

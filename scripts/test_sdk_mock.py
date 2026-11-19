@@ -39,6 +39,8 @@ def main():
             with ThreadPoolExecutor() as pool:
                 waiting = pool.submit(arm.wait, 0.8)
                 until(lambda: observer._rpc("execution_state").get("phase") == "wait")
+                assert task.cancel()["status"] == "SUCCEEDED"
+                assert not waiting.done()
                 observer.pause()
                 time.sleep(0.9)
                 assert not waiting.done()

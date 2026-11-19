@@ -62,7 +62,7 @@ class MotionHandle:
             try:
                 record = self.query()
             except FutureTimeout:
-                confirmed = self.arm._stop_after_error(self.run_id)
+                confirmed = self.arm._stop_after_error(self.run_id, self.step_id)
                 raise MotionTimeout(
                     3107,
                     "任务状态查询超时，已请求停止",
@@ -90,7 +90,7 @@ class MotionHandle:
                     record,
                 )
             if deadline is not None and time.monotonic() >= deadline:
-                confirmed = self.arm._stop_after_error(self.run_id)
+                confirmed = self.arm._stop_after_error(self.run_id, self.step_id)
                 raise MotionTimeout(
                     3107,
                     "等待运动超时，已请求停止",
@@ -102,7 +102,7 @@ class MotionHandle:
             self.arm._closed.wait(0.05)
 
     def cancel(self):
-        return self.arm._rpc("execution_stop", dict(run_id=self.run_id), timeout_s=20.0)
+        return self.arm._cancel_task(self.run_id, self.step_id)
 
 
 class Points:
@@ -232,7 +232,11 @@ class Arm:
                 )
             response = future.result(timeout=timeout_s or self.request_timeout_s)
             if response["code"]:
-                raise ArmError(response["code"], response.get("ms", "请求失败"))
+                detail = response.get("data") or {}
+                raise ArmError(response["code"], response.get("ms", "请求失败"),
+                               task_id=detail.get("task_id", 0), run_id=detail.get("run_id", ""),
+                               step_id=detail.get("step_id", ""),
+                               stop_confirmed=detail.get("stop_confirmed"))
             return response["data"]
         finally:
             with self._lock:
@@ -250,11 +254,18 @@ class Arm:
                     result = self._rpc("request_get", dict(request_id=params["request_id"]))["accepted"]
                     if result is not None:
                         return result
-                except FutureTimeout:
+                except ConnectionLost:
+                    raise
+                except (FutureTimeout, ArmError):
                     break
                 self._closed.wait(0.1)
-            confirmed = self._stop_after_error()
-            raise ArmError(3107, "请求受理结果未知，已请求停止", stop_confirmed=confirmed)
+            if not params.get("session_id"):
+                # 关闭发起请求的连接，服务端按连接回收迟到的 SDK 会话。
+                self._socket.close()
+                raise ArmError(3107, f"请求 {params['request_id']} 的受理结果未知，连接已关闭")
+            confirmed = self._stop_after_error(params["session_id"])
+            raise ArmError(3107, f"请求 {params['request_id']} 的受理结果未知，已请求停止",
+                           run_id=params["session_id"], stop_confirmed=confirmed)
 
     def _heartbeats(self):
         while not self._closed.wait(0.5):
@@ -264,7 +275,8 @@ class Arm:
                     self._rpc("session_heartbeat", dict(session_id=session["session_id"]), timeout_s=1.2)
                 except ArmError as error:
                     if error.code == 3101:
-                        self._session = None
+                        if self._session is session:
+                            self._session = None
                     else:
                         self._socket.close()
                 except Exception:
@@ -279,7 +291,9 @@ class Arm:
         while time.monotonic() < deadline:
             state = self.get_state()
             values = state.get("motor_enabled", [])
-            if state.get("state_available") and len(values) == 6 and all(v == enabled for v in values):
+            fresh = state.get("motor_fresh", [])
+            if (state.get("state_available") and len(fresh) == 6 and all(fresh)
+                    and len(values) == 6 and all(v == enabled for v in values)):
                 return state
             self._closed.wait(0.05)
         raise ArmError(2001, "使能状态未在期限内得到确认")
@@ -302,10 +316,11 @@ class Arm:
             self._stop_after_error(session["run_id"])
             raise
         else:
-            if self._session:
+            if self._session is session:
                 self._rpc("session_close", dict(session_id=session["session_id"]))
         finally:
-            self._session = None
+            if self._session is session:
+                self._session = None
 
     def _ready(self):
         session = self._session
@@ -477,28 +492,47 @@ class Arm:
         return dict(session_id=self._session["session_id"]) if self._session else {}
 
     def stop(self):
-        result = self._rpc("execution_stop", self._session_params(), timeout_s=20.0)
-        self._session = None
+        session = self._session
+        params = dict(session_id=session["session_id"]) if session else {}
+        try:
+            result = self._rpc("execution_stop", params, timeout_s=20.0)
+        except ArmError as error:
+            if error.stop_confirmed is False and session is self._session:
+                self._session = None
+            raise
+        if session is self._session:
+            self._session = None
         if not result.get("stop_confirmed"):
             raise ArmError(
                 result.get("code") or 3006, result.get("message", "停止未确认"), stop_confirmed=False
             )
         return result
 
-    def _stop_after_error(self, run_id=None):
+    def _cancel_task(self, run_id, step_id):
+        result = self._rpc("task_cancel", dict(run_id=run_id, step_id=step_id), timeout_s=20.0)
+        if result.get("session_id") == run_id and (self._session or {}).get("run_id") == run_id:
+            self._session = None
+        if result.get("stop_confirmed") is False:
+            raise ArmError(result.get("code") or 3006, result.get("message") or "停止未确认",
+                           run_id=run_id, step_id=step_id, task_id=result.get("task_id", 0),
+                           stop_confirmed=False)
+        return result
+
+    def _stop_after_error(self, run_id, step_id=None):
         try:
-            run_id = run_id or (self._session or {}).get("run_id")
-            if run_id:
-                result = self._rpc("execution_stop", dict(run_id=run_id), timeout_s=20.0)
+            if step_id:
+                return self._cancel_task(run_id, step_id).get("stop_confirmed")
+            result = self._rpc("execution_stop", dict(run_id=run_id), timeout_s=20.0)
+            if (self._session or {}).get("run_id") == run_id:
                 self._session = None
-                return result.get("stop_confirmed", False)
-            return self.stop().get("stop_confirmed", False)
+            return result.get("stop_confirmed", False)
         except Exception:
             return False
 
     def close(self):
-        if self._session and not self._closed.is_set():
-            self._stop_after_error()
+        session = self._session
+        if session and not self._closed.is_set():
+            self._stop_after_error(session["run_id"])
         self._session = None
         self._socket.close()
         self._closed.set()

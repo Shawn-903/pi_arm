@@ -10,7 +10,6 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import runpy
 import subprocess
 import tempfile
 import time
@@ -20,19 +19,18 @@ import xacro
 import yaml
 
 from test_motion_safety_vcan import Emulator, backend, command, readline
+from vcan_test_model import calibration_mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_calibration(work):
-    candidate = runpy.run_path(str(ROOT / 'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
     cable = ROOT / 'src/pi_arm_description/config/cable_kinematics.yaml'
-    mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36 if i <= 3 else 6, motor_direction=d)
-               for i, (name, d) in enumerate(zip(candidate['JOINT_NAMES'], [1, -1, -1, -1, -1, 1]), 1)]
+    _, fingerprint = calibration_mapping(cable)
     data = yaml.safe_load((ROOT / 'src/pi_arm_hardware/config/pack_reference_calibration.template.yaml').read_text())
     data['calibration'].update(approved=True, robot_id='VCAN-ONLY', calibration_id='LIFECYCLE-VCAN-ONLY',
                               packing_pose_joint_rad=[0.] * 6, raw_output_at_packing_rad=[0.] * 6,
-                              configuration_fingerprint=candidate['configuration_fingerprint'](cable, mapping))
+                              configuration_fingerprint=fingerprint)
     path = work / 'zero.yaml'
     path.write_text(yaml.safe_dump(data))
     return path, cable
@@ -131,14 +129,15 @@ def check_plugin(probe, work, calibration, cable, emulator, log_dir):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--probe', required=True, type=Path)
-    parser.add_argument('--log-dir', required=True, type=Path)
+    parser.add_argument('--probe', type=Path)
+    parser.add_argument('--log-dir', type=Path)
     parser.add_argument('--case', choices=('all', 'backend', 'plugin'), default='all')
     args = parser.parse_args()
+    if args.case != 'backend' and (not args.probe or not args.log_dir):
+        parser.error('plugin checks require --probe and --log-dir')
     assert os.environ.get('ROS_DOMAIN_ID') == '100', 'Use isolated ROS domain 100'
     link = json.loads(subprocess.check_output(['ip', '-d', '-j', 'link', 'show', 'vcan0']))[0]
     assert link['linkinfo']['info_kind'] == 'vcan', 'requires virtual CAN'
-    args.log_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='backend-lifecycle-') as folder:
         work = Path(folder)
         calibration, cable = make_calibration(work)
@@ -147,6 +146,7 @@ def main():
             if args.case in ('all', 'backend'):
                 check_backend(work, calibration, emulator)
             if args.case in ('all', 'plugin'):
+                args.log_dir.mkdir(parents=True, exist_ok=True)
                 check_plugin(args.probe.resolve(), work, calibration, cable, emulator, args.log_dir)
         finally:
             emulator.close()

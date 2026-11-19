@@ -51,6 +51,11 @@ class CommandGateway:
                 f"params={self._params_for_log(request.params)}"
                 )
             data = await self.dispatch(request, connection_id)
+            if (request.command in ('execution_stop', 'stop_motion', 'motor_stop') and
+                    data.get('stop_confirmed') is False):
+                reason = data.get('message') or "停止未确认"
+                self.bridge.get_logger().warning(f"停止未确认: {reason}")
+                return response(msg_id, data.get('code') or 3006, reason, data, precise=True)
             summary = ({'revision': data.get('revision'), 'point_count': len(data.get('points', []))}
                        if request.command in POINT_COMMANDS else
                        data.get('message') if request.command == 'preview_motion' else
@@ -82,7 +87,7 @@ class CommandGateway:
                 return dict(protocol_version=1, version='0.51', hardware_type=self.bridge.hardware_type,
                             read_only=self.bridge.read_only, commissioning=self.bridge.commissioning,
                             features=['points'] if self.bridge.read_only or self.bridge.commissioning else
-                            ['sessions', 'programs', 'steps', 'points', 'history'],
+                            ['sessions', 'programs', 'steps', 'task_cancel', 'points', 'history'],
                             units=dict(joints='deg', position='mm', orientation='deg'),
                             model=self.bridge.frame_model.metadata(),
                             motion_parameters=dict(angular_acceleration_independent=False,

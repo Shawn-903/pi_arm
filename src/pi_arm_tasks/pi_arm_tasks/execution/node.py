@@ -14,6 +14,7 @@ from pi_arm_interfaces.msg import ExecutionState
 from pi_arm_interfaces.srv import ControlSession, ExecutionCommand, StopMotion
 from pi_arm_websocket.commands import CommandGateway
 from pi_arm_websocket.frames import multiply, quaternion, pose_record
+from pi_arm_websocket.points import check_point_units
 from pi_arm_websocket.protocol import Request
 from pi_arm_websocket.ros_bridge import RosBridge
 from pi_arm_websocket.state_payload import robot_state_payload, json_safe
@@ -53,13 +54,18 @@ class Adapter:
 
     async def stop(self):
         await self.bridge.call_service("stop_motion", StopMotion.Request())
+        before = self.bridge.state_snapshot()
+        stamp = before.hardware.stamp if before else None
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             state = self.bridge.state_snapshot()
-            if state:
-                if state.hardware.motion_stop_failed:
+            if state and state.hardware.stamp != stamp:
+                hardware = state.hardware
+                if hardware.motion_stop_failed:
                     raise ExecutionError(3006, "当前位置保持失败")
-                if state.task.status != 1 and not state.hardware.motion_stop_pending:
+                stationary = (len(hardware.motor_moving) == 6 and not any(hardware.motor_moving))
+                if (hardware.connected and len(hardware.motor_fresh) == 6 and all(hardware.motor_fresh) and stationary
+                        and state.task.status != 1 and not hardware.motion_stop_pending):
                     return
             await asyncio.sleep(0.02)
         raise ExecutionError(3006, "停止后未收到静止终态")
@@ -125,6 +131,7 @@ class Adapter:
         if len(matches) != 1:
             raise ValueError("点位不存在或名称不唯一")
         point = matches[0]
+        check_point_units(point)
         state = self.bridge.state_snapshot()
         if (
             point.get("hardware_type") != self.bridge.hardware_type

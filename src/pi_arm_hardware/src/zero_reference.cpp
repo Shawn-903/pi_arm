@@ -49,20 +49,39 @@ ManagementResult RealBackend::set_zero_reference(
     const auto fingerprint = calibration_configuration_fingerprint(
       config_.cable_kinematics_file, config_.actuators);
 
+    using Clock = std::chrono::steady_clock;
+    constexpr int sample_count = 6;
+    if (!driver_) {return {false, 2001, "CAN driver is unavailable"};}
+    const auto generation = driver_->connection_generation();
+    std::array<Clock::time_point, kCalibrationAxisCount> previous;
+    previous.fill(Clock::now());
     CalibrationVector6 first{}, protocol{};
-    for (int sample = 0; sample < 6; ++sample) {
-      if (sample != 0) {std::this_thread::sleep_for(std::chrono::milliseconds(20));}
-      if (!axis_test_raw_ready(true)) {
-        return {false, 2001, "software zero requires six fresh, stationary, error-free motors"};
-      }
-      const auto snapshot = driver_->snapshot();
-      for (std::size_t i = 0; i < 6; ++i) {
-        const auto value = snapshot.at(config_.actuators[i].motor_id).protocol_angle_deg;
-        if (sample == 0) {first[i] = value;}
-        if (std::abs(value - first[i]) > 0.02 + 1e-9) {
-          return {false, 2001, "encoder position changed while capturing software zero"};
+    for (int sample = 0; sample < sample_count; ++sample) {
+      const auto deadline = Clock::now() + std::chrono::milliseconds(300);
+      MotorSnapshot snapshot;
+      while (true) {
+        if (!axis_test_raw_ready(true, &snapshot) || driver_->connection_generation() != generation) {
+          return {false, 2001, "software zero requires six fresh, stationary, error-free motors"};
         }
-        protocol[i] += value / 6.0;
+        bool all_updated = true;
+        for (std::size_t i = 0; i < previous.size(); ++i) {
+          const auto & motor = snapshot.at(config_.actuators[i].motor_id);
+          if (sample > 0 && std::abs(motor.protocol_angle_deg - first[i]) > 0.02 + 1e-9) {
+            return {false, 2001, "encoder position changed while capturing software zero"};
+          }
+          if (motor.angle_update <= previous[i]) {all_updated = false;}
+        }
+        if (all_updated) {break;}
+        if (Clock::now() >= deadline) {
+          return {false, 2001, "timed out waiting for new encoder feedback on all six motors"};
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      for (std::size_t i = 0; i < previous.size(); ++i) {
+        const auto & motor = snapshot.at(config_.actuators[i].motor_id);
+        previous[i] = motor.angle_update;
+        if (sample == 0) {first[i] = motor.protocol_angle_deg;}
+        protocol[i] += motor.protocol_angle_deg / sample_count;
       }
     }
     const auto time = std::time(nullptr);

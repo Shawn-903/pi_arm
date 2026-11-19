@@ -50,6 +50,21 @@ def main():
                 '!document.querySelector("[data-step-axis]").disabled'
             )
             assert "0.20" in page.locator('[data-step-feedback="1"]').inner_text()
+            for confirmed in (False, True):
+                page.locator("#globalStop").click()
+                page.wait_for_function("pending.size===1")
+                request = sent[-1]
+                assert request["cmd"] == "stop_motion"
+                sockets[0].send(json.dumps(dict(
+                    type="rsp", msg_id=request["msg_id"], code=0, ms="ok",
+                    data=dict(stop_confirmed=confirmed, message="" if confirmed else "保持反馈超时"),
+                )))
+                page.wait_for_function("pending.size===0")
+                warning = page.locator("#stopWarning")
+                assert warning.is_visible() == (not confirmed)
+                if not confirmed:
+                    assert "保持反馈超时" in warning.inner_text()
+                    assert "停止失败" in page.locator("#commandLog").text_content()
             for space, axis, sign, delta in [
                 ("joint", 4, 1, 0.2),
                 ("position", 1, -1, 0.5),

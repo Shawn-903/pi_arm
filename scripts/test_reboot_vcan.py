@@ -3,7 +3,6 @@
 Source the intended install/setup.bash first. Does not change calibration files.
 """
 import json
-import runpy
 import socket
 import subprocess
 import tempfile
@@ -13,6 +12,8 @@ from pathlib import Path
 import yaml
 from ament_index_python.packages import get_package_prefix
 from vcan_motor_emulator import CAN_BASE, CAN_FRAME, Motor, response
+
+from vcan_test_model import calibration_mapping, write_probe_description
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -51,23 +52,21 @@ def main():
         work=Path(folder);cal=work/'zero.yaml'
         data=yaml.safe_load((ROOT/'docs/calibration-history/pack_reference_calibration.R02.recorded.yaml').read_text())
         cable=ROOT/'src/pi_arm_description/config/cable_kinematics.yaml'
-        candidate=runpy.run_path(str(ROOT/'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
-        # Mirror the actual actuator mappings and current cable config.
-        mapping=[dict(joint_name=name,motor_id=i,protocol_angle_ratio=36.0 if i<=3 else 6.0,motor_direction=d)
-                 for i,(name,d) in enumerate(zip(candidate['JOINT_NAMES'],[1,1,-1,-1,-1,1]),1)]
+        _, fingerprint = calibration_mapping(cable)
         data['calibration'].update(robot_id='VCAN-ONLY',calibration_id='REBOOT-VCAN-ONLY',
                                   packing_pose_joint_rad=[0.]*6,raw_output_at_packing_rad=[0.]*6,
-                                  configuration_fingerprint=candidate['configuration_fingerprint'](cable,mapping))
+                                  configuration_fingerprint=fingerprint)
         cal.write_text(yaml.safe_dump(data))
         packages=['pi_arm_hardware','pi_arm_can','pi_arm_transmission'];exe=work/'probe'
         subprocess.run(['g++','-std=c++17',str(ROOT/'src/pi_arm_hardware/test/vcan_reboot_probe.cpp'),
                         *['-I'+str(ROOT/'src'/p/'include') for p in packages],
                         *['-L'+str(Path(get_package_prefix(p))/'lib') for p in packages],
                         *['-l'+p for p in packages],'-pthread','-o',str(exe)],check=True)
+        urdf = write_probe_description(work, cal, 'vcan0')
         for mode in ('recover','timeout','jump','persistent','off_ignored'):
             emulator=Emulator(mode)
             try:
-                output=subprocess.check_output([str(exe),str(ROOT),str(cal)],text=True,timeout=15)
+                output=subprocess.check_output([str(exe),str(urdf)],text=True,timeout=15)
                 assert 'success='+('1' if mode=='recover' else '0') in output,output
                 assert 'armed=0' in output,output
                 reboot=[i for i,d in emulator.frames if d[0]==7]

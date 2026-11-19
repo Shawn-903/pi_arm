@@ -8,7 +8,6 @@ import json
 import math
 import os
 from pathlib import Path
-import runpy
 import select
 import socket
 import subprocess
@@ -19,6 +18,8 @@ import time
 from ament_index_python.packages import get_package_prefix
 import yaml
 from vcan_motor_emulator import CAN_BASE, CAN_FRAME, Motor, response
+
+from vcan_test_model import calibration_mapping, write_probe_description
 
 ROOT = Path(__file__).resolve().parents[1]
 INTERFACE = 'vcan_motion'
@@ -91,14 +92,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix='pi-arm-motion-feedback-') as temp:
         work = Path(temp)
         cable = ROOT / 'src/pi_arm_description/config/cable_kinematics.yaml'
-        candidate = runpy.run_path(str(ROOT / 'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
-        mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36 if i <= 3 else 6,
-                        motor_direction=direction)
-                   for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, 1, -1, -1, -1, 1]), 1)]
+        _, fingerprint = calibration_mapping(cable)
         data = yaml.safe_load((ROOT / 'docs/calibration-history/pack_reference_calibration.R02.recorded.yaml').read_text())
         data['calibration'].update(robot_id='VCAN-ONLY', calibration_id='VCAN-MOTION-TEST',
                                   packing_pose_joint_rad=[0.] * 6, raw_output_at_packing_rad=[0.] * 6,
-                                  configuration_fingerprint=candidate['configuration_fingerprint'](cable, mapping))
+                                  configuration_fingerprint=fingerprint)
         calibration = work / 'zero.yaml'
         calibration.write_text(yaml.safe_dump(data))
         packages = ['pi_arm_hardware', 'pi_arm_can', 'pi_arm_transmission']
@@ -111,7 +109,8 @@ def main():
         env = dict(os.environ, LD_LIBRARY_PATH=':'.join(str(prefix / 'lib') for prefix in prefixes)
                    + ':' + os.environ.get('LD_LIBRARY_PATH', ''))
         feedback = Feedback()
-        process = subprocess.Popen([str(executable), str(ROOT), str(calibration)],
+        urdf = write_probe_description(work, calibration, INTERFACE)
+        process = subprocess.Popen([str(executable), str(urdf)],
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
         try:
             assert readline(process) == 'READY'

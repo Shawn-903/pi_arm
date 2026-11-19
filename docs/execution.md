@@ -44,7 +44,7 @@
 
 `output_speed_limit` 为输出轴限速，范围 1/6–10 度/秒。关节和角速度不超过 10 度/秒。MoveL 旋转加速度由后端规划配置决定，`angular_acc` 不构成独立约束。引用关节点位时支持 `move` / `movej`，笛卡尔点位使用 `movel`。
 
-启动会冻结完整步骤、点位值和参数。点位引用在启动时检查运行模式、模型、关节顺序及参考信息；运行中编辑原点位或原程序只影响下次启动。失败、取消、停止未确认均不会进入下一步。
+启动会冻结完整步骤、点位值和参数。点位引用在启动时检查运行模式、模型、单位、关节顺序及参考信息；运行中编辑原点位或原程序只影响下次启动。失败、取消、停止未确认均不会进入下一步。
 
 ## WebSocket 调用
 
@@ -65,6 +65,7 @@
 | `step_move` | `space=joint/position/orientation`、从零开始的 `axis`、`delta`、`request_id`；可附 `session_id` |
 | `move_to_point` | `point` 为名称或 ID，`motion=move/movej/movel` 及速度参数、`request_id` |
 | `task_get` | `step_id`；查询持久化步骤状态和 `task_id` |
+| `task_cancel` | 运行编号 `run_id` 和步骤编号 `step_id`。取消当前步骤会停止所属会话，已结束的步骤返回原结果。 |
 | `request_get` | `request_id`；返回 `accepted`，尚无受理记录时为 null |
 | `execution_state` | 查询当前/最近一次运行 |
 | `execution_pause/resume/stop` | 可附 `session_id` 或 `run_id` 核对目标运行；网页可控制当前运行 |

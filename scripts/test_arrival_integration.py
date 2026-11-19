@@ -4,6 +4,7 @@
 Source an isolated install; starts ONLY manager with fake feedback/controller/arm
 services. Never launches a CAN driver, opens CAN, or executes MoveIt trajectories.
 """
+import argparse
 import math
 import os
 from pathlib import Path
@@ -42,7 +43,7 @@ class Fixture(Node):
         self.events=[]
         self.controller_requested=threading.Event();self.controller_canceled=threading.Event()
         self.pub=self.create_publisher(HardwareState,'/test/hardware_state',qos_profile_sensor_data)
-        self.create_timer(.02,self.publish,callback_group=self.group)
+        self.feedback_timer = self.create_timer(.02,self.publish,callback_group=self.group)
         self.create_subscription(RobotState,'/pi_arm/state',self.record,10,callback_group=self.group)
         self.create_service(SetMotionArmed,'/pi_arm/hardware/set_motion_armed',self.arm,callback_group=self.group)
         self.server=ActionServer(self,FollowJointTrajectory,'/test/follow',execute_callback=self.follow,
@@ -142,6 +143,9 @@ def await_future(f,timeout=10):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--case', choices=('all', 'feedback'), default='all')
+    args = parser.parse_args()
     assert os.environ.get('ROS_DOMAIN_ID')=='82','Run only in isolated domain 82'
     rclpy.init(domain_id=82)
     node=Fixture();executor=MultiThreadedExecutor(num_threads=4);executor.add_node(node)
@@ -159,11 +163,32 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         config=Path(tmp)/'manager.yaml';config.write_text(yaml.safe_dump({'pi_arm_manager':{'ros__parameters':params}}))
         executable=Path(get_package_prefix('pi_arm_manager'))/'lib/pi_arm_manager/pi_arm_manager_node'
-        log=open('/tmp/pi_arm_arrival_fake_manager.log','w')
+        log=open(Path(tempfile.gettempdir())/'pi_arm_arrival_fake_manager.log','w')
         process=subprocess.Popen([str(executable),'--ros-args','--params-file',str(config)],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
         try:
             assert node.client.wait_for_server(timeout_sec=30),'manager not ready'
             assert node.preview.wait_for_service(timeout_sec=5)
+            def wait_connected(connected):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    state = node.result_state
+                    if state and len(state.hardware.motor_fresh) == 6 and state.hardware.connected == connected:
+                        return state
+                    time.sleep(.02)
+                raise AssertionError(f'manager feedback did not reach connected={connected}')
+
+            assert all(wait_connected(True).hardware.motor_fresh)
+            node.feedback_timer.cancel()
+            stale = wait_connected(False)
+            assert stale.state == RobotState.DISCONNECTED
+            assert not (stale.hardware.control_permitted or stale.hardware.kinematics_valid)
+            assert not any(stale.hardware.fresh) and not any(stale.hardware.motor_fresh)
+            node.feedback_timer.reset()
+            assert all(wait_connected(True).hardware.motor_fresh)
+            assert not node.arm_requests and node.follow_count == 0
+            print('PASS manager invalidates stale feedback and recovers on the next sample', flush=True)
+            if args.case == 'feedback':
+                return
             time.sleep(.2)
             preview=PreviewMotion.Request(mode='output', positions=[0.]*6, max_velocity=math.radians(1))
             answer=await_future(node.preview.call_async(preview))
@@ -287,7 +312,7 @@ def main():
             try:process.wait(timeout=10)
             except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=10)
             log.close()
-    executor.shutdown();node.destroy_node();rclpy.shutdown()
+            executor.shutdown();node.destroy_node();rclpy.shutdown()
 
 
 if __name__=='__main__':main()

@@ -7,7 +7,6 @@ It compiles a temporary probe and uses synthetic zero-offset calibration only.
 import contextlib
 import json
 import math
-import runpy
 from pathlib import Path
 import select
 import socket
@@ -20,6 +19,8 @@ import time
 import yaml
 from ament_index_python.packages import get_package_prefix
 from vcan_motor_emulator import CAN_BASE, CAN_FRAME, Motor, response
+
+from vcan_test_model import calibration_mapping, write_probe_description
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -125,7 +126,8 @@ def command(process, text, ok=True):
 
 @contextlib.contextmanager
 def backend(executable, calibration, commissioning=False, *, user=None):
-    process = subprocess.Popen([str(executable), str(ROOT), str(calibration),
+    urdf = write_probe_description(executable.parent, calibration, "vcan0")
+    process = subprocess.Popen([str(executable), str(urdf),
                                 'commissioning' if commissioning else 'normal'],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, user=user)
     try:
@@ -171,11 +173,8 @@ def main():
         j4_motor = 5 if swapped else 4
         wrist_gains = {motor: axes[name]['joint_radius_mm'] / axes[name]['motor_radius_mm']
                        for motor, name in ((4, 'joint_05'), (5, 'joint_06'))}
-        candidate = runpy.run_path(str(ROOT/'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
-        mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36 if i <= 3 else 6,
-                        motor_direction=direction)
-                   for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, -1, -1, -1, -1, 1]), 1)]
-        data['calibration']['configuration_fingerprint'] = candidate['configuration_fingerprint'](cable_file, mapping)
+        mapping, fingerprint = calibration_mapping(cable_file)
+        data['calibration']['configuration_fingerprint'] = fingerprint
         calibration.write_text(yaml.safe_dump(data))
         packages = ['pi_arm_hardware', 'pi_arm_can', 'pi_arm_transmission']
         executable = work/'probe'
@@ -558,8 +557,7 @@ def main():
                     command(p, 'disarm')
             print('CASE: accepted packing measurements survive direction rebind; zero target reverses')
             reference = yaml.safe_load((ROOT/'docs/calibration-history/pack_reference_calibration.R03.recorded.yaml').read_text())
-            reference['calibration']['configuration_fingerprint'] = data_fingerprint = candidate['configuration_fingerprint'](cable_file, mapping)
-            assert data_fingerprint
+            reference['calibration']['configuration_fingerprint'] = fingerprint
             pack_calibration = work/'packing.yaml'
             pack_calibration.write_text(yaml.safe_dump(reference))
             raw = reference['calibration']['raw_output_at_packing_rad']

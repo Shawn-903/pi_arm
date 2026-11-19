@@ -60,6 +60,8 @@
     });
   }
   function compatibility(point) {
+    const units = point.kind === "joint" ? "deg" : "mm,deg";
+    if (point.units !== units) return `该点位需要使用 ${units} 单位`;
     if (point.hardware_type !== state?.hardware_type)
       return "实机与模拟点位不能混用";
     if (point.model_id !== state?.base_frames?.model_id)
@@ -89,7 +91,8 @@
       const title = document.createElement("strong");
       title.textContent = point.name;
       const meta = document.createElement("small");
-      meta.textContent = `${point.kind === "joint" ? "六关节 · °" : "笛卡尔 · mm / °"} · ${{ manual: "手动录入", feedback: "反馈示教", model: "模型目标" }[point.source] || point.source} · ${new Date(point.created_at).toLocaleString()}`;
+      const unitLabel = { deg: "°", "mm,deg": "mm / °" }[point.units] || point.units || "单位未知";
+      meta.textContent = `${point.kind === "joint" ? "六关节" : "笛卡尔"} · ${unitLabel} · ${{ manual: "手动录入", feedback: "反馈示教", model: "模型目标" }[point.source] || point.source} · ${new Date(point.created_at).toLocaleString()}`;
       const values = document.createElement("p");
       values.className = "point-vector";
       values.textContent = point.values.map(fmt).join(" / ");

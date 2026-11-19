@@ -1,5 +1,5 @@
 // Feedback-only production backend probe. Never selects physical CAN.
-#include "pi_arm_hardware/backend.hpp"
+#include "vcan_probe_config.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -10,25 +10,8 @@
 
 int main(int argc, char ** argv)
 {
-  if (argc != 3) {return 2;}
-  pi_arm_hardware::BackendConfig config;
-  config.can_interface = "vcan_motion";
-  config.read_only = true;
-  config.cable_kinematics_file = std::string(argv[1]) +
-    "/src/pi_arm_description/config/cable_kinematics.yaml";
-  config.calibration_file = argv[2];
-  const std::vector<std::string> names{
-    "joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"};
-  const int directions[]{1, 1, -1, -1, -1, 1};
-  for (std::size_t i = 0; i < 6; ++i) {
-    config.actuators.push_back({names[i], static_cast<uint8_t>(i + 1),
-      i < 3 ? 36.0 : 6.0, directions[i]});
-  }
-  config.joint_upper_limits_rad = {3.14159, 1.75755, 1.494, .5236, 1.0472, 3.14159};
-  for (double limit : config.joint_upper_limits_rad) {
-    config.joint_lower_limits_rad.push_back(-limit);
-  }
-  config.joint_velocity_limits_rad_s.assign(6, .1745329);
+  if (argc != 2) {return 2;}
+  auto config = vcan_probe_config(argv[1], "vcan_motion");
   pi_arm_hardware::RealBackend backend(config);
   backend.configure();
   backend.activate();

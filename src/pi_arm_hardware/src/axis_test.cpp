@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+#include <utility>
 
 namespace pi_arm_hardware
 {
@@ -18,15 +19,16 @@ constexpr double kJointSessionLimitDeg = 2.0;
 constexpr double kJointSpeedLimitDegS = 10.0;
 }
 
-bool RealBackend::axis_test_raw_ready(const bool require_still) const
+bool RealBackend::axis_test_raw_ready(const bool require_still, MotorSnapshot * feedback) const
 {
   if (reboot_reference_uncertain_.load()) {return false;}
   if (!driver_ || !driver_->running() || config_.read_only || !config_.commissioning ||
     (driver_->mode() != pi_arm_can::DriverMode::MONITORING &&
     driver_->mode() != pi_arm_can::DriverMode::CONTROL)) {return false;}
+  auto snapshot = driver_->snapshot();
   const auto now = std::chrono::steady_clock::now();
   for (const auto & actuator : config_.actuators) {
-    const auto state = driver_->motor_state(actuator.motor_id);
+    const auto & state = snapshot.at(actuator.motor_id);
     if (!state.angle_valid || !state.status1_valid || !state.status2_valid ||
       !std::isfinite(state.protocol_angle_deg) || state.error_state != 0 ||
       std::chrono::duration<double>(now - state.angle_update).count() > 0.3 ||
@@ -35,6 +37,7 @@ bool RealBackend::axis_test_raw_ready(const bool require_still) const
       (require_still && (state.protocol_speed_dps != 0.0 || state.stationary_samples < 3)))
     {return false;}
   }
+  if (feedback) {*feedback = std::move(snapshot);}
   return true;
 }
 

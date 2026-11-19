@@ -49,6 +49,8 @@ class DescriptionConfigurationTest(unittest.TestCase):
                  if joint.attrib["name"] in ("joint_02", "joint_04") else set()),
             )
             tolerance = float(parameters.get("feedback_position_tolerance_rad", "0"))
+            if joint.attrib["name"] == "joint_02":
+                self.assertEqual(int(parameters["motor_direction"]), -1)
             self.assertAlmostEqual(tolerance, math.radians(3)
                                    if joint.attrib["name"] in ("joint_02", "joint_04") else 0)
 
