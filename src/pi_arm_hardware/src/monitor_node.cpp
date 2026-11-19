@@ -168,15 +168,14 @@ public:
           response->success = result.success;
           response->code = result.code;
           response->message = result.message;
-          response->reference_id = applied.software_zero_id;
           if (result.success) {
             std::copy_n(applied.raw_protocol_positions_deg.begin(), 6,
               response->raw_protocol_positions_deg.begin());
             std::copy_n(applied.software_output_offsets_rad.begin(), 6,
               response->software_output_offsets_rad.begin());
           }
-          RCLCPP_INFO(get_logger(), "software zero: success=%d reference=%s %s",
-            result.success, response->reference_id.c_str(), result.message.c_str());
+          RCLCPP_INFO(get_logger(), "software zero: success=%d %s",
+            result.success, result.message.c_str());
         });
       using AxisTest = pi_arm_interfaces::srv::AxisTest;
       axis_test_service_ = create_service<AxisTest>("/pi_arm/commissioning/axis_test",

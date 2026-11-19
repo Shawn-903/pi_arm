@@ -69,14 +69,14 @@ CalibrationResult decode_software_zero(
   const auto node = document["software_zero"];
   if (!node.IsMap()) {throw std::invalid_argument("software_zero map is required");}
   const int version = node["schema_version"].as<int>();
-  if (version < 1 || version > 3 || actuators.size() != kCalibrationAxisCount) {
+  if (version < 1 || version > 4 || actuators.size() != kCalibrationAxisCount) {
     throw std::invalid_argument("invalid software zero format or actuator mapping");
   }
   std::set<std::string> fields{
-    "schema_version", "reference_id", "created_at_utc",
-    "configuration_fingerprint", "motor_ids", "reference_joint_positions_rad",
+    "schema_version", "created_at_utc", "motor_ids", "reference_joint_positions_rad",
     "raw_protocol_positions_deg"};
-  if (version == 3) {
+  if (version <= 3) {fields.insert({"reference_id", "configuration_fingerprint"});}
+  if (version >= 3) {
     fields.insert("joint_names");
   } else {
     fields.insert({"robot_id", "base_calibration_id"});
@@ -86,8 +86,8 @@ CalibrationResult decode_software_zero(
       throw std::invalid_argument("unknown software_zero field: " + item.first.as<std::string>());
     }
   }
-  if (base.data.configuration_fingerprint.empty() ||
-    node["configuration_fingerprint"].as<std::string>() != base.data.configuration_fingerprint)
+  if (version <= 3 && (base.data.configuration_fingerprint.empty() ||
+    node["configuration_fingerprint"].as<std::string>() != base.data.configuration_fingerprint))
   {
     throw std::invalid_argument("software zero does not match the actuator/cable model");
   }
@@ -98,7 +98,7 @@ CalibrationResult decode_software_zero(
     throw std::invalid_argument("legacy software zero does not match the base calibration");
   }
   auto result = base;
-  if (version == 3 && !result.data.approved) {
+  if (version >= 3 && !result.data.approved) {
     result.data.calibration_id = base.data.configuration_fingerprint;
   }
   if (version == 2 || document["calibration"]) {
@@ -126,7 +126,7 @@ CalibrationResult decode_software_zero(
       throw std::invalid_argument("software zero motor order mismatch");
     }
   }
-  if (version == 3) {
+  if (version >= 3) {
     const auto names = node["joint_names"];
     if (!names.IsSequence() || names.size() != actuators.size()) {
       throw std::invalid_argument("software zero requires six joint names");
@@ -137,9 +137,8 @@ CalibrationResult decode_software_zero(
       }
     }
   }
-  result.software_zero_id = node["reference_id"].as<std::string>();
-  if (result.software_zero_id.empty() || node["created_at_utc"].as<std::string>().empty()) {
-    throw std::invalid_argument("software zero ID and timestamp must not be empty");
+  if (node["created_at_utc"].as<std::string>().empty()) {
+    throw std::invalid_argument("software zero timestamp must not be empty");
   }
   const auto reference = vector6(node, "reference_joint_positions_rad");
   const auto protocol = vector6(node, "raw_protocol_positions_deg");
@@ -207,13 +206,13 @@ CalibrationResult save_software_zero_reference(
   const CalibrationVector6 & reference_joint_rad, const CalibrationVector6 & protocol_deg,
   const std::vector<ActuatorConfig> & actuators,
   const pi_arm_transmission::CableKinematics & kinematics,
-  const std::string & reference_id, const std::string & created_at_utc)
+  const std::string & created_at_utc)
 {
   if (!base.valid || !base.data.approved) {
     throw std::invalid_argument("selected packing calibration is not approved");
   }
   return capture_pose_zero(path, base.data.configuration_fingerprint, reference_joint_rad,
-    protocol_deg, actuators, kinematics, reference_id, created_at_utc, &base);
+    protocol_deg, actuators, kinematics, created_at_utc, &base);
 }
 
 CalibrationResult capture_pose_zero(
@@ -221,7 +220,7 @@ CalibrationResult capture_pose_zero(
   const CalibrationVector6 & reference_joint_rad, const CalibrationVector6 & protocol_deg,
   const std::vector<ActuatorConfig> & actuators,
   const pi_arm_transmission::CableKinematics & kinematics,
-  const std::string & reference_id, const std::string & created_at_utc,
+  const std::string & created_at_utc,
   const CalibrationResult * packing)
 {
   if (actuators.size() != kCalibrationAxisCount || model_fingerprint.empty()) {
@@ -240,27 +239,13 @@ CalibrationResult capture_pose_zero(
   if (std::filesystem::exists(path)) {
     const auto previous = YAML::LoadFile(path);
     const auto old = previous["software_zero"];
-    if (!old.IsMap() || old["configuration_fingerprint"].as<std::string>() != model_fingerprint) {
-      throw std::invalid_argument("destination is not a zero file for this model");
-    }
-    const auto previous_version = old["schema_version"].as<int>();
-    if (previous_version < 1 || previous_version > 3 ||
-      (packing && previous_version < 3 &&
-      (old["robot_id"].as<std::string>() != packing->data.robot_id ||
-      old["base_calibration_id"].as<std::string>() != packing->data.calibration_id)))
-    {throw std::invalid_argument("existing zero file has an incompatible format or identity");}
-    if (packing && previous["calibration"]) {
-      const auto prior_pack = previous["calibration"];
-      if (prior_pack["robot_id"].as<std::string>() != packing->data.robot_id ||
-        prior_pack["calibration_id"].as<std::string>() != packing->data.calibration_id)
-      {throw std::invalid_argument("existing zero file belongs to a different packing calibration");}
+    if (!old.IsMap()) {
+      throw std::invalid_argument("destination is not a software zero file");
     }
   }
   auto node = document["software_zero"];
-  node["schema_version"] = 3;
-  node["reference_id"] = text_field(reference_id);
+  node["schema_version"] = 4;
   node["created_at_utc"] = text_field(created_at_utc);
-  node["configuration_fingerprint"] = model_fingerprint;
   for (std::size_t i = 0; i < 6; ++i) {
     node["motor_ids"].push_back(static_cast<unsigned>(actuators[i].motor_id));
     node["joint_names"].push_back(actuators[i].joint_name);

@@ -19,7 +19,7 @@ def main():
         page.locator('#connectBtn').click()
         page.wait_for_function('lastState?.commissioning && lastState?.motor_test_permitted')
         assert page.evaluate('lastState.can_interface') == 'vcan0', 'virtual CAN only'
-        before = page.evaluate('({id: lastState.software_zero_id, raw: lastState.raw_protocol_positions_deg})')
+        before = page.evaluate('lastState.raw_protocol_positions_deg')
         page.locator('#viewRole').select_option('developer')
         page.locator('[data-view-target="commissioning"]').click()
         button = page.locator('#setZeroReference')
@@ -31,8 +31,7 @@ def main():
         page.wait_for_function('!document.getElementById("setZeroReference").disabled')
         button.click()
         page.wait_for_function('document.getElementById("zeroReferenceResult").textContent.includes("软件标零成功")')
-        page.wait_for_function('id => lastState.software_zero_id && lastState.software_zero_id !== id', arg=before['id'])
-        assert page.evaluate('lastState.raw_protocol_positions_deg') == before['raw']
+        assert page.evaluate('lastState.raw_protocol_positions_deg') == before
         page.wait_for_function('pose => lastState.current_joint_angles?.length === 6 && '
                                'lastState.current_joint_angles.every((angle, i) => Math.abs(angle - pose[i]) < 0.002)',
                                arg=expected)
@@ -40,7 +39,7 @@ def main():
         assert button.is_disabled()
         assert not errors, errors
         browser.close()
-    print('PASS web software zero: explicit confirmation, task response, persisted reference ID and unchanged raw readings')
+    print('PASS web software zero: explicit confirmation, task response, packing feedback and unchanged raw readings')
 
 
 if __name__ == '__main__':

@@ -165,7 +165,6 @@ bool RealBackend::read(HardwareSample & sample) noexcept
     sample.software_output_offsets_rad.assign(kAxisCount, nan);
     sample.calibrated = calibration_.valid;
     sample.calibration_id = calibration_.data.calibration_id;
-    sample.software_zero_id = calibration_.software_zero_id;
     sample.kinematics_valid = false;
     sample.control_permitted = false;
     sample.kinematics_error_code = calibration_.valid ? "NONE" : "CALIBRATION_INVALID";

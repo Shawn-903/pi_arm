@@ -84,7 +84,7 @@ def main():
     cable = ROOT / "src/pi_arm_description/config/cable_kinematics.yaml"
     candidate = runpy.run_path(str(ROOT / "src/pi_arm_hardware/scripts/pi_arm_calibration_candidate"))
     mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36.0 if i <= 3 else 6.0, motor_direction=d)
-               for i, (name, d) in enumerate(zip(candidate["JOINT_NAMES"], [1, 1, -1, -1, -1, 1]), 1)]
+               for i, (name, d) in enumerate(zip(candidate["JOINT_NAMES"], [1, -1, -1, -1, -1, 1]), 1)]
     data = yaml.safe_load((ROOT / "src/pi_arm_hardware/config/pack_reference_calibration.template.yaml").read_text())
     data["calibration"].update(approved=True, robot_id="VCAN-ONLY", calibration_id="ZERO-ONCE-VCAN-ONLY",
                               packing_pose_joint_rad=[0.0] * 6, raw_output_at_packing_rad=[0.0] * 6,
@@ -105,7 +105,6 @@ def main():
                                      capture_output=True, text=True, timeout=10)
             assert missing.returncode != 0 and "--confirm-reference" in missing.stderr
             assert not emulator.frames_for(0x92), "missing confirmation started hardware polling"
-            previous_id = None
             for name, pose in (("packing", [0, 100.7, -85.6, 0, 0, 0]), ("zero", [0] * 6),
                                ("known-pose", [1, 0, 0, 0, 0, 0])):
                 source = command if name == "packing" else capture + ["--reference-deg", *map(str, pose)]
@@ -113,12 +112,13 @@ def main():
                 assert code == 0 and result["success"] and result["cleanup_success"], result
                 assert result["raw_protocol_positions_deg"] == angles
                 document = yaml.safe_load(zero.read_text())
-                assert document["calibration"] == data["calibration"]
+                if name == "packing":
+                    assert document["calibration"] == data["calibration"]
+                else:
+                    assert set(document) == {"software_zero"}, "recapture retained previous packing metadata"
                 saved = document["software_zero"]
-                assert saved["schema_version"] == 3 and result["software_zero_file"] == str(zero)
-                assert saved["reference_id"] == result["reference_id"] != previous_id
+                assert saved["schema_version"] == 4 and result["software_zero_file"] == str(zero)
                 assert saved["reference_joint_positions_rad"] == [math.radians(value) for value in pose]
-                previous_id = result["reference_id"]
                 assert lease_available(), "CAN lease survived successful exit"
             print("PASS one-command zero: default packing pose, explicit zero and custom pose", flush=True)
             zero.rename(work / "reference-before-loss.yaml")
@@ -130,9 +130,24 @@ def main():
                 document = yaml.safe_load(zero.read_text())
                 assert set(document) == {"software_zero"}
                 assert document["software_zero"]["raw_protocol_positions_deg"] == angles
-                assert result["reference_id"] != previous_id
-                previous_id = result["reference_id"]
             print("PASS lost file and recapture: known pose and current encoders alone", flush=True)
+
+            for name, invocation in (("changed-model", capture), ("changed-model-with-base", command)):
+                document = yaml.safe_load(zero.read_text())
+                document["software_zero"]["schema_version"] = 3
+                document["software_zero"]["reference_id"] = "legacy-sample"
+                document["software_zero"]["configuration_fingerprint"] = "fnv1a64:0000000000000000"
+                zero.write_text(yaml.safe_dump(document))
+                angles[1] += 36
+                emulator.inject(2, angles[1])
+                code, result = run_case(work, name, invocation)
+                assert code == 0 and result["success"] and result["cleanup_success"], result
+                document = yaml.safe_load(zero.read_text())
+                saved = document["software_zero"]
+                assert "configuration_fingerprint" not in saved and "reference_id" not in saved
+                assert saved["raw_protocol_positions_deg"] == angles
+                assert ("calibration" in document) == (invocation == command)
+            print("PASS replaced incompatible software zero from fresh samples", flush=True)
 
         before = zero.read_bytes() if zero.exists() else None
         with emulator.lock:

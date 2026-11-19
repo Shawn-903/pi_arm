@@ -148,7 +148,6 @@ def main():
                 _wait(node, future.done, children, stopped, 6.0, "zero-reference result", interruptible=False)
                 response = future.result()
                 result.update(success=response.success, code=response.code, message=response.message,
-                              reference_id=response.reference_id,
                               raw_protocol_positions_deg=list(response.raw_protocol_positions_deg),
                               software_output_offsets_rad=list(response.software_output_offsets_rad))
             finally:

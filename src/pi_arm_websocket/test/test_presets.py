@@ -47,16 +47,19 @@ def presets(tmp_path):
     return PosePresets(str(path))
 
 
-def test_pose_zero_uses_the_defined_packing_pose_only_for_the_known_model(tmp_path):
+@pytest.mark.parametrize("metadata", [
+    {"schema_version": 3, "configuration_fingerprint": "previous-geometry"},
+    {"schema_version": 4},
+])
+def test_packing_target_uses_joint_convention_after_radius_change(tmp_path, metadata):
     path = tmp_path / "zero.yaml"
-    record = {"schema_version": 3, "joint_names": JOINT_NAMES,
-              "configuration_fingerprint": "fnv1a64:7d99c13df4cb0c63",
-              "reference_joint_positions_rad": [0.0] * 6}
+    record = dict(metadata, joint_names=JOINT_NAMES, reference_joint_positions_rad=[0.0] * 6)
     path.write_text(yaml.safe_dump({"software_zero": record}))
     preset = PosePresets(str(path))
     assert preset.packing == [0.0, 100.7, -85.6, 0.0, 0.0, 0.0]
-    assert preset.calibration_id == record["configuration_fingerprint"]
-    record["configuration_fingerprint"] = "different-model"
+    bridge = Bridge(preset)
+    assert preset.status(bridge, bridge.state)["packing"]["available"]
+    record["joint_names"] = list(reversed(JOINT_NAMES))
     path.write_text(yaml.safe_dump({"software_zero": record}))
     assert PosePresets(str(path)).packing is None
 

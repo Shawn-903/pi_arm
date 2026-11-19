@@ -32,12 +32,13 @@ class VisualizerAssetsTest(unittest.TestCase):
             [joint.attrib["name"] for joint in joints],
             [f"motor_{index:02d}_output" for index in range(1, 7)],
         )
-        expected = [3.819, 1.758, 7.841, 4.892, 4.127, 6.047]
-        for joint, upper in zip(joints, expected):
+        limits = subprocess.check_output(["pi_arm_output_limits", str(KINEMATICS_YAML)], text=True)
+        expected = [list(map(float, row.split())) for row in limits.splitlines()]
+        for joint, (lower, upper) in zip(joints, expected, strict=True):
             self.assertEqual(joint.attrib["type"], "revolute")
             limit = joint.find("limit")
             self.assertIsNotNone(limit)
-            self.assertAlmostEqual(float(limit.attrib["lower"]), -upper)
+            self.assertAlmostEqual(float(limit.attrib["lower"]), lower)
             self.assertAlmostEqual(float(limit.attrib["upper"]), upper)
 
     def test_launch_is_parseable_and_isolates_gui_description(self) -> None:

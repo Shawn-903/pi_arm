@@ -45,7 +45,7 @@ def main():
         candidate = runpy.run_path(str(ROOT / 'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
         cable = ROOT / 'src/pi_arm_description/config/cable_kinematics.yaml'
         mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36.0 if i <= 3 else 6.0, motor_direction=d)
-                   for i, (name, d) in enumerate(zip(candidate['JOINT_NAMES'], [1, 1, -1, -1, -1, 1]), 1)]
+                   for i, (name, d) in enumerate(zip(candidate['JOINT_NAMES'], [1, -1, -1, -1, -1, 1]), 1)]
         data = yaml.safe_load((ROOT / 'src/pi_arm_hardware/config/pack_reference_calibration.template.yaml').read_text())
         data['calibration'].update(approved=True, robot_id='VCAN-ONLY', calibration_id='RECONNECT-VCAN-ONLY',
                                   packing_pose_joint_rad=[0.0]*6, raw_output_at_packing_rad=[0.0]*6,

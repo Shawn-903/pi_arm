@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(ament_cmake REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(tinyxml2 REQUIRED)
 
 add_library(pi_arm_transmission SHARED
   src/cable_kinematics.cpp
@@ -21,7 +22,7 @@ target_include_directories(pi_arm_transmission
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>"
 )
-target_link_libraries(pi_arm_transmission PRIVATE yaml-cpp)
+target_link_libraries(pi_arm_transmission PRIVATE yaml-cpp tinyxml2::tinyxml2)
 target_compile_options(pi_arm_transmission PRIVATE -Wall -Wextra -Wpedantic)
 
 install(
@@ -36,6 +37,10 @@ install(
   RUNTIME DESTINATION bin
   INCLUDES DESTINATION include
 )
+
+add_executable(pi_arm_output_limits src/output_limits_cli.cpp)
+target_link_libraries(pi_arm_output_limits PRIVATE pi_arm_transmission)
+install(TARGETS pi_arm_output_limits DESTINATION bin)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

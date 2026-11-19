@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
   c.calibration_file=argv[2]; c.commissioning=std::string(argv[3])=="commissioning";
   c.allow_real_control=!c.commissioning;
   std::vector<std::string> names{"joint_01","joint_02","joint_04","joint_05","joint_06","joint_09"};
-  std::vector<int> directions{1,1,-1,-1,-1,1};
+  std::vector<int> directions{1,-1,-1,-1,-1,1};
   for(int i=0;i<6;i++) c.actuators.push_back({names[i],static_cast<uint8_t>(i+1),i<3?36.0:6.0,directions[i]});
   c.joint_upper_limits_rad={3.141592654,1.757546556759,1.494001839708,.523598776,1.047197551,3.141592654};
   for(double v:c.joint_upper_limits_rad)c.joint_lower_limits_rad.push_back(-v);

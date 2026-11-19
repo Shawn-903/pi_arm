@@ -240,7 +240,6 @@ def dispatch_points(bridge, command, params):
                  units='deg' if kind == 'joint' else 'mm,deg', rpy_convention='Rz(yaw) Ry(pitch) Rx(roll)',
                  hardware_type=bridge.hardware_type, model_id=bridge.frame_model.model_id,
                  calibration_id=hardware.calibration_id if hardware else '',
-                 software_zero_id=hardware.software_zero_id if hardware else '',
                  feedback_stamp_sec=(hardware.stamp.sec + hardware.stamp.nanosec/1e9) if source == 'feedback' else None)
     if old:
         return store.change(params.get('revision'), update=dict(point, id=old['id']))

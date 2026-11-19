@@ -67,7 +67,6 @@ struct HardwareSample
   bool motion_stop_pending{false};
   bool motion_stop_failed{false};
   std::string calibration_id;
-  std::string software_zero_id;
   std::vector<double> raw_protocol_positions_deg;
   std::vector<double> raw_output_positions_rad;
   std::vector<double> software_output_offsets_rad;

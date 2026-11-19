@@ -62,7 +62,8 @@ class CalibrationMotionTask(Node):
         hardware = state.hardware
         if hardware.commissioning or hardware.teaching_active or not hardware.control_permitted:
             raise CalibrationMotionError("normal control permission is required")
-        if self._reference is not None and self._reference != (hardware.calibration_id, hardware.software_zero_id):
+        reference = (hardware.calibration_id, tuple(hardware.software_output_offsets_rad))
+        if self._reference is not None and self._reference != reference:
             raise CalibrationMotionError("calibration or software-zero reference changed during sampling")
 
     def _wait(self, condition, timeout, description, *, monitor=True):
@@ -174,7 +175,7 @@ class CalibrationMotionTask(Node):
             "joint_names": list(JOINT_NAMES), "target_joint_positions_rad": list(pose.joint_positions_rad),
             "feedback_joint_positions_rad": feedback, "motor_ids": list(hardware.motor_ids),
             "raw_protocol_positions_deg": raw, "model_output_positions_rad": outputs,
-            "calibration_id": hardware.calibration_id, "software_zero_id": hardware.software_zero_id,
+            "calibration_id": hardware.calibration_id,
         }
 
     def run(self, poses, output_path, *, joint_speed_rad_s=math.radians(5),
@@ -208,7 +209,8 @@ class CalibrationMotionTask(Node):
                                time.monotonic() - self._state_received <= self.state_timeout_sec,
                                self.service_timeout_sec, "fresh robot state", monitor=False)
                     self._check_state()
-                    self._reference = (self._state.hardware.calibration_id, self._state.hardware.software_zero_id)
+                    self._reference = (self._state.hardware.calibration_id,
+                                       tuple(self._state.hardware.software_output_offsets_rad))
                     self._wait(lambda: self._move.server_is_ready() and self._stop.service_is_ready(),
                                self.service_timeout_sec, "manager interfaces")
                     for index, pose in enumerate(poses, 1):

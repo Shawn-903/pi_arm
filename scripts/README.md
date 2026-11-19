@@ -200,7 +200,7 @@ python3 scripts/test_software_zero_clients.py
 python3 scripts/test_web_software_zero.py
 ```
 
-前者验证 Python `ZeroReferenceClient` 和命令行的服务调用与单位转换；后者验证网页确认、返回结果、参考编号，以及操作前后原始编码器读数一致。这两个脚本在 vcan0 测试实例中更新软件参考，零点数据、测试用基础标定和一次性启动工具保存在临时目录。
+前者验证 Python `ZeroReferenceClient` 和命令行的服务调用与单位转换；后者验证网页确认、返回结果、已保存的参考姿态，以及操作前后原始编码器读数一致。这两个脚本在 vcan0 测试实例中更新软件参考，零点数据、测试用基础标定和一次性启动工具保存在临时目录。
 
 ## 维护规范
 

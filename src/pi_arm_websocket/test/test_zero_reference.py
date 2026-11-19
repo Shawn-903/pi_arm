@@ -17,7 +17,7 @@ class Bridge:
 
     async def call_service(self, command, request):
         self.calls.append((command, request))
-        return SimpleNamespace(reference_id='zero-test', message='saved',
+        return SimpleNamespace(message='saved',
                                raw_protocol_positions_deg=[1.0] * 6,
                                software_output_offsets_rad=[0.1] * 6)
 
@@ -34,7 +34,7 @@ def test_zero_reference_converts_units_and_returns_saved_reference():
     assert bridge.calls[0][0] == 'set_zero_reference'
     assert bridge.calls[0][1].reference_joint_positions_rad[0] == pytest.approx(math.radians(10))
     assert bridge.calls[0][1].reference_pose_confirmed
-    assert result['reference_id'] == 'zero-test'
+    assert "reference_id" not in result
     assert result['raw_protocol_positions_deg'] == [1.0] * 6
 
 

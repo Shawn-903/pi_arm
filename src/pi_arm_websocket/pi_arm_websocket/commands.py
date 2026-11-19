@@ -113,7 +113,7 @@ class CommandGateway:
                 reference_joint_positions_rad=[value * DEG_TO_RAD for value in reference],
                 reference_pose_confirmed=True,
             ))
-            return {"reference_id": result.reference_id, "message": result.message,
+            return {"message": result.message,
                     "raw_protocol_positions_deg": list(result.raw_protocol_positions_deg),
                     "software_output_offsets_rad": list(result.software_output_offsets_rad)}
         if command == "set_teaching":

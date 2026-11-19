@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import math
+import subprocess
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -109,67 +111,10 @@ class DescriptionConfigurationTest(unittest.TestCase):
         )
         axes = cable["axes"]
         self.assertEqual(axes["joint_04"]["model"], "synchronized_pair_coupled")
-        self.assertAlmostEqual(axes["joint_01"]["motor_radius_mm"], 16.25)
-        self.assertAlmostEqual(axes["joint_01"]["joint_radius_mm"], 19.75)
-        self.assertAlmostEqual(axes["joint_04"]["motor_radius_mm"], 16.25)
-        self.assertAlmostEqual(axes["joint_04"]["joint3_radius_mm"], 28.5)
-        self.assertAlmostEqual(axes["joint_04"]["joint4_radius_mm"], 23.25)
-        self.assertAlmostEqual(axes["joint_04"]["joint2_guide_radius_mm"], 28.5)
-        self.assertAlmostEqual(
-            (
-                axes["joint_04"]["joint3_radius_mm"]
-                + axes["joint_04"]["joint4_radius_mm"]
-            )
-            / axes["joint_04"]["motor_radius_mm"],
-            207.0 / 65.0,
-        )
-        for joint_name in ("joint_05", "joint_06"):
-            self.assertAlmostEqual(
-                axes[joint_name]["joint_radius_mm"]
-                / axes[joint_name]["motor_radius_mm"],
-                33.94 / 16.25,
-            )
-            self.assertAlmostEqual(
-                axes[joint_name]["joint2_guide_radius_mm"]
-                / axes[joint_name]["motor_radius_mm"],
-                114.0 / 65.0,
-            )
-        axis6 = cable["axes"]["joint_09"]
-        small = axis6["branch_a"]
-        large = axis6["branch_b"]
-        self.assertAlmostEqual(
-            small["joint_radius_mm"] / small["motor_radius_mm"],
-            large["joint_radius_mm"] / large["motor_radius_mm"],
-        )
-        small_coupling = (
-            small["joint2_guide_radius_mm"] / small["motor_radius_mm"]
-        )
-        large_coupling = (
-            large["joint2_guide_radius_mm"] / large["motor_radius_mm"]
-        )
-        self.assertNotEqual(small_coupling, large_coupling)
-        self.assertLess(
-            abs(small_coupling - large_coupling)
-            / max(abs(small_coupling), abs(large_coupling)),
-            cable["validation"]["compatibility_tolerance"],
-        )
-
-        self.assertAlmostEqual(small["joint2_guide_radius_mm"], 20.25)
-        self.assertAlmostEqual(axes["joint_05"]["joint_radius_mm"], 33.94)
-        self.assertAlmostEqual(axes["joint_06"]["joint_radius_mm"], 33.94)
-
         output_limits = cable["output_limits"]
         self.assertEqual(output_limits["coordinate"], "reducer_output_shaft")
         self.assertEqual(output_limits["unit"], "rad")
-        self.assertEqual(
-            [name for name in output_limits if name.startswith("motor_")],
-            [f"motor_{index:02d}" for index in range(1, 7)],
-        )
-        expected_upper = [3.819, 1.758, 7.841, 4.892, 4.127, 6.047]
-        for index, upper in enumerate(expected_upper, start=1):
-            limit = output_limits[f"motor_{index:02d}"]
-            self.assertAlmostEqual(limit["lower_position_rad"], -upper)
-            self.assertAlmostEqual(limit["upper_position_rad"], upper)
+        self.assertEqual((YAML_PATH.parent / output_limits["joint_limits_from"]).resolve(), XACRO_PATH)
 
     def test_urdf_joint_limits_match_kinematic_derivation(self) -> None:
         expected = {
@@ -209,6 +154,52 @@ class DescriptionConfigurationTest(unittest.TestCase):
             self.assertLessEqual(lower, -position)
             self.assertGreaterEqual(upper, -position)
 
+    def test_changing_only_j2_radius_updates_just_its_output_range(self):
+        model = yaml.safe_load(YAML_PATH.read_text())
+        limits = model["cable_kinematics"]["output_limits"]
+        limits["joint_limits_from"] = str(XACRO_PATH)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cable.yaml"
+
+            def ranges():
+                path.write_text(yaml.safe_dump(model))
+                output = subprocess.check_output(["pi_arm_output_limits", str(path)], text=True)
+                return [list(map(float, line.split())) for line in output.splitlines()]
+
+            axis = model["cable_kinematics"]["axes"]["joint_02"]
+            limits.pop("motor_02", None)
+            axis.update(motor_radius_mm=16.0, joint_radius_mm=16.0)
+            before = ranges()
+            axis["motor_radius_mm"] = 28.5
+            after = ranges()
+            self.assertEqual(before[1], [-1.758, 1.758])
+            self.assertEqual(after[1], [-0.987, 0.987])
+            self.assertEqual(before[:1] + before[2:], after[:1] + after[2:])
+            limits["motor_02"] = {"lower_position_rad": -0.5, "upper_position_rad": 2.0}
+            self.assertEqual(ranges()[1], [-0.5, 0.987])
+
+    def test_invalid_source_joint_limits_are_reported(self):
+        model = yaml.safe_load(YAML_PATH.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            urdf = Path(directory) / "arm.urdf"
+            config = Path(directory) / "cable.yaml"
+            model["cable_kinematics"]["output_limits"]["joint_limits_from"] = urdf.name
+            config.write_text(yaml.safe_dump(model), encoding="utf-8")
+            for defect in ("duplicate", "upper"):
+                with self.subTest(defect=defect):
+                    tree = ET.parse(XACRO_PATH)
+                    joint = tree.find("joint[@name='joint_02']")
+                    if defect == "duplicate":
+                        tree.getroot().append(joint)
+                    else:
+                        joint.find("limit").set("upper", "1.5rad")
+                    tree.write(urdf)
+                    result = subprocess.run(["pi_arm_output_limits", str(config)],
+                                            text=True, capture_output=True, check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(defect, result.stderr)
+                    self.assertIn("joint_02", result.stderr)
+
     def test_output_limits_enclose_joint_limit_image(self) -> None:
         cable = yaml.safe_load(YAML_PATH.read_text(encoding="utf-8"))[
             "cable_kinematics"
@@ -231,15 +222,10 @@ class DescriptionConfigurationTest(unittest.TestCase):
         coupling = axes["joint_04"]["joint2_guide_radius_mm"] / axes["joint_04"][
             "motor_radius_mm"
         ]
-        branch_a = axes["joint_09"]["branch_a"]
-        branch_b = axes["joint_09"]["branch_b"]
-        alpha6 = 0.5 * (
-            branch_a["joint_radius_mm"] / branch_a["motor_radius_mm"]
-            + branch_b["joint_radius_mm"] / branch_b["motor_radius_mm"]
-        )
-        coupling6 = 0.5 * (
-            branch_a["joint2_guide_radius_mm"] / branch_a["motor_radius_mm"]
-            + branch_b["joint2_guide_radius_mm"] / branch_b["motor_radius_mm"]
+        branches = [axes["joint_09"]["branch_a"], axes["joint_09"]["branch_b"]]
+        axis6_range = max(
+            (b["joint_radius_mm"] * q6 + b["joint2_guide_radius_mm"] * q2) / b["motor_radius_mm"]
+            for b in branches
         )
         theoretical = [
             axes["joint_01"]["joint_radius_mm"]
@@ -258,31 +244,21 @@ class DescriptionConfigurationTest(unittest.TestCase):
             axes["joint_05"]["joint_radius_mm"]
             / axes["joint_05"]["motor_radius_mm"]
             * math.sin(q4)
-            + coupling * q2,
+            + axes["joint_05"]["joint2_guide_radius_mm"] / axes["joint_05"]["motor_radius_mm"] * q2,
             axes["joint_06"]["joint_radius_mm"]
             / axes["joint_06"]["motor_radius_mm"]
             * math.sin(q5)
-            + coupling * q2,
-            alpha6 * q6 + coupling6 * q2,
+            + axes["joint_06"]["joint2_guide_radius_mm"] / axes["joint_06"]["motor_radius_mm"] * q2,
+            axis6_range,
         ]
-        for index, required in enumerate(theoretical, start=1):
-            configured = cable["output_limits"][f"motor_{index:02d}"][
-                "upper_position_rad"
-            ]
-            self.assertGreaterEqual(configured, required)
-            self.assertLess(configured - required, 0.0011)
-
-        # Motor 6 is rounded above the larger manufactured branch envelope too.
-        branch_a_required = (
-            branch_a["joint_radius_mm"] / branch_a["motor_radius_mm"] * q6
-            + branch_a["joint2_guide_radius_mm"]
-            / branch_a["motor_radius_mm"]
-            * q2
-        )
-        self.assertGreaterEqual(
-            cable["output_limits"]["motor_06"]["upper_position_rad"],
-            branch_a_required,
-        )
+        actual = [list(map(float, line.split())) for line in subprocess.check_output(
+            ["pi_arm_output_limits", str(YAML_PATH)], text=True).splitlines()]
+        self.assertEqual(len(actual), 6)
+        for i, ((lower, upper), required) in enumerate(zip(actual, theoretical), start=1):
+            bound = math.ceil(required * 1000) / 1000
+            cap = cable["output_limits"].get(f"motor_{i:02d}", {})
+            self.assertAlmostEqual(lower, max(-bound, cap.get("lower_position_rad", -bound)))
+            self.assertAlmostEqual(upper, min(bound, cap.get("upper_position_rad", bound)))
 
 
 if __name__ == "__main__":

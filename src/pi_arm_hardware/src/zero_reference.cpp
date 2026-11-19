@@ -5,7 +5,6 @@
 #include <cmath>
 #include <ctime>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -38,10 +37,15 @@ ManagementResult RealBackend::set_zero_reference(
     if (output_path == std::filesystem::weakly_canonical(config_.cable_kinematics_file)) {
       return {false, 1004, "software zero must not overwrite cable geometry"};
     }
+    CalibrationResult capture_base;
     if (!config_.calibration_file.empty() &&
-      output_path != std::filesystem::weakly_canonical(config_.calibration_file) &&
-      !calibration_.valid)
-    {return {false, 2001, calibration_.message};}
+      output_path != std::filesystem::weakly_canonical(config_.calibration_file))
+    {
+      // Only a separately selected packing file supplies a preset for this capture.
+      capture_base = load_pack_reference_calibration(config_.calibration_file,
+        config_.cable_kinematics_file, config_.actuators, kinematics_);
+      if (!capture_base.valid) {return {false, 2001, capture_base.message};}
+    }
     const auto fingerprint = calibration_configuration_fingerprint(
       config_.cable_kinematics_file, config_.actuators);
 
@@ -61,22 +65,18 @@ ManagementResult RealBackend::set_zero_reference(
         protocol[i] += value / 6.0;
       }
     }
-    std::string reference_id;
-    std::ifstream uuid("/proc/sys/kernel/random/uuid");
-    if (!(uuid >> reference_id)) {throw std::runtime_error("cannot generate reference ID");}
     const auto time = std::time(nullptr);
     std::tm utc{};
     ::gmtime_r(&time, &utc);
     std::ostringstream stamp;
     stamp << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
-    const auto * packing = calibration_.valid && calibration_.data.approved ? &calibration_ : nullptr;
+    const auto * packing = capture_base.valid && capture_base.data.approved ? &capture_base : nullptr;
     auto next = capture_pose_zero(config_.software_zero_file, fingerprint, reference_joint_rad,
-      protocol, config_.actuators, kinematics_, reference_id, stamp.str(), packing);
+      protocol, config_.actuators, kinematics_, stamp.str(), packing);
     // No CAN writes, and no concurrent controller exists in commissioning mode.
     calibration_ = std::move(next);
     for (auto & detector : joint_motion_detectors_) {detector.reset();}
     position_initialized_ = false;
-    applied_sample.software_zero_id = calibration_.software_zero_id;
     applied_sample.raw_protocol_positions_deg.assign(protocol.begin(), protocol.end());
     applied_sample.software_output_offsets_rad.assign(
       calibration_.software_output_offsets_rad.begin(), calibration_.software_output_offsets_rad.end());

@@ -34,10 +34,9 @@ def main():
         )
         rclpy.spin_until_future_complete(node, future, timeout_sec=6.0)
         if not future.done():
-            raise RuntimeError("result unknown; inspect software_zero_id, do not retry automatically")
+            raise RuntimeError("result unknown; inspect the saved zero file and live joint feedback, do not retry automatically")
         result = future.result()
         print(json.dumps(dict(success=result.success, code=result.code, message=result.message,
-                              reference_id=result.reference_id,
                               raw_protocol_positions_deg=list(result.raw_protocol_positions_deg),
                               software_output_offsets_rad=list(result.software_output_offsets_rad))))
         return 0 if result.success else 1

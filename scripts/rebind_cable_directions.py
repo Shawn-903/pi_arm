@@ -41,7 +41,8 @@ def validate_wrist_swap(old, new, calibration):
     if calibration['packing_pose_joint_rad'][3:5] != [0.0, 0.0]:
         raise ValueError('wrist rebind requires both accepted packing wrist angles to be zero')
     limits = b['output_limits']
-    limits['motor_04'], limits['motor_05'] = limits['motor_05'], limits['motor_04']
+    if 'joint_limits_from' not in limits:
+        limits['motor_04'], limits['motor_05'] = limits['motor_05'], limits['motor_04']
     if old != new:
         raise ValueError('wrist rebind only permits swapping assignment and its two output envelopes')
 

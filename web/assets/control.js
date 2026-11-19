@@ -660,7 +660,7 @@ function refreshAxisTests(fresh) {
     !idle || !lastState?.motor_test_permitted || !hasReference ||
     !document.getElementById("zeroReferenceConfirmed").checked;
   document.getElementById("zeroReferenceCurrent").textContent =
-    `当前软件零点：${lastState?.software_zero_id || "未设置"}`;
+    fresh ? (lastState.calibrated ? "当前标定状态：已标定" : "当前标定状态：未标定") : "当前标定状态：等待反馈";
   const id = Number(document.getElementById("testMotorId").value);
   const index = lastState?.motor_ids?.indexOf(id) ?? -1;
   const enabled = lastState?.motor_enabled?.[index] === true;
@@ -725,11 +725,11 @@ function bindAxisTests() {
       reference_joint_positions_deg: lastState.mechanical_zero_joints_deg,
       reference_pose_confirmed: true,
     }, {
-      resolve: (data) => {
-        result.textContent = `软件标零成功，参考编号：${data.reference_id}`;
+      resolve: () => {
+        result.textContent = "软件标零成功";
       },
       reject: (error) => {
-        result.textContent = `软件标零未确认：${error.message}；核对当前参考编号后再操作。`;
+        result.textContent = `软件标零未确认：${error.message}；请核对零点文件和关节反馈。`;
       },
     });
     document.getElementById("zeroReferenceConfirmed").checked = false;

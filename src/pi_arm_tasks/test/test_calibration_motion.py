@@ -40,7 +40,7 @@ class ManagerFixture(Node):
             fresh=[True] * 6, moving=[False] * 6, motor_ids=list(range(1, 7)),
             motor_enabled=[True] * 6, motor_errors=[False] * 6, motor_fresh=[True] * 6,
             motor_moving=[False] * 6, calibrated=True, kinematics_valid=True, control_permitted=True,
-            calibration_id="synthetic-calibration", software_zero_id="synthetic-zero",
+            calibration_id="synthetic-calibration", software_output_offsets_rad=[0.0]*6,
             raw_protocol_positions_deg=[10.0] * 6, model_output_positions_rad=[0.0] * 6,
         )
         self.state = RobotState(state=RobotState.READY, state_name="READY", hardware=hardware)
@@ -161,7 +161,7 @@ def test_sequential_arrival_dwell_and_timestamped_feedback(rig, tmp_path):
     assert [sample["task_id"] for sample in samples] == [1, 2]
     assert samples[1]["feedback_joint_positions_rad"][0] == pytest.approx(0.02)
     assert samples[1]["calibration_id"] == "synthetic-calibration"
-    assert samples[1]["software_zero_id"] == "synthetic-zero"
+    assert "software_zero_id" not in samples[1]
     assert samples[1]["ros_stamp"]["sec"] > 0
     assert manager.requests[1][0] - manager.arrivals[0] >= 0.15
     assert manager.stops == 0
@@ -247,7 +247,7 @@ def test_reference_change_during_dwell_aborts_sampling(rig, tmp_path):
         assert manager.arrived.wait(3.0)
         time.sleep(0.08)
         with manager.lock:
-            manager.state.hardware.software_zero_id = "new-reference"
+            manager.state.hardware.software_output_offsets_rad = [0.01] * 6
 
     worker = threading.Thread(target=change_reference)
     worker.start()

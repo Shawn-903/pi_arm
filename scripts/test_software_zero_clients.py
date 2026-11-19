@@ -33,14 +33,14 @@ def main():
         wait(node, future.done)
         result = future.result()
         assert result.success, result.message
-        wait(node, lambda: samples[-1].software_zero_id == result.reference_id)
+        wait(node, lambda: list(samples[-1].software_output_offsets_rad) == list(result.software_output_offsets_rad))
         assert max(abs(value) for value in samples[-1].positions) < 1e-8
         print('PASS Python ZeroReferenceClient: confirmed reference applied through task service', flush=True)
 
         command = ['ros2', 'run', 'pi_arm_tasks', 'pi_arm_zero', '--confirm-reference']
         packing = json.loads(subprocess.check_output(command, text=True, timeout=12))
         assert packing['success'], packing
-        wait(node, lambda: samples[-1].software_zero_id == packing['reference_id'])
+        wait(node, lambda: list(samples[-1].software_output_offsets_rad) == packing['software_output_offsets_rad'])
         expected = [math.radians(v) for v in (0, 100.7, -85.6, 0, 0, 0)]
         assert len(samples[-1].positions) == len(expected)
         assert all(abs(a - b) < 1e-6 for a, b in zip(samples[-1].positions, expected))
@@ -51,8 +51,7 @@ def main():
         ], text=True, timeout=12)
         cli = json.loads(output)
         assert cli['success'], cli
-        assert cli['reference_id'] != result.reference_id
-        wait(node, lambda: samples[-1].software_zero_id == cli['reference_id'])
+        wait(node, lambda: list(samples[-1].software_output_offsets_rad) == cli['software_output_offsets_rad'])
         assert abs(samples[-1].positions[0] - math.radians(1)) < 1e-8
         print('PASS CLI: degrees converted to radians; returned reference matches live feedback', flush=True)
     finally:

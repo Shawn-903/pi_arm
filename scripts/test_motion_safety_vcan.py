@@ -162,18 +162,19 @@ def main():
         data['calibration'].update(robot_id='VCAN-ONLY', calibration_id='VCAN-ONLY-ZERO',
                                   packing_pose_joint_rad=[0.0]*6, raw_output_at_packing_rad=[0.0]*6)
         cable_file = ROOT/'src/pi_arm_description/config/cable_kinematics.yaml'
-        directions = yaml.safe_load(cable_file.read_text())['cable_kinematics'].get(
-            'output_directions', {f'motor_{i:02d}': 1 for i in range(1, 7)})
+        cable = yaml.safe_load(cable_file.read_text())['cable_kinematics']
+        axes = cable['axes']
+        j2_gain = axes['joint_02']['joint_radius_mm'] / axes['joint_02']['motor_radius_mm']
+        directions = cable.get('output_directions', {f'motor_{i:02d}': 1 for i in range(1, 7)})
         signs = [directions[f'motor_{i:02d}'] for i in range(1, 7)]
-        swapped = yaml.safe_load(cable_file.read_text())['cable_kinematics'].get('swap_wrist_channels', False)
+        swapped = cable.get('swap_wrist_channels', False)
         j4_motor = 5 if swapped else 4
-        axes = yaml.safe_load(cable_file.read_text())['cable_kinematics']['axes']
         wrist_gains = {motor: axes[name]['joint_radius_mm'] / axes[name]['motor_radius_mm']
                        for motor, name in ((4, 'joint_05'), (5, 'joint_06'))}
         candidate = runpy.run_path(str(ROOT/'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
         mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36 if i <= 3 else 6,
                         motor_direction=direction)
-                   for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, 1, -1, -1, -1, 1]), 1)]
+                   for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, -1, -1, -1, -1, 1]), 1)]
         data['calibration']['configuration_fingerprint'] = candidate['configuration_fingerprint'](cable_file, mapping)
         calibration.write_text(yaml.safe_dump(data))
         packages = ['pi_arm_hardware', 'pi_arm_can', 'pi_arm_transmission']
@@ -205,7 +206,7 @@ def main():
             print('CASE: feedback allowance preserves measured angles, command bounds stay strict')
             def protocol_from_joint_degrees(q2, q3):
                 coupling = 28.5 / 16.25
-                original = [0, q2*36, -(51.75/16.25*q3-coupling*q2)*36,
+                original = [0, -q2*j2_gain*36, -(51.75/16.25*q3-coupling*q2)*36,
                         -coupling*q2*6, -coupling*q2*6,
                         .5*(20.25/12.25+28.5/17.25)*q2*6]
                 return [value*sign for value, sign in zip(original, signs)]
@@ -218,7 +219,7 @@ def main():
                 assert len(sent) == 6
                 # Interpolated q2=101.6 is accepted as recovery, but the actual
                 # A4 target is the standard 100.7-degree command boundary.
-                assert abs(struct.unpack('<i', sent[2][4:])[0]/100/36 - 100.7) < .0003
+                assert abs(struct.unpack('<i', sent[2][4:])[0]/100/36/j2_gain + 100.7) < .0003
                 command(p, 'disarm')
 
             for axis, bound in ((2, 100.7), (3, 85.6)):
@@ -573,10 +574,10 @@ def main():
                 command(p, 'write')  # q1=.01 rad, all other joints zero, virtual CAN only
                 time.sleep(.1)
                 sent = dict(emulator.frames_for(0xa4))
-                old_pack_output = [0, 100.7, (51.75*-85.6-28.5*100.7)/16.25,
+                old_pack_output = [0, 100.7*j2_gain, (51.75*-85.6-28.5*100.7)/16.25,
                                    28.5/16.25*100.7, 28.5/16.25*100.7,
                                    .5*(20.25/12.25+28.5/17.25)*100.7]
-                for axis in (3, 4):
+                for axis in (2, 3, 4):
                     actual = struct.unpack('<i', sent[axis][4:])[0]/100
                     entry = mapping[axis-1]
                     expected = protocol_pack[axis-1]-signs[axis-1]*old_pack_output[axis-1]*entry['motor_direction']*entry['protocol_angle_ratio']

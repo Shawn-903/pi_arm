@@ -45,7 +45,7 @@ class ZeroReferenceNode(Node):
             future.add_done_callback(lambda _: completed.set())
             if not completed.wait(4.0):
                 response.code = 2002
-                response.message = "zero-reference result unknown; inspect software_zero_id, do not retry automatically"
+                response.message = "zero-reference result unknown; inspect the saved zero file and live joint feedback, do not retry automatically"
                 return response
             return future.result()
         except Exception as error:

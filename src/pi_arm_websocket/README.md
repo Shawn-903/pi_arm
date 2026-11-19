@@ -34,7 +34,7 @@ Python WebSocket ↔ ROS 2 网关，负责网页命令、状态推送、持久�
 | `motor_move` / `move` | 单关节 / 完整六关节目标，经 DirectMove 执行 |
 | `output_move` | 六个模型输出轴角，经绳索反解和 DirectMove |
 | `move_preset` | 打包 / 零位，前端可设置关节速度，仍受输出轴限速约束 |
-| `set_zero_reference` | 维护模式软件标零。网页以状态中的 `mechanical_zero_joints_deg` 为参考角，通过 `reference_joint_positions_deg` 传入六个关节角（°）。现场确认后将 `reference_pose_confirmed` 设为 true，采集成功返回参考编号 |
+| `set_zero_reference` | 维护模式软件标零。网页以状态中的 `mechanical_zero_joints_deg` 为参考角，通过 `reference_joint_positions_deg` 传入六个关节角（°）。现场确认后将 `reference_pose_confirmed` 设为 true，采集成功返回六轴原始协议角和软件零偏 |
 | `movej` / `movejs` / `movel` | 对应 ROS MoveJ / MoveJs / MoveL |
 | `preview_motion` | joint/output/ik/lin 只读预览 |
 | `enable_motor` / `disable_motor` / `reset_motor` / `reboot_motor` | 管理服务；reset 为清错，reboot 为选定电机重启 |

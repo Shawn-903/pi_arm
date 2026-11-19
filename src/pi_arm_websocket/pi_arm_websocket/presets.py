@@ -7,7 +7,6 @@ from .motion_limits import DEFAULT_ANGULAR_SPEED_DEG_S, MAX_ANGULAR_SPEED_DEG_S
 
 JOINT_NAMES = ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"]
 PACKING_JOINTS_DEG = [0.0, 100.7, -85.6, 0.0, 0.0, 0.0]
-PACKING_MODEL_FINGERPRINT = "fnv1a64:7d99c13df4cb0c63"
 # Default adjustable joint speed for packing/zero pose buttons (degrees/second).
 # The per-request output-shaft speed limit is enforced independently.
 PRESET_JOINT_SPEED_DEG_S = DEFAULT_ANGULAR_SPEED_DEG_S
@@ -28,11 +27,10 @@ class PosePresets:
                 document = yaml.safe_load(Path(calibration_file).read_text())
                 if "calibration" not in document:
                     zero = document["software_zero"]
-                    if (zero["schema_version"] != 3 or zero["joint_names"] != JOINT_NAMES or
-                            zero["configuration_fingerprint"] != PACKING_MODEL_FINGERPRINT):
+                    if zero["schema_version"] not in (3, 4) or zero["joint_names"] != JOINT_NAMES:
                         raise ValueError("当前模型未定义打包姿态")
                     self.packing = list(PACKING_JOINTS_DEG)
-                    self.calibration_id = zero["configuration_fingerprint"]
+                    self.calibration_id = None
                     self.approved = True
                     self.error = ""
                     return
@@ -83,7 +81,8 @@ class PosePresets:
             if name == "packing":
                 if self.error:
                     denied.append(self.error)
-                if hardware is not None and bridge.hardware_type == "real" and self.calibration_id != hardware.calibration_id:
+                if (self.calibration_id is not None and hardware is not None and bridge.hardware_type == "real"
+                        and self.calibration_id != hardware.calibration_id):
                     denied.append("网页目标与硬件加载的标定 ID 不一致")
             result[name] = {"label": label, "target_joint_angles_deg": target,
                             "available": not denied, "reason": "；".join(denied),

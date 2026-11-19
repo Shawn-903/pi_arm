@@ -3,8 +3,15 @@
 #include "pi_arm_transmission/cable_kinematics.hpp"
 
 #include <yaml-cpp/yaml.h>
+#include <tinyxml2.h>
+
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <limits>
 
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -142,6 +149,92 @@ OutputPositionLimits parse_output_limit(const YAML::Node & node, const std::stri
     require_value<double>(node, "upper_position_rad")};
 }
 
+using Limits = std::array<OutputPositionLimits, 6>;
+
+double joint_bound(const tinyxml2::XMLElement & limit, const char * key, const std::string & joint)
+{
+  const auto * raw = limit.Attribute(key);
+  std::istringstream input(raw ? raw : "");
+  double value{};
+  if (!(input >> value) || !std::isfinite(value) || !(input >> std::ws).eof()) {
+    throw std::invalid_argument("invalid URDF " + std::string(key) + " limit for " + joint);
+  }
+  return value;
+}
+
+Limits read_joint_bounds(const std::filesystem::path & path)
+{
+  tinyxml2::XMLDocument xml;
+  if (xml.LoadFile(path.string().c_str()) != tinyxml2::XML_SUCCESS || !xml.FirstChildElement("robot")) {
+    throw std::invalid_argument("cannot read joint limits from " + path.string());
+  }
+  const std::array<std::string, 6> names{
+    "joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"};
+  Limits bounds{};
+  std::set<std::string> found;
+  for (auto joint = xml.FirstChildElement("robot")->FirstChildElement("joint"); joint;
+    joint = joint->NextSiblingElement("joint"))
+  {
+    const auto * name = joint->Attribute("name");
+    const auto it = std::find(names.begin(), names.end(), name ? name : "");
+    if (it == names.end()) {continue;}
+    if (!found.insert(*it).second) {
+      throw std::invalid_argument("duplicate joint in URDF: " + *it);
+    }
+    const auto * limit = joint->FirstChildElement("limit");
+    if (!limit) {throw std::invalid_argument("missing URDF limit for " + *it);}
+    auto & bound = bounds[it - names.begin()];
+    bound = {joint_bound(*limit, "lower", *it), joint_bound(*limit, "upper", *it)};
+    if (bound.lower_position_rad >= bound.upper_position_rad) {
+      throw std::invalid_argument("invalid URDF limit order for " + *it);
+    }
+  }
+  if (found.size() != names.size()) {
+    throw std::invalid_argument("missing active joint in " + path.string());
+  }
+  return bounds;
+}
+
+Limits derive_output_limits(const CableKinematics & model, const Limits & joints)
+{
+  // On the supported principal branch the two chord equations are monotonic.
+  // Each output therefore reaches both extremes at corners of the joint box.
+  for (const auto i : {3U, 4U}) {
+    if (joints[i].lower_position_rad < -std::acos(-1.0) / 2 ||
+      joints[i].upper_position_rad > std::acos(-1.0) / 2)
+    {throw std::invalid_argument("chord joint limits exceed the inverse sine branch");}
+  }
+  Limits bounds;
+  bounds.fill({std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest()});
+  const auto & p = model.parameters();
+  for (unsigned corner = 0; corner < 64; ++corner) {
+    Vector6 q{}, output{};
+    for (std::size_t i = 0; i < q.size(); ++i) {
+      q[i] = corner & (1U << i) ? joints[i].upper_position_rad : joints[i].lower_position_rad;
+    }
+    if (!model.joint_to_output_position(q, output)) {
+      throw std::invalid_argument("cannot compute output limits for joint range");
+    }
+    for (std::size_t i = 0; i < bounds.size(); ++i) {
+      bounds[i].lower_position_rad = std::min(bounds[i].lower_position_rad, output[i]);
+      bounds[i].upper_position_rad = std::max(bounds[i].upper_position_rad, output[i]);
+    }
+    // Also enclose each manufactured J6 cable branch, not only their mean.
+    for (const auto & b : {p.axis6_branch_a, p.axis6_branch_b}) {
+      const double shaft = p.output_directions[5] *
+        (b.joint_radius_mm * q[5] + b.coupling_sign * b.joint2_guide_radius_mm * q[1]) /
+        b.motor_radius_mm;
+      bounds[5].lower_position_rad = std::min(bounds[5].lower_position_rad, shaft);
+      bounds[5].upper_position_rad = std::max(bounds[5].upper_position_rad, shaft);
+    }
+  }
+  for (auto & b : bounds) {
+    b.lower_position_rad = std::floor(b.lower_position_rad * 1000.0) / 1000.0;
+    b.upper_position_rad = std::ceil(b.upper_position_rad * 1000.0) / 1000.0;
+  }
+  return bounds;
+}
+
 }  // namespace
 
 CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
@@ -211,7 +304,7 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
   const auto output_limits = require_map(root, "output_limits");
   reject_unknown_keys(
     output_limits,
-    {"coordinate", "unit", "motor_01", "motor_02", "motor_03", "motor_04", "motor_05",
+    {"coordinate", "unit", "joint_limits_from", "motor_01", "motor_02", "motor_03", "motor_04", "motor_05",
       "motor_06"},
     "output_limits");
   if (require_value<std::string>(output_limits, "coordinate") != "reducer_output_shaft") {
@@ -221,12 +314,6 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
   if (require_value<std::string>(output_limits, "unit") != "rad") {
     throw std::invalid_argument("output_limits unit must be 'rad'");
   }
-  for (std::size_t index = 0; index < parameters.output_limits.size(); ++index) {
-    const std::string name = "motor_0" + std::to_string(index + 1U);
-    parameters.output_limits[index] =
-      parse_output_limit(require_map(output_limits, name.c_str()), name);
-  }
-
   const auto validation = root["validation"];
   if (validation) {
     if (!validation.IsMap()) {
@@ -250,6 +337,28 @@ CableKinematicsParameters load_cable_kinematics_config(const std::string & path)
     parameters.output_limit_tolerance_rad =
       optional_value<double>(
       validation, "output_limit_tolerance_rad", parameters.output_limit_tolerance_rad);
+  }
+
+  if (output_limits["joint_limits_from"]) {
+    const auto urdf = std::filesystem::path(path).parent_path() /
+      require_value<std::string>(output_limits, "joint_limits_from");
+    // The forward equations can be evaluated without any output clipping.
+    parameters.output_limits.fill({-std::numeric_limits<double>::max(),
+      std::numeric_limits<double>::max()});
+    parameters.output_limits = derive_output_limits(CableKinematics(parameters), read_joint_bounds(urdf));
+  }
+  for (std::size_t i = 0; i < parameters.output_limits.size(); ++i) {
+    const std::string name = "motor_0" + std::to_string(i + 1);
+    if (!output_limits["joint_limits_from"] || output_limits[name]) {
+      const auto cap = parse_output_limit(require_map(output_limits, name.c_str()), name);
+      if (!std::isfinite(cap.lower_position_rad) || !std::isfinite(cap.upper_position_rad)) {
+        throw std::invalid_argument("non-finite output limit for " + name);
+      }
+      auto & limit = parameters.output_limits[i];
+      limit = output_limits["joint_limits_from"] ? OutputPositionLimits{
+        std::max(limit.lower_position_rad, cap.lower_position_rad),
+        std::min(limit.upper_position_rad, cap.upper_position_rad)} : cap;
+    }
   }
 
   const CableKinematics validated(parameters);

@@ -105,7 +105,7 @@ CalibrationResult load_pack_reference_calibration(
     const auto document = YAML::LoadFile(path);
     const auto fingerprint = calibration_configuration_fingerprint(cable_kinematics_file, actuators);
     const auto zero = document["software_zero"];
-    if (zero && zero.IsMap() && zero["schema_version"].as<int>() == 3) {
+    if (zero && zero.IsMap() && zero["schema_version"].as<int>() >= 3) {
       CalibrationResult model;
       model.data.configuration_fingerprint = fingerprint;
       return decode_software_zero(document, model, actuators, kinematics);

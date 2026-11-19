@@ -361,10 +361,10 @@ protected:
     std::ifstream file(path);
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
   }
-  pi_arm_hardware::CalibrationResult save(const std::string & id = "zero-1")
+  pi_arm_hardware::CalibrationResult save()
   {
     return pi_arm_hardware::save_software_zero_reference(path.string(), base,
-      reference, protocol, config.actuators, kinematics, id, "2026-11-16T00:00:00Z");
+      reference, protocol, config.actuators, kinematics, "2026-11-16T00:00:00Z");
   }
   pi_arm_hardware::BackendConfig config;
   pi_arm_transmission::CableKinematics kinematics;
@@ -379,7 +379,7 @@ TEST_F(SoftwareZero, PersistsReferenceAndRoundTripsCoupledTargets)
   const auto saved = save();
   const auto loaded = pi_arm_hardware::load_software_zero_reference(
     path.string(), base, config.actuators, kinematics);
-  EXPECT_EQ(loaded.software_zero_id, "zero-1");
+  EXPECT_FALSE(YAML::LoadFile(path.string())["software_zero"]["reference_id"]);
   EXPECT_EQ(loaded.software_output_offsets_rad, saved.software_output_offsets_rad);
   EXPECT_EQ(loaded.data.raw_output_at_packing_rad, base.data.raw_output_at_packing_rad);
   pi_arm_transmission::Vector6 output{}, recovered{};
@@ -392,11 +392,11 @@ TEST_F(SoftwareZero, PersistsReferenceAndRoundTripsCoupledTargets)
   ASSERT_TRUE(kinematics.output_to_joint_position(output, recovered));
   for (std::size_t i = 0; i < 6; ++i) {EXPECT_NEAR(recovered[i], reference[i], 1e-9);}
   protocol[0] += 36.0;
-  const auto replaced = save("zero-2");
+  const auto replaced = save();
   EXPECT_NEAR(replaced.software_output_offsets_rad[0] - saved.software_output_offsets_rad[0],
     -3.14159265358979323846 / 180.0, 1e-12);
   EXPECT_EQ(pi_arm_hardware::load_software_zero_reference(
-    path.string(), base, config.actuators, kinematics).software_zero_id, "zero-2");
+    path.string(), base, config.actuators, kinematics).software_output_offsets_rad, replaced.software_output_offsets_rad);
 }
 
 TEST_F(SoftwareZero, InvalidCandidateLeavesCommittedReferenceUnchanged)
@@ -404,7 +404,7 @@ TEST_F(SoftwareZero, InvalidCandidateLeavesCommittedReferenceUnchanged)
   save();
   const auto before = contents();
   protocol[2] = std::numeric_limits<double>::quiet_NaN();
-  EXPECT_THROW(save("invalid"), std::exception);
+  EXPECT_THROW(save(), std::exception);
   EXPECT_EQ(contents(), before);
   auto mismatched = base;
   mismatched.data.configuration_fingerprint = "different";
@@ -422,19 +422,20 @@ TEST_F(SoftwareZero, SingleFileLoadsAloneAndLegacyIsUpgradedOnlyOnCapture)
   const auto single = pi_arm_hardware::load_pack_reference_calibration(
     path.string(), config.cable_kinematics_file, config.actuators, kinematics);
   ASSERT_TRUE(single.valid) << single.message;
-  EXPECT_EQ(single.software_zero_id, saved.software_zero_id);
   EXPECT_EQ(single.software_output_offsets_rad, saved.software_output_offsets_rad);
 
   auto document = YAML::LoadFile(path.string());
   auto zero = document["software_zero"];
   zero["schema_version"] = 2;
+  zero["configuration_fingerprint"] = base.data.configuration_fingerprint;
+  zero["reference_id"] = "legacy-zero";
   zero.remove("joint_names");
   zero["robot_id"] = base.data.robot_id;
   zero["base_calibration_id"] = base.data.calibration_id;
   {std::ofstream out(path); out << document;}
   EXPECT_EQ(pi_arm_hardware::load_pack_reference_calibration(
-    path.string(), config.cable_kinematics_file, config.actuators, kinematics).software_zero_id,
-    saved.software_zero_id);
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics).software_output_offsets_rad,
+    saved.software_output_offsets_rad);
   document.remove("calibration");
   {std::ofstream out(path); out << document;}
   EXPECT_THROW(pi_arm_hardware::load_software_zero_reference(
@@ -446,29 +447,77 @@ TEST_F(SoftwareZero, SingleFileLoadsAloneAndLegacyIsUpgradedOnlyOnCapture)
     path.string(), base, config.actuators, kinematics);
   EXPECT_EQ(legacy.software_output_offsets_rad, saved.software_output_offsets_rad);
   EXPECT_EQ(contents(), old_bytes);
-  save("upgraded");
+  save();
   EXPECT_EQ(pi_arm_hardware::load_pack_reference_calibration(
-    path.string(), config.cable_kinematics_file, config.actuators, kinematics).software_zero_id,
-    "upgraded");
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics).software_output_offsets_rad,
+    saved.software_output_offsets_rad);
+  EXPECT_FALSE(YAML::LoadFile(path.string())["software_zero"]["reference_id"]);
 }
 
 TEST_F(SoftwareZero, LostFileCanBeRebuiltFromThePoseAndNewEncoderReadings)
 {
   const auto fingerprint = base.data.configuration_fingerprint;
   auto first = pi_arm_hardware::capture_pose_zero(path.string(), fingerprint, reference, protocol,
-    config.actuators, kinematics, "first", "2026-11-19T00:00:00Z");
+    config.actuators, kinematics, "2026-11-19T00:00:00Z");
   ASSERT_TRUE(first.valid);
   ASSERT_TRUE(std::filesystem::remove(path));
   protocol[0] += 72.0;
   const auto next = pi_arm_hardware::capture_pose_zero(path.string(), fingerprint, reference,
-    protocol, config.actuators, kinematics, "rebuilt", "2026-11-19T00:01:00Z");
+    protocol, config.actuators, kinematics, "2026-11-19T00:01:00Z");
   const auto loaded = pi_arm_hardware::load_pack_reference_calibration(
     path.string(), config.cable_kinematics_file, config.actuators, kinematics);
   ASSERT_TRUE(loaded.valid) << loaded.message;
-  EXPECT_EQ(loaded.software_zero_id, "rebuilt");
   EXPECT_EQ(loaded.software_output_offsets_rad, next.software_output_offsets_rad);
   EXPECT_NEAR(next.software_output_offsets_rad[0] - first.software_output_offsets_rad[0],
     -2.0 * 3.14159265358979323846 / 180.0, 1.0e-12);
+}
+
+TEST_F(SoftwareZero, ConfirmedRecaptureAfterDirectionChangeReplacesTheSingleFile)
+{
+  const auto capture = [&]() {
+      const auto fingerprint = pi_arm_hardware::calibration_configuration_fingerprint(
+        config.cable_kinematics_file, config.actuators);
+      return pi_arm_hardware::capture_pose_zero(path.string(), fingerprint, reference, protocol,
+        config.actuators, kinematics, "2026-11-19T00:00:00Z");
+    };
+  const auto load = [&]() {
+      return pi_arm_hardware::load_pack_reference_calibration(
+        path.string(), config.cable_kinematics_file, config.actuators, kinematics);
+    };
+  ASSERT_TRUE(capture().valid);
+  const auto before = contents();
+  config.actuators[1].motor_direction *= -1;
+  EXPECT_TRUE(load().valid);
+  protocol[1] = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_THROW(capture(), std::exception);
+  EXPECT_EQ(contents(), before);
+  protocol[1] = 5832.0;
+  ASSERT_TRUE(capture().valid);
+  const auto current = load();
+  ASSERT_TRUE(current.valid) << current.message;
+  EXPECT_FALSE(YAML::LoadFile(path.string())["software_zero"]["configuration_fingerprint"]);
+  pi_arm_transmission::Vector6 output{};
+  ASSERT_TRUE(kinematics.joint_to_output_position(reference, output));
+  for (std::size_t i = 0; i < protocol.size(); ++i) {
+    EXPECT_NEAR(pi_arm_hardware::protocol_position_to_model_output_rad(
+      protocol[i], current.software_output_offsets_rad[i], config.actuators[i]), output[i], 1e-9);
+  }
+  for (const auto & entry : std::filesystem::directory_iterator(directory)) {
+    EXPECT_EQ(entry.path(), path);
+  }
+}
+
+TEST_F(SoftwareZero, ConfirmedCaptureReplacesEarlierPackingMetadata)
+{
+  save();
+  auto previous = YAML::LoadFile(path.string());
+  previous["calibration"]["calibration_id"] = "earlier-packing-reference";
+  previous["calibration"]["robot_id"] = "earlier-installation";
+  {std::ofstream out(path); out << previous;}
+  ASSERT_TRUE(save().valid);
+  const auto current = YAML::LoadFile(path.string());
+  EXPECT_EQ(current["calibration"]["calibration_id"].as<std::string>(), base.data.calibration_id);
+  EXPECT_EQ(current["calibration"]["robot_id"].as<std::string>(), base.data.robot_id);
 }
 
 TEST_F(SoftwareZero, MissingCorruptOrUnapprovedReferenceIsRejected)

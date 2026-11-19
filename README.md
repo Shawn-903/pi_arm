@@ -130,7 +130,7 @@ ros2 topic echo /pi_arm/state --once
 | 网页无法打开 | HTTP 启动终端、主机 IP、8000 端口及网络 |
 | 页面可打开但无法连接 | WebSocket 地址/8765 端口、网关进程；HTTP 与 WS 是两个服务 |
 | 六轴掉线或反馈过期 | CAN 接口、供电、驱动占用与启动日志 |
-| `CALIBRATION_INVALID` | 核对零点文件、当前 CAN 接口、批准状态及模型指纹。见[配置说明](src/pi_arm_hardware/config/README.md) |
+| `CALIBRATION_INVALID` | 核对零点文件、当前 CAN 接口和关节映射；显式指定历史打包标定时核对其批准状态及模型指纹。见[配置说明](src/pi_arm_hardware/config/README.md) |
 | 有反馈但运动不可用 | 启动模式、使能、示教状态、控制许可、活动任务及关节轨迹控制器（JTC）是否 active |
 | 回零看起来很慢 | 同时检查关节速度与输出轴限速，绳索耦合会延长整臂同步时间 |
 
@@ -138,7 +138,7 @@ ros2 topic echo /pi_arm/state --once
 
 ## 备份与恢复
 
-当前版本为 `V0.56`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
+当前版本为 `V0.57`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
 
 历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
 
@@ -163,7 +163,7 @@ git worktree add --detach ../pi_arm-V0.5 V0.5
 | 数据 | 保存位置与恢复方式 |
 | --- | --- |
 | 源码、配置、接受的标定 | Git；标定数据与 `.cable.yaml` 必须配套 |
-| 软件零点 | 默认备份并还原 `~/.local/share/pi_arm/software-zero-can0.yaml`。启动后核对参考编号及实物姿态 |
+| 软件零点 | 默认备份并还原 `~/.local/share/pi_arm/software-zero-can0.yaml`。启动后核对六轴反馈与实物姿态 |
 | 点位库 | 默认 `~/.local/share/pi_arm/points-real.json` / `points-mock.json`；网页导出备份，停止服务后恢复到相应 `points_file` |
 | 重复测试记录 | 当前浏览器内存；关闭、刷新或新测试前导出 JSON/CSV |
 | ROM 零点、绳索张紧状态 | 记录实物状态，恢复时在现场核对 |

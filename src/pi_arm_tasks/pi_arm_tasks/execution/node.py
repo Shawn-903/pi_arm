@@ -132,10 +132,7 @@ class Adapter:
             or point.get("joint_names") != self.bridge.frame_model.names
         ):
             raise ValueError("点位的运行模式或机械臂模型不兼容")
-        if state and (
-            point.get("calibration_id", "") != state.hardware.calibration_id
-            or point.get("software_zero_id", "") != state.hardware.software_zero_id
-        ):
+        if state and point.get("calibration_id", "") != state.hardware.calibration_id:
             raise ValueError("点位参考信息已变化，请重新核对并保存")
         return point
 

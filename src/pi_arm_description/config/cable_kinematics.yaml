@@ -12,7 +12,7 @@ cable_kinematics:
   # This is NOT motor_direction (protocol encoder -> output shaft, in URDF).
   # ROS vector order remains joint_01, joint_02, joint_04, joint_05, joint_06, joint_09.
   # swap_wrist_channels changes only the two wrist cable-to-joint assignments.
-  # After editing, rebind the packing calibration to this model and restart.
+  # After editing, restart and capture the software zero at the packing pose.
   output_directions:
     motor_01: 1
     motor_02: 1
@@ -29,20 +29,12 @@ cable_kinematics:
     compatibility_tolerance: 1.0e-3
     output_limit_tolerance_rad: 1.0e-6
 
-  # Reducer output-shaft positions, relative to the whole-arm zero operation.
-  # These are theoretical envelopes derived from the URDF joint limits and the
-  # cable model; live hardware still requires low-speed acceptance testing.
-  # Joint 2: +/-100.7 deg; joint 4: +/-85.6 deg. Envelopes are rounded
-  # outward to 0.001 rad; this is numerical enclosure, not mechanical clearance.
+  # Compute output-shaft ranges from the joint limits and cable equations.
+  # Optional motor_XX bounds here can further restrict physical shaft travel.
   output_limits:
     coordinate: reducer_output_shaft
     unit: rad
-    motor_01: {lower_position_rad: -3.819, upper_position_rad: 3.819}
-    motor_02: {lower_position_rad: -1.758, upper_position_rad: 1.758}
-    motor_03: {lower_position_rad: -7.841, upper_position_rad: 7.841}
-    motor_04: {lower_position_rad: -4.892, upper_position_rad: 4.892}
-    motor_05: {lower_position_rad: -4.127, upper_position_rad: 4.127}
-    motor_06: {lower_position_rad: -6.047, upper_position_rad: 6.047}
+    joint_limits_from: ../urdf/pi_arm.urdf.xacro
 
   # Legacy geometry keys identify cable rows; joint_05/joint_06 geometry
   # stays with motor_04/motor_05 respectively, even when assignments swap.
@@ -54,7 +46,7 @@ cable_kinematics:
 
     joint_02:
       model: linear
-      motor_radius_mm: 16.0
+      motor_radius_mm: 28.5
       joint_radius_mm: 16.0
 
     joint_04:

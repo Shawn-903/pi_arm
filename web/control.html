@@ -77,7 +77,7 @@
           ROS 2 Jazzy / Pi Arm R1
         </small>
         <div class="version-note">
-          Pi Arm V0.56
+          Pi Arm V0.57
         </div>
       </div>
     </aside>
@@ -920,7 +920,7 @@
                       到位后开始等待，测试使用此处速度并受输出轴限速约束。树莓派独立执行；页面刷新或断线后继续，重新连接可查看当前运行，也可在运行记录中导出。
                     </p>
                     <p>
-                      记录来自编码器与绳索模型，不能替代外部量具测得的末端重复定位精度。记录包含点位、参考编号、到位误差和时间，便于与实测对照。
+                      记录来自编码器与绳索模型，不能替代外部量具测得的末端重复定位精度。记录包含点位、到位误差和时间，便于与实测对照。
                     </p>
                   </details>
                 </fieldset>
@@ -1258,7 +1258,7 @@
                   采集并保存软件零点
                 </button>
                 <div id="zeroReferenceCurrent" role="status">
-                  当前软件零点：未设置
+                  当前标定状态：等待反馈
                 </div>
                 <div id="zeroReferenceResult" role="status">
                   等待维护模式及新鲜静止反馈
@@ -1413,7 +1413,7 @@
     </script>
     <script src="assets/diagnostics.js?v=20261116-diagnostics1">
     </script>
-    <script src="assets/control.js?v=20261119-controller-ip">
+    <script src="assets/control.js?v=20261119-software-zero">
     </script>
     <script src="assets/interactive.js">
     </script>

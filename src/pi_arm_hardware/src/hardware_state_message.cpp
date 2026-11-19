@@ -41,7 +41,6 @@ pi_arm_interfaces::msg::HardwareState make_hardware_state_message(
   message.motion_stop_pending = sample.motion_stop_pending;
   message.motion_stop_failed = sample.motion_stop_failed;
   message.calibration_id = sample.calibration_id;
-  message.software_zero_id = sample.software_zero_id;
   message.raw_protocol_positions_deg = sample.raw_protocol_positions_deg;
   message.raw_output_positions_rad = sample.raw_output_positions_rad;
   message.software_output_offsets_rad = sample.software_output_offsets_rad;

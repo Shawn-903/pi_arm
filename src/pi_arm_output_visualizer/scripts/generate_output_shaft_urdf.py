@@ -3,32 +3,21 @@
 """Generate the six-slider URDF from cable_kinematics.yaml."""
 
 import argparse
-import math
+import subprocess
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-import yaml
 
 
 MOTOR_NAMES = tuple(f"motor_{index:02d}" for index in range(1, 7))
 
 
 def load_output_limits(path: Path) -> list[tuple[str, float, float]]:
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    limits = document["cable_kinematics"]["output_limits"]
-    if limits.get("coordinate") != "reducer_output_shaft":
-        raise ValueError("output_limits.coordinate must be reducer_output_shaft")
-    if limits.get("unit") != "rad":
-        raise ValueError("output_limits.unit must be rad")
-
+    output = subprocess.check_output(["pi_arm_output_limits", str(path)], text=True)
     result = []
-    for motor_name in MOTOR_NAMES:
-        motor_limit = limits[motor_name]
-        lower = float(motor_limit["lower_position_rad"])
-        upper = float(motor_limit["upper_position_rad"])
-        if not math.isfinite(lower) or not math.isfinite(upper) or lower >= upper:
-            raise ValueError(f"invalid output limit for {motor_name}")
-        result.append((f"{motor_name}_output", lower, upper))
+    for name, row in zip(MOTOR_NAMES, output.splitlines(), strict=True):
+        lower, upper = map(float, row.split())
+        result.append((f"{name}_output", lower, upper))
     return result
 
 

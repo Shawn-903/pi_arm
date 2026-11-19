@@ -80,7 +80,7 @@ def main():
             candidate = runpy.run_path(str(ROOT / 'src/pi_arm_hardware/scripts/pi_arm_calibration_candidate'))
             mapping = [dict(joint_name=name, motor_id=i, protocol_angle_ratio=36.0 if i <= 3 else 6.0,
                             motor_direction=direction)
-                       for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, 1, -1, -1, -1, 1]), 1)]
+                       for i, (name, direction) in enumerate(zip(candidate['JOINT_NAMES'], [1, -1, -1, -1, -1, 1]), 1)]
             data = yaml.safe_load((ROOT / 'src/pi_arm_hardware/config/pack_reference_calibration.template.yaml').read_text())
             data['calibration'].update(
                 approved=True, robot_id='VCAN-ONLY', calibration_id='SOFTWARE-ZERO-VCAN-ONLY',
@@ -107,8 +107,8 @@ def main():
                 result = call(node, client, request)
                 assert result.success, result.message
                 saved = zero.read_bytes()
-                reference_id = result.reference_id
-                wait(node, lambda: samples[-1].software_zero_id == reference_id)
+                offsets = list(result.software_output_offsets_rad)
+                wait(node, lambda: list(samples[-1].software_output_offsets_rad) == offsets)
                 assert max(abs(value) for value in samples[-1].positions) < 1e-8
                 for index, actuator in enumerate(mapping):
                     expected = -math.radians(angles[index]) / (actuator['protocol_angle_ratio'] * actuator['motor_direction'])
@@ -132,7 +132,7 @@ def main():
                     assert not result.success, result.message
                 finally:
                     zero.parent.chmod(0o700)
-                assert zero.read_bytes() == saved and samples[-1].software_zero_id == reference_id
+                assert zero.read_bytes() == saved and list(samples[-1].software_output_offsets_rad) == offsets
                 print('PASS stale feedback and persistence failure leave the committed reference unchanged', flush=True)
 
                 start = call(node, axis, AxisTest.Request(operation='start', space='motor', axis_id=1,
@@ -146,7 +146,7 @@ def main():
                 print('PASS active task rejects reference changes', flush=True)
             samples.clear()
             with monitor(work, params):
-                wait(node, lambda: samples and samples[-1].software_zero_id == reference_id and all(samples[-1].motor_fresh))
+                wait(node, lambda: samples and list(samples[-1].software_output_offsets_rad) == offsets and all(samples[-1].motor_fresh))
                 assert max(abs(value) for value in samples[-1].positions) < 1e-8
                 assert zero.read_bytes() == saved and base.read_bytes() == base_before
                 assert not emulator.frames_for(0x19) and not emulator.frames_for(0x95)

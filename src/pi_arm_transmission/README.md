@@ -34,7 +34,8 @@ C = 33.94 / 16.25
 K = (20.25/12.25 + 28.5/17.25) / 2
 
 phi1 = (19.75/16.25) * q1
-phi2 = q2
+R2 = axes.joint_02.joint_radius_mm / axes.joint_02.motor_radius_mm
+phi2 = R2 * q2
 phi3 = -A*q3 + B*q2
 phi4 = -C*sin(q5) - B*q2
 phi5 =  C*sin(q4) + B*q2
@@ -47,7 +48,7 @@ J3 绳长由两个同步关节半径共同贡献，所以系数是半径之和�
 
 ```text
 q1 = phi1 / (19.75/16.25)
-q2 = phi2
+q2 = phi2 / R2
 q3 = (B*q2 - phi3) / A
 q4 = asin(( phi5 - B*q2) / C)
 q5 = asin((-phi4 - B*q2) / C)
@@ -59,7 +60,7 @@ q6 = -phi6 - K*q2
 速度关系为 `phi_dot = J(q) * q_dot`。Jacobian 的非零项：
 
 ```text
-J11 = 19.75/16.25; J22 = 1
+J11 = 19.75/16.25; J22 = R2
 J32 = B;          J33 = -A
 J42 = -B;         J45 = -C*cos(q5)
 J52 = B;          J54 =  C*cos(q4)
@@ -69,6 +70,8 @@ J62 = -K;         J66 = -1
 速度反解按位置反解顺序扣除 J2 项，再除自身增益；cos 接近零时返回奇异诊断。非有限输入、输出轴超限、asin 定义域与配置错误都应显式上报。
 
 ## 限位与轨迹时间
+
+生产配置的 `output_limits.joint_limits_from` 指向含关节限位的 URDF。加载器将关节范围代入绳索方程，包含腕部交换、J2 补偿和 J6 两条支路，向外取整到 0.001 rad。若配置了实测的 `motor_XX` 输出轴限位，加载器取二者交集。运行 `pi_arm_output_limits <绳索配置路径>` 可查看六个最终范围。
 
 `check_output_position_limits` 检查目标输出轴角；`check_output_feedback_limits` 将关节容差经耦合传播到反馈输出包络。调用方在反解后继续检查各关节限位。
 
