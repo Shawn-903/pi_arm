@@ -95,7 +95,7 @@ ROS_DOMAIN_ID=81 PI_ARM_WEB_PORT=8001 bash scripts/start_web.sh \
 
 ## 打开网页与停止
 
-在浏览器打开 `http://树莓派IP:8000/control.html`，点击“连接”；默认 WebSocket 地址为 `ws://树莓派IP:8765`。三维模型通过该 HTTP 页面加载。实机控制时，先核对标定、六轴反馈和控制许可，再手动使能。详细操作见 [web/README.md](web/README.md)。
+在浏览器打开 `http://192.168.2.110:8000/control.html`，点击“连接”。网页默认连接 `ws://192.168.2.110:8765`，也可以修改“控制器”地址或在页面网址中指定 `?ws=...`。三维模型通过该 HTTP 页面加载。实机控制时，先核对标定、六轴反馈和控制许可，再手动使能。详细操作见 [web/README.md](web/README.md)。
 
 `PI_ARM_WEB_PORT` 设置 HTTP 端口；普通控制和方向测试模式可用 `websocket_port` 设置 WebSocket 端口。点位文件用 `points_file` 指定。
 
@@ -138,7 +138,7 @@ ros2 topic echo /pi_arm/state --once
 
 ## 备份与恢复
 
-当前版本为 `V0.55`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
+当前版本为 `V0.56`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
 
 历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
 

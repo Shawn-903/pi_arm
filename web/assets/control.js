@@ -1,7 +1,3 @@
-const defaultHost = window.location.hostname || "127.0.0.1";
-const defaultWsUrl =
-  new URLSearchParams(window.location.search).get("ws") ||
-  `ws://${defaultHost}:8765`;
 const activeJointNames = [
   "joint_01",
   "joint_02",
@@ -1081,7 +1077,8 @@ function stopAllMotors() {
 }
 
 function init() {
-  els.wsUrl.value = defaultWsUrl;
+  const wsOverride = new URLSearchParams(window.location.search).get("ws");
+  if (wsOverride) els.wsUrl.value = wsOverride;
   buildStatusTable();
   buildSingleMotorControls();
   buildJointInputs(els.multiJointGrid, "multiJoint");
