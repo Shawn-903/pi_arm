@@ -1,6 +1,6 @@
 # 标定、坐标与硬件配置
 
-整体启动命令统一在 [根 README](../../../README.md)。当前参考为 [R10](pack_reference_calibration.R10.recorded.yaml)，对应 [绳索模型快照](pack_reference_calibration.R10.recorded.cable.yaml)，标定编号 `PIARM-R1-SN0001-PACKCAL-20260920-R10`，配置指纹 `fnv1a64:7d99c13df4cb0c63`。
+整体启动命令见[根 README](../../../README.md)。本目录保存历史打包测量和模型快照。已接受的打包记录为 [R10](pack_reference_calibration.R10.recorded.yaml)，对应的模型见[绳索配置快照](pack_reference_calibration.R10.recorded.cable.yaml)。
 
 ## 三种角度与零偏
 
@@ -43,7 +43,7 @@ p_target = G × d × (F(q_target) - b)
 | 到位容差和稳定时间 | [manager.yaml](../../pi_arm_bringup/config/manager.yaml) |
 | 运动默认/最大角速度 | [motion_limits.py](../../pi_arm_websocket/pi_arm_websocket/motion_limits.py)，实际约束同时由 manager/硬件校验 |
 
-本目录中的历史 R06/R08/R09 及模板用于复现，不是自动回退候选。运行必须显式选择当前接受的文件，源模型和标定绑定指纹不匹配时应报错，不能跳过校验。
+本目录中的 R06/R08/R09 及模板用于复现历史配置。若显式加载打包标定，程序会校验其批准状态、模型指纹和电机映射。
 
 ## 参考重建流程
 
@@ -51,9 +51,9 @@ p_target = G × d × (F(q_target) - b)
 
 日常重设零位使用主机软件零偏，不调用 `pi_arm_rom_zero_cli`，也不发送 0x19 或 0x95。第一版限定在 commissioning 维护模式；该模式不启动 manager/JTC，采样过程与单轴测试、管理操作在同一线程串行执行。
 
-实机默认读取当前 CAN 接口的零点文件，例如 `~/.local/share/pi_arm/software-zero-can0.yaml`。首次采集使用包内 R10 或指定的已接受基础标定。保存时将基础标定和新参考写入同一文件，后续启动和再次采集都可直接读取。文件损坏或模型指纹不符时，硬件仍可报告原始反馈，整臂运动保持禁止。
+实机默认读取当前 CAN 接口的零点文件，例如 `~/.local/share/pi_arm/software-zero-can0.yaml`。采集在当前绳索模型上按 `F(q_ref) − raw_now` 求零偏。即使原零点文件丢失，也能在实物回到已知姿态后重建。默认启动若缺少有效零点，硬件仍报告原始反馈，整臂运动保持禁止。
 
-新文件保存参考姿态、六电机原始协议角、时间、参考编号及基础标定绑定关系。零偏由 `F(q_ref) - raw_ref` 计算，读取时重新核验并计算，复用原有反馈和目标转换；基础标定的打包测量和几何参数原样保留。文件完整写入、同步后原子替换，成功后才应用六轴零偏。`HardwareState.software_zero_id` 标识正在使用的软件参考，`calibration_id` 仍标识基础标定。
+零点文件保存姿态、六电机原始协议角、采集时间、编号和模型指纹，加载时核对关节顺序与电机映射。完整写入并同步后，程序一次替换文件并应用六轴零偏。`HardwareState.software_zero_id` 标识此次采集，`calibration_id` 标识所用模型或显式指定的打包标定。
 
 将机械臂实际放到六关节零位后，才可把 `q_ref` 设为六个零；打包姿态不能当作机械零位。流程只采样和设置参考，不负责自动寻找或运动到机械零位。只有新鲜、无故障、连续静止反馈且没有活动测试时才接受请求。
 

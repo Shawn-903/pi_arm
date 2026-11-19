@@ -1,4 +1,4 @@
-"""Named joint targets; real packing targets come from the active calibration."""
+"""Named joint targets for the current model or an explicitly configured packing pose."""
 from pathlib import Path
 import math
 
@@ -6,7 +6,8 @@ import yaml
 from .motion_limits import DEFAULT_ANGULAR_SPEED_DEG_S, MAX_ANGULAR_SPEED_DEG_S
 
 JOINT_NAMES = ["joint_01", "joint_02", "joint_04", "joint_05", "joint_06", "joint_09"]
-MOCK_PACKING_DEG = [0.0, 100.7, -85.6, 0.0, 0.0, 0.0]
+PACKING_JOINTS_DEG = [0.0, 100.7, -85.6, 0.0, 0.0, 0.0]
+PACKING_MODEL_FINGERPRINT = "fnv1a64:7d99c13df4cb0c63"
 # Default adjustable joint speed for packing/zero pose buttons (degrees/second).
 # The per-request output-shaft speed limit is enforced independently.
 PRESET_JOINT_SPEED_DEG_S = DEFAULT_ANGULAR_SPEED_DEG_S
@@ -19,12 +20,23 @@ class PosePresets:
         self.approved = False
         self.error = "未加载打包标定文件"
         if hardware_type == "mock":
-            self.packing = list(MOCK_PACKING_DEG)
+            self.packing = list(PACKING_JOINTS_DEG)
             self.approved = True
             self.error = ""
         elif calibration_file:
             try:
-                data = yaml.safe_load(Path(calibration_file).read_text())["calibration"]
+                document = yaml.safe_load(Path(calibration_file).read_text())
+                if "calibration" not in document:
+                    zero = document["software_zero"]
+                    if (zero["schema_version"] != 3 or zero["joint_names"] != JOINT_NAMES or
+                            zero["configuration_fingerprint"] != PACKING_MODEL_FINGERPRINT):
+                        raise ValueError("当前模型未定义打包姿态")
+                    self.packing = list(PACKING_JOINTS_DEG)
+                    self.calibration_id = zero["configuration_fingerprint"]
+                    self.approved = True
+                    self.error = ""
+                    return
+                data = document["calibration"]
                 if data["joint_names"] != JOINT_NAMES:
                     raise ValueError("标定关节顺序不匹配")
                 values = data["packing_pose_joint_rad"]

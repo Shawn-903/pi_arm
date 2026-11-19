@@ -35,13 +35,15 @@ ManagementResult RealBackend::set_zero_reference(
   }
   try {
     const auto output_path = std::filesystem::weakly_canonical(config_.software_zero_file);
-    if ((output_path == std::filesystem::weakly_canonical(config_.calibration_file) &&
-      calibration_.software_zero_id.empty()) ||
-      output_path == std::filesystem::weakly_canonical(config_.cable_kinematics_file))
-    {return {false, 1004, "software zero must not overwrite base calibration or cable geometry"};}
-    auto base = load_pack_reference_calibration(config_.calibration_file,
-      config_.cable_kinematics_file, config_.actuators, kinematics_);
-    if (!base.valid) {return {false, 2001, base.message};}
+    if (output_path == std::filesystem::weakly_canonical(config_.cable_kinematics_file)) {
+      return {false, 1004, "software zero must not overwrite cable geometry"};
+    }
+    if (!config_.calibration_file.empty() &&
+      output_path != std::filesystem::weakly_canonical(config_.calibration_file) &&
+      !calibration_.valid)
+    {return {false, 2001, calibration_.message};}
+    const auto fingerprint = calibration_configuration_fingerprint(
+      config_.cable_kinematics_file, config_.actuators);
 
     CalibrationVector6 first{}, protocol{};
     for (int sample = 0; sample < 6; ++sample) {
@@ -67,8 +69,9 @@ ManagementResult RealBackend::set_zero_reference(
     ::gmtime_r(&time, &utc);
     std::ostringstream stamp;
     stamp << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
-    auto next = save_software_zero_reference(config_.software_zero_file, base,
-      reference_joint_rad, protocol, config_.actuators, kinematics_, reference_id, stamp.str());
+    const auto * packing = calibration_.valid && calibration_.data.approved ? &calibration_ : nullptr;
+    auto next = capture_pose_zero(config_.software_zero_file, fingerprint, reference_joint_rad,
+      protocol, config_.actuators, kinematics_, reference_id, stamp.str(), packing);
     // No CAN writes, and no concurrent controller exists in commissioning mode.
     calibration_ = std::move(next);
     for (auto & detector : joint_motion_detectors_) {detector.reset();}

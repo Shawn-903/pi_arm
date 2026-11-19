@@ -17,13 +17,13 @@ def paths(tmp_path, monkeypatch):
 def test_first_capture_default_and_mock_isolation(paths):
     config, zero = paths
     template = config / "pack_reference_calibration.template.yaml"
-    factory = config / "pack_reference_calibration.R10.recorded.yaml"
-    assert files.resolve_reference_files("vcan0") == (template, None)
-    assert files.resolve_reference_files("vcan0", capture=True) == (factory, zero)
+    assert files.resolve_reference_files("vcan0") == (zero, zero)
+    assert files.resolve_reference_files("vcan0", capture=True) == (zero, zero)
     zero.write_text("calibration: {}\nsoftware_zero: {schema_version: 2}\n")
     assert files.resolve_reference_files("vcan0") == (zero, zero)
     assert files.resolve_reference_files("vcan0", mock=True) == (template, None)
-    assert files.resolve_reference_files("vcan1") == (template, None)
+    other = zero.with_name("software-zero-vcan1.yaml")
+    assert files.resolve_reference_files("vcan1") == (other, other)
 
 
 def test_legacy_custom_paths_and_corrupt_file(paths):
@@ -32,6 +32,7 @@ def test_legacy_custom_paths_and_corrupt_file(paths):
     custom = Path(str(zero) + ".custom")
     zero.write_text("software_zero: {schema_version: 1}\n")
     assert files.resolve_reference_files("vcan0") == (factory, zero)
+    assert files.resolve_reference_files("vcan0", capture=True) == (zero, zero)
     assert files.resolve_reference_files("vcan0", custom) == (custom, zero)
     zero.write_text("software_zero: [")
     assert files.resolve_reference_files("vcan0") == (zero, zero)

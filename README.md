@@ -46,7 +46,7 @@ source install/setup.bash
 bash scripts/start_web.sh hardware_type:=real allow_real_control:=true
 ```
 
-首次标零时，停止占用 CAN 的服务，确认实物在六关节机械零位并保持静止，执行 `bash scripts/zero_reference.sh --confirm-reference`。此后实机启动自动读取 `~/.local/share/pi_arm/software-zero-can0.yaml`，备份零点只需保存这份文件。其他已知参考姿态见[标零步骤](src/pi_arm_tasks/pi_arm_tasks/zero_reference/README.md)。
+标零时，停止占用 CAN 的服务，确认实物在六关节机械零位并保持静止，执行 `bash scripts/zero_reference.sh --confirm-reference`。实机启动自动读取 `~/.local/share/pi_arm/software-zero-can0.yaml`。文件丢失时，把实物放回已知姿态，再采集一次即可重建。其他已知姿态见[标零步骤](src/pi_arm_tasks/pi_arm_tasks/zero_reference/README.md)。
 
 DirectMove、输出轴和预设姿态使用关节插值，执行前确认沿途空间。笛卡尔 LIN 规划末端直线路径，并按已建模场景检查碰撞。
 
@@ -129,7 +129,7 @@ ros2 topic echo /pi_arm/state --once
 
 ## 备份与恢复
 
-当前版本为 `V0.53`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
+当前版本为 `V0.54`。项目使用 `main` 和工作分支 `refactor/code-organization`。版本规则及更新记录见[版本管理](docs/versioning.md)。
 
 历史重复定位测试 1.0 的恢复标签为 `repeatability-v1.0`（`95b65be`），本轮重构前基线为 `baseline/pre-refactor-20261116`（`7010186`）。
 

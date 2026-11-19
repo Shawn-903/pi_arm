@@ -103,8 +103,14 @@ CalibrationResult load_pack_reference_calibration(
   }
   try {
     const auto document = YAML::LoadFile(path);
-    auto base = decode_pack_reference(document,
-      calibration_configuration_fingerprint(cable_kinematics_file, actuators), actuators, kinematics);
+    const auto fingerprint = calibration_configuration_fingerprint(cable_kinematics_file, actuators);
+    const auto zero = document["software_zero"];
+    if (zero && zero.IsMap() && zero["schema_version"].as<int>() == 3) {
+      CalibrationResult model;
+      model.data.configuration_fingerprint = fingerprint;
+      return decode_software_zero(document, model, actuators, kinematics);
+    }
+    auto base = decode_pack_reference(document, fingerprint, actuators, kinematics);
     if (base.valid && document["software_zero"]) {
       return decode_software_zero(document, base, actuators, kinematics);
     }

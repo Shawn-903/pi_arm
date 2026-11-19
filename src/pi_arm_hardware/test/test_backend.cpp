@@ -426,6 +426,15 @@ TEST_F(SoftwareZero, SingleFileLoadsAloneAndLegacyIsUpgradedOnlyOnCapture)
   EXPECT_EQ(single.software_output_offsets_rad, saved.software_output_offsets_rad);
 
   auto document = YAML::LoadFile(path.string());
+  auto zero = document["software_zero"];
+  zero["schema_version"] = 2;
+  zero.remove("joint_names");
+  zero["robot_id"] = base.data.robot_id;
+  zero["base_calibration_id"] = base.data.calibration_id;
+  {std::ofstream out(path); out << document;}
+  EXPECT_EQ(pi_arm_hardware::load_pack_reference_calibration(
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics).software_zero_id,
+    saved.software_zero_id);
   document.remove("calibration");
   {std::ofstream out(path); out << document;}
   EXPECT_THROW(pi_arm_hardware::load_software_zero_reference(
@@ -441,6 +450,25 @@ TEST_F(SoftwareZero, SingleFileLoadsAloneAndLegacyIsUpgradedOnlyOnCapture)
   EXPECT_EQ(pi_arm_hardware::load_pack_reference_calibration(
     path.string(), config.cable_kinematics_file, config.actuators, kinematics).software_zero_id,
     "upgraded");
+}
+
+TEST_F(SoftwareZero, LostFileCanBeRebuiltFromThePoseAndNewEncoderReadings)
+{
+  const auto fingerprint = base.data.configuration_fingerprint;
+  auto first = pi_arm_hardware::capture_pose_zero(path.string(), fingerprint, reference, protocol,
+    config.actuators, kinematics, "first", "2026-11-19T00:00:00Z");
+  ASSERT_TRUE(first.valid);
+  ASSERT_TRUE(std::filesystem::remove(path));
+  protocol[0] += 72.0;
+  const auto next = pi_arm_hardware::capture_pose_zero(path.string(), fingerprint, reference,
+    protocol, config.actuators, kinematics, "rebuilt", "2026-11-19T00:01:00Z");
+  const auto loaded = pi_arm_hardware::load_pack_reference_calibration(
+    path.string(), config.cable_kinematics_file, config.actuators, kinematics);
+  ASSERT_TRUE(loaded.valid) << loaded.message;
+  EXPECT_EQ(loaded.software_zero_id, "rebuilt");
+  EXPECT_EQ(loaded.software_output_offsets_rad, next.software_output_offsets_rad);
+  EXPECT_NEAR(next.software_output_offsets_rad[0] - first.software_output_offsets_rad[0],
+    -2.0 * 3.14159265358979323846 / 180.0, 1.0e-12);
 }
 
 TEST_F(SoftwareZero, MissingCorruptOrUnapprovedReferenceIsRejected)

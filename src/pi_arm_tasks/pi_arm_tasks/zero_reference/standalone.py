@@ -88,9 +88,10 @@ def main():
         calibration, zero = resolve_reference_files(
             args.can_interface, args.calibration_file, args.software_zero_file, capture=True)
         cable = (args.cable_kinematics_file or description / "config/cable_kinematics.yaml").expanduser().resolve()
-        for path in (calibration, cable):
-            if not path.is_file():
-                raise FileNotFoundError(path)
+        if not cable.is_file():
+            raise FileNotFoundError(cable)
+        if calibration != zero and not calibration.is_file():
+            raise FileNotFoundError(calibration)
         result["software_zero_file"] = str(zero)
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous_handlers[signum] = signal.signal(signum, lambda *_: stopped.set())

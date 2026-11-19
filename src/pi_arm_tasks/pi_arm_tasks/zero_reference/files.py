@@ -1,4 +1,4 @@
-"""选择当前 CAN 接口的零点文件与首次采集使用的基础配置。"""
+"""按 CAN 接口选择零点文件，兼容已保存的打包标定。"""
 
 import os
 from pathlib import Path
@@ -39,11 +39,11 @@ def resolve_reference_files(can_interface, calibration_file=None, software_zero_
             record = document.get("software_zero")
             legacy = ("calibration" not in document and isinstance(record, dict)
                       and record.get("schema_version") == 1)
-            base = factory if legacy else zero
+            base = factory if legacy and not capture else zero
         return base, zero
-    if capture or software_zero_file:
-        return base or factory, zero
-    return base or template, None
+    if capture or software_zero_file or base is None:
+        return base or zero, zero
+    return base, None
 
 
 def configure_launch_references(context, *, monitor=False):

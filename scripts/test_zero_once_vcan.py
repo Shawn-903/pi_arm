@@ -114,12 +114,24 @@ def main():
                 document = yaml.safe_load(zero.read_text())
                 assert document["calibration"] == data["calibration"]
                 saved = document["software_zero"]
-                assert saved["schema_version"] == 2 and result["software_zero_file"] == str(zero)
+                assert saved["schema_version"] == 3 and result["software_zero_file"] == str(zero)
                 assert saved["reference_id"] == result["reference_id"] != previous_id
                 assert saved["reference_joint_positions_rad"] == [math.radians(value) for value in pose]
                 previous_id = result["reference_id"]
                 assert lease_available(), "CAN lease survived successful exit"
             print("PASS one-command zero: explicit confirmation, zero/custom pose, persisted IDs and service cleanup", flush=True)
+            zero.rename(work / "reference-before-loss.yaml")
+            for name in ("lost-file", "recapture"):
+                angles[0] += 72
+                emulator.inject(1, angles[0])
+                code, result = run_case(work, name, capture + ["--reference-deg", "1", "0", "0", "0", "0", "0"])
+                assert code == 0 and result["cleanup_success"] and result["success"], result
+                document = yaml.safe_load(zero.read_text())
+                assert set(document) == {"software_zero"}
+                assert document["software_zero"]["raw_protocol_positions_deg"] == angles
+                assert result["reference_id"] != previous_id
+                previous_id = result["reference_id"]
+            print("PASS lost file and recapture: known pose and current encoders alone", flush=True)
 
         before = zero.read_bytes() if zero.exists() else None
         with emulator.lock:

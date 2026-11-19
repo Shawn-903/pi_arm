@@ -47,6 +47,20 @@ def presets(tmp_path):
     return PosePresets(str(path))
 
 
+def test_pose_zero_uses_the_defined_packing_pose_only_for_the_known_model(tmp_path):
+    path = tmp_path / "zero.yaml"
+    record = {"schema_version": 3, "joint_names": JOINT_NAMES,
+              "configuration_fingerprint": "fnv1a64:7d99c13df4cb0c63",
+              "reference_joint_positions_rad": [0.0] * 6}
+    path.write_text(yaml.safe_dump({"software_zero": record}))
+    preset = PosePresets(str(path))
+    assert preset.packing == [0.0, 100.7, -85.6, 0.0, 0.0, 0.0]
+    assert preset.calibration_id == record["configuration_fingerprint"]
+    record["configuration_fingerprint"] = "different-model"
+    path.write_text(yaml.safe_dump({"software_zero": record}))
+    assert PosePresets(str(path)).packing is None
+
+
 def dispatch(bridge, preset, **extra):
     return asyncio.run(CommandGateway(bridge).dispatch(parse_request(json.dumps({
         'cmd': 'move_preset', 'params': {'preset': preset, **extra}}))))
