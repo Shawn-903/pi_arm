@@ -186,11 +186,7 @@ class Adapter:
             frames = self.bridge.frame_model.feedback(state.hardware if state else None)
             if not frames["valid"]:
                 raise ExecutionError(2001, "反馈无效，无法生成关节目标")
-            target = [math.degrees(v) for v in state.hardware.positions]
-            target[params.pop("joint_id") - 1] = params.pop("target_angle")
-            params["targets"] = target
             params.setdefault("max_speed", 5.0)
-            command = "move"
         if command == "move_to_point":
             catalog = await asyncio.to_thread(self.bridge.points.list)
             point = self.point(params.pop("point"), catalog)
@@ -204,10 +200,8 @@ class Adapter:
                 raise ExecutionError(2001, "步进需要新鲜、有效且静止的反馈")
             space, axis, delta = params.pop("space"), params.pop("axis"), params.pop("delta")
             if space == "joint":
-                target = [math.degrees(v) for v in hardware.positions]
-                target[axis] += delta
-                command = "move"
-                params.update(targets=target)
+                command = "motor_move"
+                params.update(joint_id=axis + 1, target_angle=math.degrees(hardware.positions[axis]) + delta)
                 params.setdefault("max_speed", 2.0)
             else:
                 tool = frames["tool"]

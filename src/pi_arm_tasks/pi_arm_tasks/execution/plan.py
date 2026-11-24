@@ -75,7 +75,8 @@ def validate_motion(command, params):
         if type(params.get("joint_id")) is not int or not 1 <= params["joint_id"] <= 6:
             raise ValueError("joint_id 应为 1–6")
         number(params.get("target_angle"), "目标角")
-        number(params.get("max_speed", 5.0), "速度", positive=True)
+        if number(params.get("max_speed", 5.0), "速度", positive=True) > 10:
+            raise ValueError("关节和角速度上限为 10 度/秒")
     elif command == "move_preset":
         if params.get("preset") not in ("packing", "zero"):
             raise ValueError("预设姿态无效")

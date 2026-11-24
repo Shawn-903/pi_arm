@@ -1583,27 +1583,14 @@ private:
       goal.trajectory.joint_names = hardware_.joint_names;
       point.positions = hardware_.positions;
       validate_direct_positions(joint_limits_, goal.trajectory.joint_names, point.positions, "start/hold", true);
-      const auto measured_start = point.positions;
       for (size_t i = 0; i < point.positions.size(); ++i) {
-        const auto & bounds = joint_limits_.at(goal.trajectory.joint_names[i]);
-        point.positions[i] = std::clamp(point.positions[i], bounds.lower, bounds.upper);
-      }
-      for (size_t i = 0; i < request->joint_names.size(); ++i) {
-        const auto found = std::find(
-          hardware_.joint_names.begin(), hardware_.joint_names.end(), request->joint_names[i]);
-        if (found == hardware_.joint_names.end()) {
-          throw std::runtime_error("direct_move contains unknown joint");
-        }
-        const auto index = static_cast<size_t>(
-          std::distance(hardware_.joint_names.begin(), found));
-        duration = std::max(
-          duration, std::abs(targets[i] - point.positions[index]) /
-          request->max_velocity);
-        point.positions[index] = targets[i];
-      }
-      for (size_t i = 0; i < point.positions.size(); ++i) {
-        duration = std::max(duration, std::abs(point.positions[i] - measured_start[i]) /
-          request->max_velocity);
+        const auto & name = hardware_.joint_names[i];
+        const double measured = hardware_.positions[i];
+        const auto selected = std::find(request->joint_names.begin(), request->joint_names.end(), name);
+        point.positions[i] = selected == request->joint_names.end() ?
+          direct_hold_position(name, joint_limits_.at(name), measured) :
+          targets[std::distance(request->joint_names.begin(), selected)];
+        duration = std::max(duration, std::abs(point.positions[i] - measured) / request->max_velocity);
       }
     }
     validate_direct_positions(joint_limits_, goal.trajectory.joint_names, point.positions, "target/hold");
