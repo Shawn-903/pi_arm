@@ -168,7 +168,18 @@ class RosBridge(Node):
         if not available:
             self.get_logger().error(f"服务不可用: {command}")
             raise ProtocolError(CODE_STATE_UNAVAILABLE, "manager 服务不可用")
-        result = await self.wait_future(client.call_async(request), 20.0 if command == 'execution' else 12.0 if command == "preview_motion" else None)
+        # The manager may wait once for the hardware service and again for its reboot result.
+        response_timeout = {
+            "execution": 20.0,
+            "preview_motion": 12.0,
+            "reboot_motor": 2 * self.timeout + 1.0,
+        }.get(command, self.timeout)
+        future = client.call_async(request)
+        try:
+            result = await self.wait_future(future, response_timeout)
+        finally:
+            if not future.done():
+                client.remove_pending_request(future)
         if not result.success:
             code = int(result.code) if result.code else CODE_COMMAND_FAILED
             self.get_logger().warning(

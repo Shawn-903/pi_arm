@@ -445,7 +445,7 @@ function sendCommand(cmd, params = {}, options = {}) {
       msg_id: payload.msg_id,
     });
     refreshControlGate();
-  }, 15000);
+  }, cmd === "reboot_motor" ? 20000 : 15000);
   const record =
     cmd === "axis_test"
       ? {

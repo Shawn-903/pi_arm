@@ -133,7 +133,9 @@ public:
       "/pi_arm/state", rclcpp::QoS(10).reliable().transient_local());
 
     service_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-    control_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+    control_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    motor_reply_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+    motor_reply_executor_.add_callback_group(motor_reply_group_, get_node_base_interface());
     control_service_ = create_service<pi_arm_interfaces::srv::ControlSession>(
       "/pi_arm/control_session",
       std::bind(&ManagerNode::control_session, this, std::placeholders::_1,
@@ -152,15 +154,15 @@ public:
     // starving against the default MutuallyExclusive group (timers/subscriptions).
     action_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     enable_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
-      "/pi_arm/hardware/enable_motor", rmw_qos_profile_services_default, service_group_);
+      "/pi_arm/hardware/enable_motor", rmw_qos_profile_services_default, motor_reply_group_);
     disable_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
-      "/pi_arm/hardware/disable_motor", rmw_qos_profile_services_default, service_group_);
+      "/pi_arm/hardware/disable_motor", rmw_qos_profile_services_default, motor_reply_group_);
     reset_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
-      "/pi_arm/hardware/reset_motor", rmw_qos_profile_services_default, service_group_);
+      "/pi_arm/hardware/reset_motor", rmw_qos_profile_services_default, motor_reply_group_);
     motion_arm_client_ = create_client<pi_arm_interfaces::srv::SetMotionArmed>(
       "/pi_arm/hardware/set_motion_armed", rmw_qos_profile_services_default, service_group_);
     reboot_client_ = create_client<pi_arm_interfaces::srv::ManageMotor>(
-      "/pi_arm/hardware/reboot_motor", rmw_qos_profile_services_default, service_group_);
+      "/pi_arm/hardware/reboot_motor", rmw_qos_profile_services_default, motor_reply_group_);
     teaching_client_ = create_client<pi_arm_interfaces::srv::SetTeaching>(
       "/pi_arm/hardware/set_teaching", rmw_qos_profile_services_default, service_group_);
     teaching_service_ = create_service<pi_arm_interfaces::srv::SetTeaching>(
@@ -765,9 +767,13 @@ private:
           return;
         }
         auto future = client->async_send_request(request);
-        if (future.wait_for(std::chrono::duration<double>(operation_timeout_)) !=
-          std::future_status::ready)
+        // The command lock serializes these calls. Process the hardware reply on
+        // this worker even when other executor threads are waiting for that lock.
+        if (motor_reply_executor_.spin_until_future_complete(
+            future, std::chrono::duration<double>(operation_timeout_)) !=
+          rclcpp::FutureReturnCode::SUCCESS)
         {
+          client->remove_pending_request(future);
           response->success = false;
           response->code = 2002;
           response->message = "hardware service timeout";
@@ -786,7 +792,7 @@ private:
             name.c_str(), request->motor_id, response->code, response->message.c_str());
         }
       },
-      rmw_qos_profile_services_default, service_group_);
+      rmw_qos_profile_services_default, control_group_);
   }
 
   std::uint64_t active_task_id()
@@ -2112,6 +2118,8 @@ private:
   std::uint64_t control_generation_{0};
   std::chrono::steady_clock::time_point control_deadline_{};
   rclcpp::CallbackGroup::SharedPtr control_group_;
+  rclcpp::CallbackGroup::SharedPtr motor_reply_group_;
+  rclcpp::executors::SingleThreadedExecutor motor_reply_executor_;
   rclcpp::Service<pi_arm_interfaces::srv::ControlSession>::SharedPtr control_service_;
   rclcpp::TimerBase::SharedPtr control_timer_;
   double operation_timeout_;
