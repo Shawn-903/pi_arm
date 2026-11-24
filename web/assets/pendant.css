@@ -42,12 +42,11 @@ fieldset, .card { border-radius: 7px; box-shadow: none; }
 .state-light { width: 6px; height: 6px; border-radius: 50%; background: #aab8c7; }
 body[data-connected=true] .state-light { background: #249d76; }
 .header-actions { gap: 12px; order: 2; }
-.header-presets { display: flex; align-self: flex-start; gap: 6px; }
+.header-presets { display: flex; gap: 6px; }
 .header-presets button { min-height: 40px; white-space: nowrap; }
 .role-picker { font-size: 10px; gap: 4px; }
 .role-picker select { min-height: 30px; font-size: 11px; padding: 3px 5px; width: 80px; }
 .btn-stop { min-width: 130px; min-height: 40px; border-radius: 5px; font-size: 14px; box-shadow: none; }
-.stop-wrap > span { font-size: 9px; margin: 0; }
 .connection-card {
   display: flex; align-items: center; gap: 12px; padding: 7px 0;
   margin: 0; background: transparent; border: 0; box-shadow: none; border-radius: 0;
@@ -387,5 +386,5 @@ input[aria-invalid=true] { outline: 2px solid #b42318; }
   .page-heading { grid-area: 1 / 1; }
   .role-picker { grid-area: 1 / 2; justify-self: end; }
   .header-presets { grid-area: 2 / 1; justify-content: flex-end; }
-  .stop-wrap { grid-area: 2 / 2; }
+  .btn-stop { grid-area: 2 / 2; }
 }
