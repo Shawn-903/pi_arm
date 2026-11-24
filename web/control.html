@@ -8,7 +8,7 @@
       Pi Arm · 机械臂示教
     </title>
     <link href="assets/console.css?v=V0.52" rel="stylesheet"/>
-    <link href="assets/pendant.css?v=V0.52" rel="stylesheet"/>
+    <link href="assets/pendant.css?v=20261125-header-presets" rel="stylesheet"/>
   </head>
   <body data-role="operator" data-view="workbench">
     <a class="skip-link" href="#viewContent">
@@ -113,6 +113,10 @@
               </option>
             </select>
           </label>
+          <div aria-label="预设姿态运动" class="header-presets" role="group">
+            <button aria-label="运动到打包位姿" class="btn-secondary" data-preset="packing" disabled type="button">到打包位姿</button>
+            <button aria-label="运动到零位" class="btn-secondary" data-preset="zero" disabled type="button">到零位</button>
+          </div>
           <div class="stop-wrap">
             <button class="btn-stop" data-cmd="stop_motion" disabled="" id="globalStop">
               <span aria-hidden="true">
@@ -1413,7 +1417,7 @@
     </script>
     <script src="assets/diagnostics.js?v=20261116-diagnostics1">
     </script>
-    <script src="assets/control.js?v=20261119-software-zero">
+    <script src="assets/control.js?v=20261125-header-presets">
     </script>
     <script src="assets/interactive.js">
     </script>

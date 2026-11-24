@@ -42,6 +42,8 @@ fieldset, .card { border-radius: 7px; box-shadow: none; }
 .state-light { width: 6px; height: 6px; border-radius: 50%; background: #aab8c7; }
 body[data-connected=true] .state-light { background: #249d76; }
 .header-actions { gap: 12px; order: 2; }
+.header-presets { display: flex; align-self: flex-start; gap: 6px; }
+.header-presets button { min-height: 40px; white-space: nowrap; }
 .role-picker { font-size: 10px; gap: 4px; }
 .role-picker select { min-height: 30px; font-size: 11px; padding: 3px 5px; width: 80px; }
 .btn-stop { min-width: 130px; min-height: 40px; border-radius: 5px; font-size: 14px; box-shadow: none; }
@@ -378,4 +380,12 @@ input[aria-invalid=true] { outline: 2px solid #b42318; }
   .joint-overview-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .task-tray > .card { display: block; }
   .viewer-toolbar { flex-wrap: wrap; }
+}
+@container (max-width:540px) {
+  .topbar { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 5px 8px; }
+  .header-actions { display: contents; }
+  .page-heading { grid-area: 1 / 1; }
+  .role-picker { grid-area: 1 / 2; justify-self: end; }
+  .header-presets { grid-area: 2 / 1; justify-content: flex-end; }
+  .stop-wrap { grid-area: 2 / 2; }
 }
