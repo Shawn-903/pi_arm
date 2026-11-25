@@ -23,8 +23,10 @@ def main():
             ws.on('framereceived', received)
         page.on('websocket', observe)
         page.goto(args.url)
-        assert page.locator('#movePackingPose').is_disabled()
-        assert page.locator('#moveZeroPose').is_disabled()
+        packing_button = page.locator('.header-presets [data-preset="packing"]')
+        zero_button = page.locator('.header-presets [data-preset="zero"]')
+        assert packing_button.is_visible() and zero_button.is_visible()
+        assert all(b.is_disabled() for b in page.locator('[data-preset]').all())
         page.locator('#connectBtn').click()
         page.locator('#teachTab-target').click()
         page.locator('[data-tab="single"]').click()
@@ -38,36 +40,45 @@ def main():
         previous = page.evaluate('lastState.task.task_id')
         assert page.locator('#presetSpeed').input_value() == '5'
         page.locator('#presetSpeed').fill('10')
-        page.locator('#movePackingPose').click()
+        page.locator('#outputSpeedLimit').fill('10')
+        page.locator('#teachTab-step').click()
+        packing_button.click()
         page.wait_for_function('id => lastState.task.task_id > id && lastState.task.status === 1', arg=previous)
-        assert page.locator('#movePackingPose').is_disabled()
-        assert page.locator('#moveZeroPose').is_disabled()
+        assert all(b.is_disabled() for b in page.locator('[data-preset]').all())
         page.wait_for_timeout(700)
-        page.locator('#presetPosePanel [data-cmd="stop_motion"]').click()
+        page.locator('#globalStop').click()
         page.wait_for_function('lastState.robot_state === "READY" && [3,4].includes(lastState.task.status)')
         page.wait_for_timeout(600)
         page.wait_for_function('lastState.robot_state === "READY" && !document.getElementById("moveZeroPose").disabled')
-        packing = [r for r in responses if r.get('data', {}).get('preset') == 'packing'][-1]
-        assert packing['code'] == 0
-        assert packing['data']['target_joint_angles_deg'] == [0, 100.7, -85.6, 0, 0, 0]
-        assert packing['data']['joint_speed_deg_s'] == 10.0
-        previous = page.evaluate('lastState.task.task_id')
+        packed = [0, 100.7, -85.6, 0, 0, 0]
+        def move_and_check(button, target):
+            previous = page.evaluate('lastState.task.task_id')
+            button.click()
+            page.wait_for_function('id => lastState.task.task_id > id && lastState.task.status === 2',
+                                   arg=previous, timeout=130000)
+            actual = page.evaluate('lastState.current_joint_angles')
+            assert len(actual) == 6 and all(abs(a - b) < .01 for a, b in zip(actual, target)), actual
+        move_and_check(packing_button, packed)
+        page.locator('#teachTab-target').click()
         page.locator('#presetSpeed').fill('5')
-        page.locator('#moveZeroPose').click()
-        page.wait_for_function('id => lastState.task.task_id > id && lastState.task.status === 2', arg=previous, timeout=120000)
-        assert all(abs(q) < .01 for q in page.evaluate('lastState.current_joint_angles'))
-        zero = [r for r in responses if r.get('data', {}).get('preset') == 'zero'][-1]
-        assert zero['data']['joint_speed_deg_s'] == 5.0
-        assert zero['code'] == 0 and zero['data']['target_joint_angles_deg'] == [0]*6
-        page.evaluate('lastStateAt = Date.now()-2000; refreshControlGate()')
-        assert page.locator('#movePackingPose').is_disabled()
-        assert page.locator('#moveZeroPose').is_disabled()
+        page.locator('[data-view-target="points"]').click()
+        move_and_check(zero_button, [0]*6)
+        steps = [r['data'] for r in responses if r['code'] == 0
+                 and r['data'].get('request_params', {}).get('preset')]
+        assert [(s['request_params']['preset'], s['params']['targets'], s['params']['max_speed'])
+                for s in steps] == [('packing', packed, 10), ('packing', packed, 10), ('zero', [0]*6, 5)]
+        assert len({s['request_id'] for s in steps}) == 3
+        assert page.evaluate('''() => {
+            lastStateAt = Date.now() - 2000; refreshControlGate();
+            return [...document.querySelectorAll('[data-preset]')].every(b => b.disabled)
+                && !document.getElementById('globalStop').disabled;
+        }''')
         page.locator('#disconnectBtn').click()
         page.wait_for_function('connectionState === "closed"')
-        assert page.locator('#movePackingPose').is_disabled()
+        assert all(b.is_disabled() for b in page.locator('[data-preset]').all())
         assert not errors, errors
         browser.close()
-    print('PASS mock packing action/stop, zero completion, server targets, task lock and stale/disconnect gates')
+    print('PASS header packing/zero arrival, stop, server targets, task lock and stale/disconnect gates')
 
 
 if __name__ == '__main__':

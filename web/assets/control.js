@@ -266,8 +266,6 @@ function refreshPresetPoses(fresh, permitted) {
   ]) {
     const preset = lastState?.preset_poses?.[name];
     const available = fresh && permitted && preset?.available === true;
-    const button = document.querySelector(`[data-preset="${name}"]`);
-    button.disabled = !available;
     const angles = preset?.target_joint_angles_deg;
     const target =
       Array.isArray(angles) && angles.length === 6
@@ -278,7 +276,10 @@ function refreshPresetPoses(fresh, permitted) {
       : !preset
         ? "后端尚未提供预设姿态"
         : preset.reason || (!permitted ? "等待当前运动或请求结束" : "可执行");
-    button.title = reason;
+    for (const button of document.querySelectorAll(`[data-preset="${name}"]`)) {
+      button.disabled = !available;
+      button.title = available ? `关节目标 ${target}` : reason;
+    }
     document.getElementById(statusId).textContent =
       `${name === "packing" ? "打包姿态" : "零位"}：${target}；${reason}`;
   }

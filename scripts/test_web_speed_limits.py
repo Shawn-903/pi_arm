@@ -32,6 +32,17 @@ def main():
                 socket.on_message(receive)
             page.route_web_socket('**/*', route)
             page.goto(f'http://127.0.0.1:{server.server_port}/control.html')
+            for width, zoom in [(1440, 1), (390, 1), (320, 1), (1024, 2)]:
+                page.set_viewport_size(dict(width=width, height=844))
+                page.evaluate('s => document.body.style.zoom = s', zoom)
+                buttons = page.locator('.header-presets button, #globalStop').all()
+                packing, zero, stop = [b.bounding_box() for b in buttons]
+                assert 0 <= packing['x'] and packing['x'] + packing['width'] <= zero['x']
+                assert zero['x'] + zero['width'] <= stop['x'] and stop['x'] + stop['width'] <= width
+                assert all(max(b['y'], stop['y']) < min(b['y'] + b['height'], stop['y'] + stop['height'])
+                           for b in (packing, zero)), (width, zoom)
+            page.evaluate('document.body.style.zoom = 1')
+            page.set_viewport_size(dict(width=1440, height=1100))
             page.locator('#connectBtn').click()
             state = fixture([0]*6)
             page.evaluate('s=>{window.fake=s;window.tick=setInterval(()=>handleMessage(fake),100);handleMessage(s)}', state)
@@ -44,10 +55,10 @@ def main():
                 control = page.locator('#'+name)
                 assert control.input_value() == '5', name
                 assert control.get_attribute('max') == '10', name
-            for name, speed in [('packing', 10), ('zero', 5)]:
+            for name, speed, area in [('packing', 10, '#presetPosePanel'), ('zero', 5, '.header-presets')]:
                 page.locator('#presetSpeed').fill(str(speed))
                 page.locator('#outputSpeedLimit').fill('10')
-                page.locator(f'[data-preset="{name}"]').click()
+                page.locator(f'{area} [data-preset="{name}"]').click()
                 page.wait_for_function('pending.size===0')
                 assert sent[-1]['cmd'] == 'move_preset'
                 params = dict(sent[-1]['params'])
@@ -59,8 +70,11 @@ def main():
             assert len(sent) == before
             page.locator('#presetSpeed').fill('5')
             page.locator('#outputSpeedLimit').fill('10.001')
-            page.locator('#moveZeroPose').click()
+            page.locator('.header-presets [data-preset="zero"]').click()
             assert len(sent) == before
+            page.evaluate("fake.preset_poses.packing.available=false;handleMessage(fake)")
+            assert all(b.is_disabled() for b in page.locator('[data-preset="packing"]').all())
+            assert all(b.is_enabled() for b in page.locator('[data-preset="zero"]').all())
             assert not errors, errors
             browser.close()
     finally:

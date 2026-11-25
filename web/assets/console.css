@@ -359,16 +359,6 @@ input[type="radio"] {
   font-size: 12px;
   min-height: 36px;
 }
-.stop-wrap {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.stop-wrap > span {
-  color: #94a0b1;
-  font-size: 9px;
-}
 fieldset,
 .card {
   min-width: 0;
@@ -1260,9 +1250,6 @@ body[data-view="commissioning"] .workspace-grid {
     min-height: 40px;
     font-size: 12px;
     padding: 8px;
-  }
-  .stop-wrap > span {
-    font-size: 8px;
   }
   .workspace-grid,
   body[data-view="diagnostics"] .workspace-grid,
