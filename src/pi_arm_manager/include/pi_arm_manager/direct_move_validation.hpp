@@ -35,6 +35,20 @@ inline double direct_result_timeout(
   return std::max(default_timeout, trajectory_seconds + completion_margin);
 }
 
+inline double direct_hold_position(const std::string & name, const JointLimits & bounds, double measured)
+{
+  constexpr double kBoundaryNoiseRad = 0.01 * M_PI / 180.0;
+  const double target = std::clamp(measured, bounds.lower, bounds.upper);
+  if (std::abs(measured - target) > kBoundaryNoiseRad) {
+    std::ostringstream message;
+    message.precision(17);
+    message << "direct_move cannot hold " << name << " at " << measured
+            << " rad: more than 0.01 deg outside command limits";
+    throw std::runtime_error(message.str());
+  }
+  return target;
+}
+
 inline void validate_direct_positions(
   const std::map<std::string, JointLimits> & joint_limits,
   const std::vector<std::string> & names, const std::vector<double> & positions,

@@ -27,6 +27,18 @@ TEST(DirectMoveValidation, SlowPackingMoveOutlivesDefaultTimeout)
   EXPECT_THROW(direct_result_timeout(-1.0, 120.0, 5.0), std::invalid_argument);
 }
 
+TEST(DirectMoveValidation, HoldsUnselectedJointAtMeasuredAngleOrNearbyBoundary)
+{
+  using pi_arm_manager::direct_hold_position;
+  const double rad = M_PI / 180.0;
+  const JointLimits limits{-85.6 * rad, 85.6 * rad, 0.2, 0.1, 3 * rad};
+  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, -72.0 * rad), -72.0 * rad);
+  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, -85.60071944 * rad), limits.lower);
+  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, 85.601 * rad), limits.upper);
+  EXPECT_THROW(direct_hold_position("joint_04", limits, -85.62 * rad), std::runtime_error);
+  EXPECT_THROW(direct_hold_position("joint_04", limits, 85.62 * rad), std::runtime_error);
+}
+
 TEST(DirectMoveValidation, ValidatesUnselectedHoldJointAtFullPrecision)
 {
   const std::map<std::string, JointLimits> limits{
