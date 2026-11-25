@@ -12,8 +12,8 @@ TEST(DirectMoveValidation, FeedbackAllowanceNeverExpandsTargets)
 {
   const std::map<std::string, JointLimits> limits{
     {"joint_02", {-1.0, 1.0, 0.2, 0.1, 0.05}}};
-  EXPECT_NO_THROW(validate_direct_positions(limits, {"joint_02"}, {1.04}, "start", true));
-  EXPECT_THROW(validate_direct_positions(limits, {"joint_02"}, {1.04}, "target"), std::runtime_error);
+  EXPECT_NO_THROW(validate_direct_positions(limits, {"joint_02"}, {1.001}, "start", true));
+  EXPECT_THROW(validate_direct_positions(limits, {"joint_02"}, {1.001}, "target"), std::runtime_error);
   EXPECT_THROW(validate_direct_positions(limits, {"joint_02"}, {-1.06}, "start", true), std::runtime_error);
 }
 
@@ -33,10 +33,17 @@ TEST(DirectMoveValidation, HoldsUnselectedJointAtMeasuredAngleOrNearbyBoundary)
   const double rad = M_PI / 180.0;
   const JointLimits limits{-85.6 * rad, 85.6 * rad, 0.2, 0.1, 3 * rad};
   EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, -72.0 * rad), -72.0 * rad);
-  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, -85.60071944 * rad), limits.lower);
-  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, 85.601 * rad), limits.upper);
-  EXPECT_THROW(direct_hold_position("joint_04", limits, -85.62 * rad), std::runtime_error);
-  EXPECT_THROW(direct_hold_position("joint_04", limits, 85.62 * rad), std::runtime_error);
+  const double measured_j3_rad = -1.4954880146749696;
+  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, measured_j3_rad), limits.lower);
+  const double lower_edge = limits.lower - 0.5 * rad;
+  const double upper_edge = limits.upper + 0.5 * rad;
+  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, lower_edge), limits.lower);
+  EXPECT_DOUBLE_EQ(direct_hold_position("joint_04", limits, upper_edge), limits.upper);
+  const double infinity = std::numeric_limits<double>::infinity();
+  EXPECT_THROW(direct_hold_position("joint_04", limits, std::nextafter(lower_edge, -infinity)),
+    std::runtime_error);
+  EXPECT_THROW(direct_hold_position("joint_04", limits, std::nextafter(upper_edge, infinity)),
+    std::runtime_error);
 }
 
 TEST(DirectMoveValidation, ValidatesUnselectedHoldJointAtFullPrecision)
