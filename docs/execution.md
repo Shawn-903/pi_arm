@@ -60,7 +60,7 @@
 
 | 命令 | 参数 / 返回 |
 | --- | --- |
-| `get_info`、`get_state` | 协议版本、模式、能力、模型元数据 / 新鲜反馈和当前执行状态 |
+| `get_info`、`get_state` | 控制器版本 `version`、协议版本 `protocol_version`、模式、能力、模型元数据 / 新鲜反馈和当前执行状态 |
 | `session_open` | `name`、`request_id`；返回 `session_id`、`run_id`、控制器实例 |
 | `session_heartbeat`、`session_close` | `session_id`；必须由创建会话的连接调用 |
 | `move`、`movej`、`movel`、`wait` | 运动参数或 `seconds`，加 `session_id`、`request_id`；返回步骤编号 |

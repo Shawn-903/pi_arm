@@ -84,7 +84,7 @@ class CommandGateway:
         if command in ('get_info', 'get_state'):
             from .state_payload import robot_state_payload, json_safe
             if command == 'get_info':
-                return dict(protocol_version=1, version='0.51', hardware_type=self.bridge.hardware_type,
+                return dict(protocol_version=1, version='0.58', hardware_type=self.bridge.hardware_type,
                             read_only=self.bridge.read_only, commissioning=self.bridge.commissioning,
                             features=['points'] if self.bridge.read_only or self.bridge.commissioning else
                             ['sessions', 'programs', 'steps', 'task_cancel', 'points', 'history'],
